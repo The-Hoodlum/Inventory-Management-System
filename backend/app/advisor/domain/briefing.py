@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import datetime as dt
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
 ZERO = Decimal("0")
@@ -353,7 +353,7 @@ def build_context(
         f"{len(supplier_scores)} supplier scorecard(s); {len(findings)} finding(s) surfaced."
     )
     return AdvisoryContext(
-        generated_at=now or dt.datetime.now(dt.timezone.utc),
+        generated_at=now or dt.datetime.now(dt.UTC),
         findings=ranked,
         metrics=metrics,
         summary_line=summary,

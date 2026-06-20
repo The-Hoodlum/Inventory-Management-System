@@ -21,9 +21,9 @@ import datetime as dt
 from collections.abc import Iterable
 from decimal import ROUND_HALF_UP, Decimal
 
+from app.forecast.domain.confidence import forecast_confidence
 from app.forecast.domain.exceptions import InvalidForecastInput
 from app.forecast.domain.models import DemandPoint, ForecastMethod, ForecastResult
-from app.forecast.domain.confidence import forecast_confidence
 from app.forecast.domain.patterns import detect_seasonality, linear_trend
 
 ZERO = Decimal("0")

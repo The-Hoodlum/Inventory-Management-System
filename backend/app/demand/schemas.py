@@ -20,7 +20,7 @@ class RebuildDemandRequest(BaseModel):
     warehouse_id: uuid.UUID | None = Field(default=None, description="Limit the rollup to one warehouse")
 
     @model_validator(mode="after")
-    def _check_range(self) -> "RebuildDemandRequest":
+    def _check_range(self) -> RebuildDemandRequest:
         if self.start_date and self.end_date and self.start_date > self.end_date:
             raise ValueError("start_date must be on or before end_date")
         return self

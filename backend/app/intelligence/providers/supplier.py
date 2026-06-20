@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from app.intelligence.domain.supplier_risk import SupplierMetrics, supplier_risk
-from app.intelligence.providers.base import ONE, Observation, IntelligenceProvider
+from app.intelligence.domain.supplier_risk import supplier_risk
+from app.intelligence.providers.base import ONE, IntelligenceProvider, Observation
 
 _FULL_CONFIDENCE_POS = Decimal("10")  # received POs for full confidence
 

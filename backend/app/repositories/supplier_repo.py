@@ -4,7 +4,6 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import func, or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Supplier
 from app.repositories.base import BaseRepository

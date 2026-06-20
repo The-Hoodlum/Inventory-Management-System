@@ -23,7 +23,7 @@ class ReportsService:
     async def get_inventory_aging(
         self, warehouse_id: uuid.UUID | None = None
     ) -> InventoryAgingReport:
-        as_of = dt.datetime.now(dt.timezone.utc)
+        as_of = dt.datetime.now(dt.UTC)
         products = await self.repo.product_lookup()  # id -> (sku, name, cost_price)
         movements = await self.repo.movements_for_aging(warehouse_id)
 
@@ -60,7 +60,7 @@ class ReportsService:
     async def get_supplier_performance(
         self, window_days: int | None = 365
     ) -> SupplierPerformanceReport:
-        as_of = dt.datetime.now(dt.timezone.utc)
+        as_of = dt.datetime.now(dt.UTC)
         since = as_of - dt.timedelta(days=window_days) if window_days else None
 
         suppliers = await self.repo.suppliers_basic()  # list of (id, name, lead_days)

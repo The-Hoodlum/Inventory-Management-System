@@ -28,7 +28,7 @@ class DashboardService:
         by_status = await self.repo.po_status_counts()
         open_count, open_value = await self.repo.open_purchase_orders()
 
-        since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=30)
+        since = dt.datetime.now(dt.UTC) - dt.timedelta(days=30)
         receipts = await self.repo.receipts_since(since)
 
         return DashboardMetrics(
@@ -43,5 +43,5 @@ class DashboardService:
                 by_status=by_status, open_count=open_count, open_value=open_value
             ),
             activity=ActivityMetrics(receipts_last_30d=receipts),
-            generated_at=dt.datetime.now(dt.timezone.utc),
+            generated_at=dt.datetime.now(dt.UTC),
         )

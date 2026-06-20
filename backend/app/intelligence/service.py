@@ -14,12 +14,11 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
-
-from app.forecast.domain.methods import package_result
-from app.forecast.domain.models import ForecastMethod
 from decimal import Decimal
 
 from app.core.exceptions import NotFoundError
+from app.forecast.domain.methods import package_result
+from app.forecast.domain.models import ForecastMethod
 from app.forecast.domain.signals import SignalContext, default_pipeline
 from app.intelligence.domain.scoring import ScopedAdjustment, assess
 from app.intelligence.domain.supplier_risk import supplier_risk
@@ -132,7 +131,7 @@ class IntelligenceService:
             by_category=a.by_category,
             recommended_actions=a.actions,
             drivers=a.drivers,
-            generated_at=dt.datetime.now(dt.timezone.utc),
+            generated_at=dt.datetime.now(dt.UTC),
         )
 
     async def pipeline_impact(
@@ -197,7 +196,7 @@ class IntelligenceService:
             changes={"scored": scored}, ip_address=ip,
         )
         return SupplierScoreRefreshResponse(
-            scored=scored, generated_at=dt.datetime.now(dt.timezone.utc)
+            scored=scored, generated_at=dt.datetime.now(dt.UTC)
         )
 
     async def supplier_scores(self) -> list:

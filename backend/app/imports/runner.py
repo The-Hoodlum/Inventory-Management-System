@@ -34,7 +34,7 @@ _TASKS: set[asyncio.Task] = set()
 
 
 def _now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
+    return dt.datetime.now(dt.UTC)
 
 
 async def _set_tenant(session, tenant_id: uuid.UUID) -> None:

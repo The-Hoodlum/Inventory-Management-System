@@ -17,7 +17,7 @@ class PlanLineInput(BaseModel):
     units: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
-    def _exactly_one_quantity(self) -> "PlanLineInput":
+    def _exactly_one_quantity(self) -> PlanLineInput:
         if (self.cartons is None) == (self.units is None):
             raise ValueError("provide exactly one of 'cartons' or 'units'")
         return self

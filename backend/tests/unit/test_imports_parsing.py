@@ -16,7 +16,7 @@ def test_csv_headers_and_rows():
 
 
 def test_csv_strips_bom_and_blank_rows():
-    data = "﻿SKU,Name\nA-1,Widget\n\n,\nA-2,Gadget\n".encode("utf-8")
+    data = "﻿SKU,Name\nA-1,Widget\n\n,\nA-2,Gadget\n".encode()
     table = parse_table("stock.csv", data)
     assert table.headers == ["SKU", "Name"]
     assert table.rows == [["A-1", "Widget"], ["A-2", "Gadget"]]

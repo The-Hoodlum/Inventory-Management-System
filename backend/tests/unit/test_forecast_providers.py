@@ -5,10 +5,10 @@ from decimal import Decimal
 
 import pytest
 
+from app.forecast.domain import providers
 from app.forecast.domain.exceptions import InvalidForecastInput
 from app.forecast.domain.methods import forecast as orchestrate
 from app.forecast.domain.models import ForecastMethod, ForecastParams
-from app.forecast.domain import providers
 
 D = Decimal
 

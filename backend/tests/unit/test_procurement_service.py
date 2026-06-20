@@ -45,7 +45,7 @@ class FakeProcurementRepo:
         return f"PO-TEST-{self._counter:04d}"
 
     async def add_po(self, **f: Any):
-        now = dt.datetime.now(dt.timezone.utc)
+        now = dt.datetime.now(dt.UTC)
         po = SimpleNamespace(
             id=uuid.uuid4(), created_at=now, updated_at=now, version=0,
             approved_by=None, approved_at=None, **f,

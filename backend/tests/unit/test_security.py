@@ -41,7 +41,7 @@ def test_refresh_token_type():
 
 
 def test_expired_token_is_rejected():
-    now = dt.datetime.now(dt.timezone.utc)
+    now = dt.datetime.now(dt.UTC)
     token = jwt.encode(
         {
             "sub": str(uuid.uuid4()),

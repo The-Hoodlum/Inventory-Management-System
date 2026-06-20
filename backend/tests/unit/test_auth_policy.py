@@ -5,7 +5,7 @@ import datetime as dt
 
 from app.core import auth_policy as ap
 
-NOW = dt.datetime(2025, 6, 1, 12, 0, tzinfo=dt.timezone.utc)
+NOW = dt.datetime(2025, 6, 1, 12, 0, tzinfo=dt.UTC)
 DEFAULT = "CHANGE_ME_use_a_long_random_secret"
 
 

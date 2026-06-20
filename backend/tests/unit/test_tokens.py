@@ -14,7 +14,7 @@ ALG = "HS256"
 
 def _now() -> dt.datetime:
     # Real current time: PyJWT validates exp/iat against the actual clock.
-    return dt.datetime.now(dt.timezone.utc)
+    return dt.datetime.now(dt.UTC)
 
 
 def _make(token_type: str, *, secret: str = SECRET, ttl_seconds: int = 900, extra=None) -> str:

@@ -26,7 +26,6 @@ from app.forecast.domain.providers import (
     get_provider,
 )
 from app.forecast.domain.signals import SignalContext, default_pipeline
-from app.intelligence.signals import build_snapshot
 from app.forecast.schemas import (
     DemandPatternResponse,
     ForecastAccuracyResponse,
@@ -35,6 +34,7 @@ from app.forecast.schemas import (
     ForecastSummaryResponse,
     ProviderOut,
 )
+from app.intelligence.signals import build_snapshot
 
 # Selection mode (not a registry provider): detect the best method per product.
 AUTO_METHOD = "auto"
@@ -252,7 +252,7 @@ class ForecastService:
     async def summary(self) -> ForecastSummaryResponse:
         latest = await self.repo.latest_per_pair()
         total = await self.repo.count_all()
-        now = dt.datetime.now(dt.timezone.utc)
+        now = dt.datetime.now(dt.UTC)
 
         if not latest:
             return ForecastSummaryResponse(

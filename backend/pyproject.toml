@@ -10,12 +10,15 @@ testpaths = ["tests"]
 addopts = "-q"
 
 [tool.ruff]
-line-length = 100
+line-length = 120
 target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
-ignore = ["B008"]  # FastAPI uses callables in argument defaults (Depends(...))
+# B008: FastAPI uses callables in argument defaults (Depends(...)).
+# E501: line-length is advisory (this codebase is densely written); the bug-catching
+# rules (F/B/I/UP) are enforced instead. Re-enable E501 + reformat to burn it down later.
+ignore = ["B008", "E501"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]

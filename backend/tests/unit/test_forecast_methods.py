@@ -10,13 +10,13 @@ from app.forecast.domain.exceptions import InvalidForecastInput
 from app.forecast.domain.methods import (
     build_series,
     croston,
+    forecast,
     mean,
     moving_average,
     population_std,
     seasonal_indices,
     seasonal_point,
     single_exponential_smoothing,
-    forecast,
 )
 from app.forecast.domain.models import DemandPoint, ForecastMethod
 

@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint-and-unit:
+    name: Ruff + unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Ruff
+        run: ruff check .
+      - name: Unit tests
+        run: python -m pytest tests/unit -q
+
+  integration:
+    name: Integration tests (PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: inventory
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d inventory"
+          --health-interval 5s --health-timeout 5s --health-retries 15
+    env:
+      # The app connects as the non-superuser app_user so RLS is enforced (matches docker-compose).
+      DATABASE_URL: postgresql+asyncpg://app_user:app_pw@localhost:5432/inventory
+      JWT_SECRET_KEY: ci-only-test-secret-0123456789abcdef0123456789abcdef
+      ENVIRONMENT: test
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: inventory
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements-dev.txt
+      - name: Install psql client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Provision database (same ordered init scripts as docker-compose)
+        run: |
+          set -e
+          for f in \
+            database/sql/schema.sql \
+            backend/docker/02_app_role.sql \
+            database/sql/seed_rbac.sql \
+            database/sql/seed_demo.sql \
+            database/sql/po_events.sql \
+            database/sql/auth_hardening.sql \
+            database/sql/demand_source.sql \
+            database/sql/demand_forecasts.sql \
+            database/sql/intelligence.sql \
+            database/sql/reorder_risk.sql \
+            database/sql/product_profile.sql \
+            database/sql/supplier_scores.sql \
+            database/sql/inventory_import.sql \
+            database/sql/import_rollback.sql \
+            database/sql/product_profile_flags.sql ; do
+            echo "applying $f"
+            psql -v ON_ERROR_STOP=1 -f "$f"
+          done
+      - name: Integration tests
+        working-directory: backend
+        run: python -m pytest tests/integration -q
+
+  frontend:
+    name: Frontend typecheck + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint (tsc) + build
+        run: npm run build

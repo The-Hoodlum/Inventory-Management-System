@@ -11,7 +11,7 @@ from decimal import Decimal
 
 from app.reports.compute import supplier_performance
 
-NOW = dt.datetime(2025, 6, 1, 12, 0, tzinfo=dt.timezone.utc)
+NOW = dt.datetime(2025, 6, 1, 12, 0, tzinfo=dt.UTC)
 
 S1 = uuid.UUID("11111111-0000-0000-0000-000000000001")
 S2 = uuid.UUID("11111111-0000-0000-0000-000000000002")

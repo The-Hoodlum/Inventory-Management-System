@@ -278,14 +278,14 @@ class ProcurementService:
         try:
             assert_transition(from_status, action)
         except InvalidTransitionError as exc:
-            raise ConflictError(str(exc))
+            raise ConflictError(str(exc)) from exc
 
         target = target_status(from_status, action)
         po.status = target.value
         po.version += 1
         if action is POAction.APPROVE:
             po.approved_by = actor
-            po.approved_at = dt.datetime.now(dt.timezone.utc)
+            po.approved_at = dt.datetime.now(dt.UTC)
         await self.repo.session.flush()
 
         await self._record_event(
@@ -326,7 +326,7 @@ class ProcurementService:
         try:
             assert_transition(po.status, POAction.RECEIVE)
         except InvalidTransitionError as exc:
-            raise ConflictError(str(exc))
+            raise ConflictError(str(exc)) from exc
 
         lines = await self.repo.lines_for_update(po.id)
         lines_by_id = {ln.id: ln for ln in lines}
@@ -342,7 +342,7 @@ class ProcurementService:
         try:
             outcome = apply_receipt(line_states, receipt)
         except ReceiptError as exc:
-            raise BusinessRuleError(str(exc))
+            raise BusinessRuleError(str(exc)) from exc
 
         movements = 0
         for lr in outcome.lines:

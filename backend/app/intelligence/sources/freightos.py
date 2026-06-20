@@ -99,7 +99,7 @@ class FreightosSource:
         self._token_expiry: dt.datetime | None = None
 
     @classmethod
-    def from_settings(cls, settings) -> "FreightosSource":
+    def from_settings(cls, settings) -> FreightosSource:
         return cls(
             api_key=settings.freightos_api_key,
             api_secret=settings.freightos_api_secret,
@@ -134,7 +134,7 @@ class FreightosSource:
 
     async def _access_token(self, client) -> str:
         """OAuth2 client-credentials token, cached until just before expiry."""
-        now = dt.datetime.now(dt.timezone.utc)
+        now = dt.datetime.now(dt.UTC)
         if self._token and self._token_expiry and now < self._token_expiry:
             return self._token
         resp = await client.post(

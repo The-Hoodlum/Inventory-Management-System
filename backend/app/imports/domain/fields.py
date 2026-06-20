@@ -50,13 +50,13 @@ class RowResult:
     sku: str | None = None
 
     @classmethod
-    def imported(cls, sku: str | None = None) -> "RowResult":
+    def imported(cls, sku: str | None = None) -> RowResult:
         return cls(ROW_IMPORTED, sku=sku)
 
     @classmethod
-    def skipped(cls, reason: str, sku: str | None = None) -> "RowResult":
+    def skipped(cls, reason: str, sku: str | None = None) -> RowResult:
         return cls(ROW_SKIPPED, errors=[reason], sku=sku)
 
     @classmethod
-    def error(cls, messages: list[str], sku: str | None = None) -> "RowResult":
+    def error(cls, messages: list[str], sku: str | None = None) -> RowResult:
         return cls(ROW_ERROR, errors=list(messages), sku=sku)

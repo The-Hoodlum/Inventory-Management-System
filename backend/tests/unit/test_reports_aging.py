@@ -12,7 +12,7 @@ from decimal import Decimal
 
 from app.reports.compute import BUCKETS, aging_from_movements, bucket_label
 
-NOW = dt.datetime(2025, 6, 1, 12, 0, tzinfo=dt.timezone.utc)
+NOW = dt.datetime(2025, 6, 1, 12, 0, tzinfo=dt.UTC)
 P = uuid.UUID("11111111-1111-1111-1111-111111111111")
 P2 = uuid.UUID("22222222-2222-2222-2222-222222222222")
 W1 = uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")

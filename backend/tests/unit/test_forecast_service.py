@@ -24,7 +24,7 @@ class FakeForecastRepo:
 
     async def save(self, **fields):
         rec = SimpleNamespace(
-            id=uuid.uuid4(), generated_at=dt.datetime.now(dt.timezone.utc), **fields
+            id=uuid.uuid4(), generated_at=dt.datetime.now(dt.UTC), **fields
         )
         self.saved.append(rec)
         self._by_id[rec.id] = rec

@@ -15,10 +15,10 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+from app.catalog.profile import ProductProfile, suggested_forecast_method, vulnerability
 from app.forecast.domain.methods import build_series
 from app.forecast.domain.models import ForecastParams
 from app.forecast.domain.providers import default_provider_key, get_provider
-from app.catalog.profile import ProductProfile, suggested_forecast_method, vulnerability
 from app.forecast.domain.signals import SignalContext, default_pipeline
 from app.intelligence.domain.scoring import assess, combine_severities
 from app.intelligence.signals import build_snapshot, match_context
@@ -34,9 +34,6 @@ from app.reorder.domain.models import (
 )
 from app.reorder.domain.risk import build_risk_adjustment
 from app.reorder.repository import ReorderRepository
-
-# Risk categories that delay supply, and so stretch the effective lead time.
-_LEAD_TIME_RISK_CATEGORIES = ("freight", "port", "geopolitical")
 from app.reorder.schemas import (
     GeneratePurchaseOrdersRequest,
     GeneratePurchaseOrdersResponse,
@@ -46,6 +43,9 @@ from app.reorder.schemas import (
     ReorderRunResponse,
     RunReorderRequest,
 )
+
+# Risk categories that delay supply, and so stretch the effective lead time.
+_LEAD_TIME_RISK_CATEGORIES = ("freight", "port", "geopolitical")
 
 if TYPE_CHECKING:
     from app.procurement.service import ProcurementService
@@ -68,7 +68,7 @@ class ReorderService:
     def __init__(
         self,
         reorder_repo: ReorderRepository,
-        procurement_service: "ProcurementService",
+        procurement_service: ProcurementService,
         audit_repo,
         demand_repo=None,
         intelligence_repo=None,
@@ -208,7 +208,7 @@ class ReorderService:
         )
 
         return ReorderRunResponse(
-            generated_at=dt.datetime.now(dt.timezone.utc),
+            generated_at=dt.datetime.now(dt.UTC),
             window_days=req.window_days,
             evaluated=evaluated,
             to_order=to_order,
@@ -232,7 +232,7 @@ class ReorderService:
         return build_snapshot(rows, country_map)
 
     def _risk_for(
-        self, terms: "SupplierTerms", profile: ProductProfile, snapshot
+        self, terms: SupplierTerms, profile: ProductProfile, snapshot
     ) -> RiskAdjustment:
         """Turn the intelligence that matches this SKU into a reorder risk
         adjustment. Matching uses the supplier AND the Product Intelligence

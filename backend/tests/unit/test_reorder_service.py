@@ -114,7 +114,7 @@ class FakeProcurementService:
             status="draft", currency="USD", fx_rate=Decimal(1),
             subtotal=subtotal, tax=Decimal(0), total=subtotal,
             notes=data.notes, expected_date=data.expected_date,
-            created_at=dt.datetime.now(dt.timezone.utc), lines=lines,
+            created_at=dt.datetime.now(dt.UTC), lines=lines,
         )
         self.created.append(po)
         return po

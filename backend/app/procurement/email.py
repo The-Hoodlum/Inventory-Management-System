@@ -37,7 +37,7 @@ class EmailService:
         self.from_addr = from_addr
 
     @classmethod
-    def from_settings(cls) -> "EmailService":
+    def from_settings(cls) -> EmailService:
         from app.core.config import settings
 
         return cls(

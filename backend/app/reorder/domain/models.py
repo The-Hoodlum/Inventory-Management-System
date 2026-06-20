@@ -41,7 +41,7 @@ class DemandStatistics:
         sum_of_squares: Decimal | int | str,
         window_days: int,
         days_with_sales: int = 0,
-    ) -> "DemandStatistics":
+    ) -> DemandStatistics:
         """Build stats from SQL aggregates over the window.
 
         Missing (zero-sales) days contribute 0 to both the sum and the sum of
@@ -70,7 +70,7 @@ class DemandStatistics:
         )
 
     @classmethod
-    def zero(cls, window_days: int) -> "DemandStatistics":
+    def zero(cls, window_days: int) -> DemandStatistics:
         return cls(ZERO, ZERO, int(window_days), 0, ZERO)
 
 

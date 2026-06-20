@@ -46,7 +46,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 # JWT
 # --------------------------------------------------------------------------- #
 def _now() -> _dt.datetime:
-    return _dt.datetime.now(_dt.timezone.utc)
+    return _dt.datetime.now(_dt.UTC)
 
 
 def create_access_token(subject: uuid.UUID | str, tenant_id: uuid.UUID | str) -> str:

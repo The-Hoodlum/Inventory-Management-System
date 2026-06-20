@@ -20,47 +20,47 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.advisor.providers import build_llm_provider
+from app.advisor.service import AdvisorService
+from app.container.repository import ContainerRepository
+from app.container.service import ContainerService
 from app.core.config import settings
 from app.core.exceptions import AuthenticationError, PermissionDeniedError
 from app.core.security import TokenTypeError, decode_access_token
-from app.intelligence.sources.factory import build_external_source
-from app.intelligence.providers.registry import build_free_providers
-from app.db.session import AsyncSessionLocal
-from app.repositories.audit_repo import AuditRepository
-from app.repositories.inventory_repo import InventoryRepository
-from app.repositories.product_repo import ProductRepository
-from app.repositories.supplier_repo import SupplierRepository
-from app.repositories.user_repo import UserRepository
-from app.repositories.warehouse_repo import WarehouseRepository
-from app.repositories.user_admin_repo import UserAdminRepository
-from app.repositories.refresh_repo import RefreshSessionRepository
-from app.services.auth_service import AuthService
-from app.services.inventory_service import InventoryService
-from app.services.product_service import ProductService
-from app.services.supplier_service import SupplierService
-from app.services.warehouse_service import WarehouseService
-from app.services.user_service import UserAdminService
-from app.reorder.repository import ReorderRepository
-from app.reorder.service import ReorderService
-from app.procurement.repository import ProcurementRepository
-from app.procurement.service import ProcurementService
-from app.procurement.email import EmailService
 from app.dashboard.repository import DashboardRepository
 from app.dashboard.service import DashboardService
+from app.db.session import AsyncSessionLocal
 from app.demand.repository import DemandRepository
 from app.demand.service import DemandService
 from app.forecast.repository import ForecastRepository
 from app.forecast.service import ForecastService
-from app.container.repository import ContainerRepository
-from app.container.service import ContainerService
-from app.advisor.providers import build_llm_provider
-from app.advisor.service import AdvisorService
 from app.imports.repository import ImportRepository
 from app.imports.service import ImportService
+from app.intelligence.providers.registry import build_free_providers
 from app.intelligence.repository import IntelligenceRepository
 from app.intelligence.service import IntelligenceService
+from app.intelligence.sources.factory import build_external_source
+from app.procurement.email import EmailService
+from app.procurement.repository import ProcurementRepository
+from app.procurement.service import ProcurementService
+from app.reorder.repository import ReorderRepository
+from app.reorder.service import ReorderService
 from app.reports.repository import ReportsRepository
 from app.reports.service import ReportsService
+from app.repositories.audit_repo import AuditRepository
+from app.repositories.inventory_repo import InventoryRepository
+from app.repositories.product_repo import ProductRepository
+from app.repositories.refresh_repo import RefreshSessionRepository
+from app.repositories.supplier_repo import SupplierRepository
+from app.repositories.user_admin_repo import UserAdminRepository
+from app.repositories.user_repo import UserRepository
+from app.repositories.warehouse_repo import WarehouseRepository
+from app.services.auth_service import AuthService
+from app.services.inventory_service import InventoryService
+from app.services.product_service import ProductService
+from app.services.supplier_service import SupplierService
+from app.services.user_service import UserAdminService
+from app.services.warehouse_service import WarehouseService
 
 _bearer = HTTPBearer(auto_error=False)
 

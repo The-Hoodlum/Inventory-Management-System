@@ -3,10 +3,9 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import app.imports.targets  # noqa: F401  (registers the inventory target)
 from app.imports.domain.fields import ROW_IMPORTED, ROW_SKIPPED
 from app.imports.domain.registry import get_importer
-
-import app.imports.targets  # noqa: F401  (registers the inventory target)
 
 IMPORTER = get_importer("inventory")
 

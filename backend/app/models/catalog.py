@@ -6,8 +6,8 @@ import uuid
 from decimal import Decimal
 
 from sqlalchemy import (
-    Boolean,
     CHAR,
+    Boolean,
     ForeignKey,
     Integer,
     Numeric,

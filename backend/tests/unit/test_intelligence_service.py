@@ -35,7 +35,7 @@ class FakeIntelRepo:
             category=obs.category, scope_type=obs.scope_type, scope_key=obs.scope_key,
             severity=obs.severity, demand_factor=obs.demand_factor, confidence=obs.confidence,
             headline=obs.headline, value=obs.value, unit=obs.unit, trend=obs.trend,
-            source=obs.source, observed_at=dt.datetime.now(dt.timezone.utc),
+            source=obs.source, observed_at=dt.datetime.now(dt.UTC),
             expires_at=obs.expires_at, detail=obs.detail,
         )
         self.rows.append(row)

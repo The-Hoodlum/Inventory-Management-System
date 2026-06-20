@@ -27,7 +27,7 @@ def _metrics(on_time=0.8, avg=30, stdev=6, fill=0.95, received=10):
 def _history(po=12, received=10, spend="50000", last=None):
     return SupplierHistory(
         po_count=po, received_po_count=received, total_spend=D(spend),
-        last_order_at=last or dt.datetime(2026, 6, 1, tzinfo=dt.timezone.utc),
+        last_order_at=last or dt.datetime(2026, 6, 1, tzinfo=dt.UTC),
     )
 
 
@@ -108,7 +108,7 @@ class _FakeScoreRepo:
         return {}
 
     async def save_supplier_score(self, **fields):
-        row = SimpleNamespace(id=uuid.uuid4(), computed_at=dt.datetime.now(dt.timezone.utc), **fields)
+        row = SimpleNamespace(id=uuid.uuid4(), computed_at=dt.datetime.now(dt.UTC), **fields)
         self.saved.append(row)
         return row
 

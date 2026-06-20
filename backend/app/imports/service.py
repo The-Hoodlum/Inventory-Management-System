@@ -41,7 +41,7 @@ _MISSING = object()
 
 
 def _now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
+    return dt.datetime.now(dt.UTC)
 
 
 class ImportContext:
@@ -189,7 +189,7 @@ class ImportService:
         try:
             return get_importer(key)
         except KeyError:
-            raise NotFoundError(f"Unknown import target '{key}'")
+            raise NotFoundError(f"Unknown import target '{key}'") from None
 
     @staticmethod
     def _target_out(imp: ResourceImporter) -> TargetOut:
@@ -224,9 +224,9 @@ class ImportService:
         try:
             parsed = parse_table(filename, data)
         except UnsupportedFileType as exc:
-            raise BusinessRuleError(str(exc))
+            raise BusinessRuleError(str(exc)) from exc
         except Exception as exc:  # malformed workbook, etc.
-            raise BusinessRuleError(f"Could not read the file: {exc}")
+            raise BusinessRuleError(f"Could not read the file: {exc}") from exc
         if not parsed.headers:
             raise BusinessRuleError("No header row found in the file")
 

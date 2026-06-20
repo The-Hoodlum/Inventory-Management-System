@@ -19,7 +19,7 @@ names — rather than duplicating them.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
 ONE = Decimal("1")
@@ -71,7 +71,7 @@ class ProductProfile:
     carton_weight_kg: Decimal | None = None
 
     @classmethod
-    def from_product(cls, product) -> "ProductProfile":
+    def from_product(cls, product) -> ProductProfile:
         tags = getattr(product, "commodity_tags", None) or []
         return cls(
             commodity_tags=tuple(str(t) for t in tags),

@@ -47,7 +47,7 @@ class AdjustStockRequest(BaseModel):
     reason: str = Field(min_length=1, description="Reason is mandatory for adjustments.")
 
     @model_validator(mode="after")
-    def _non_zero(self) -> "AdjustStockRequest":
+    def _non_zero(self) -> AdjustStockRequest:
         if self.delta == 0:
             raise ValueError("delta must be non-zero")
         return self
@@ -61,7 +61,7 @@ class TransferStockRequest(BaseModel):
     reason: str | None = None
 
     @model_validator(mode="after")
-    def _distinct(self) -> "TransferStockRequest":
+    def _distinct(self) -> TransferStockRequest:
         if self.from_warehouse_id == self.to_warehouse_id:
             raise ValueError("from_warehouse_id and to_warehouse_id must differ")
         return self

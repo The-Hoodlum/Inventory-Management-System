@@ -30,7 +30,7 @@ def _cell_to_str(value: object) -> str:
     if isinstance(value, float):
         # Avoid '100.0' for whole numbers that arrive as floats from Excel.
         return str(int(value)) if value.is_integer() else repr(value)
-    if isinstance(value, (dt.datetime, dt.date)):
+    if isinstance(value, dt.datetime | dt.date):
         return value.isoformat()
     return str(value).strip()
 

@@ -3,16 +3,16 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from app.advisor.api import router as advisor_router
 from app.api.v1.endpoints import auth, inventory, products, suppliers, users, warehouses
-from app.reorder.api import purchase_order_router, reorder_router
-from app.procurement.api import router as procurement_router
+from app.container.api import router as container_router
 from app.dashboard.api import router as dashboard_router
 from app.demand.api import router as demand_router
 from app.forecast.api import router as forecast_router
-from app.container.api import router as container_router
-from app.advisor.api import router as advisor_router
 from app.imports.api import router as imports_router
 from app.intelligence.api import router as intelligence_router
+from app.procurement.api import router as procurement_router
+from app.reorder.api import purchase_order_router, reorder_router
 from app.reports.api import router as reports_router
 
 api_router = APIRouter()
