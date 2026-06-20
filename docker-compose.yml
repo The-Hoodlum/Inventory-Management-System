@@ -1,0 +1,92 @@
+# ============================================================================
+#  Inventory & Procurement Platform — local / evaluation stack (run from root).
+#
+#  Brings up:
+#    • db  : PostgreSQL 16, provisioned on first boot (in order) with
+#            01 schema → 02 app_user role+grants → 03 RBAC seed →
+#            04 demo data → 05 PO events → 06 auth hardening   (all idempotent)
+#    • api : the FastAPI backend, connecting as the NON-superuser app_user so
+#            PostgreSQL Row-Level Security is enforced.
+#
+#  Usage:
+#    docker compose up --build        # start (first run builds the API image)
+#    docker compose down              # stop, keep data
+#    docker compose down -v           # stop and WIPE the database (fresh re-seed)
+#
+#  Values below can be overridden via a root .env file (see .env.example);
+#  sensible defaults are baked in so it runs with no .env at all.
+#
+#  The frontend runs separately with npm — see README.md / TESTING_GUIDE.md.
+# ============================================================================
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-inventory}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./database/sql/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./backend/docker/02_app_role.sql:/docker-entrypoint-initdb.d/02_app_role.sql:ro
+      - ./database/sql/seed_rbac.sql:/docker-entrypoint-initdb.d/03_seed_rbac.sql:ro
+      - ./database/sql/seed_demo.sql:/docker-entrypoint-initdb.d/04_seed_demo.sql:ro
+      - ./database/sql/po_events.sql:/docker-entrypoint-initdb.d/05_po_events.sql:ro
+      - ./database/sql/auth_hardening.sql:/docker-entrypoint-initdb.d/06_auth_hardening.sql:ro
+      - ./database/sql/demand_source.sql:/docker-entrypoint-initdb.d/07_demand_source.sql:ro
+      - ./database/sql/demand_forecasts.sql:/docker-entrypoint-initdb.d/08_demand_forecasts.sql:ro
+      - ./database/sql/intelligence.sql:/docker-entrypoint-initdb.d/09_intelligence.sql:ro
+      - ./database/sql/reorder_risk.sql:/docker-entrypoint-initdb.d/10_reorder_risk.sql:ro
+      - ./database/sql/product_profile.sql:/docker-entrypoint-initdb.d/11_product_profile.sql:ro
+      - ./database/sql/supplier_scores.sql:/docker-entrypoint-initdb.d/12_supplier_scores.sql:ro
+      - ./database/sql/inventory_import.sql:/docker-entrypoint-initdb.d/13_inventory_import.sql:ro
+      - ./database/sql/import_rollback.sql:/docker-entrypoint-initdb.d/14_import_rollback.sql:ro
+      - ./database/sql/product_profile_flags.sql:/docker-entrypoint-initdb.d/15_product_profile_flags.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-inventory}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://app_user:app_pw@db:5432/inventory}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-only-change-me-0123456789abcdef0123456789abcdef}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
+      # Freightos freight intelligence (optional; inert unless enabled + key + secret).
+      FREIGHTOS_ENABLED: ${FREIGHTOS_ENABLED:-false}
+      FREIGHTOS_API_KEY: ${FREIGHTOS_API_KEY:-}
+      FREIGHTOS_API_SECRET: ${FREIGHTOS_API_SECRET:-}
+      FREIGHTOS_AUTH_MODE: ${FREIGHTOS_AUTH_MODE:-basic}
+      FREIGHTOS_TOKEN_URL: ${FREIGHTOS_TOKEN_URL:-https://api.freightos.com/oauth/token}
+      FREIGHTOS_BASE_URL: ${FREIGHTOS_BASE_URL:-https://api.freightos.com/api/v1}
+      FREIGHTOS_INDEX_PATH: ${FREIGHTOS_INDEX_PATH:-/co2calc}
+      FREIGHTOS_LANES: ${FREIGHTOS_LANES:-}
+      # AI Supply Chain Analyst (optional LLM narration; inert unless enabled + key).
+      ADVISOR_LLM_ENABLED: ${ADVISOR_LLM_ENABLED:-false}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ADVISOR_MODEL: ${ADVISOR_MODEL:-claude-opus-4-8}
+      # External intelligence providers + daily scheduler (all inert by default).
+      INTEL_EXCHANGERATE_ENABLED: ${INTEL_EXCHANGERATE_ENABLED:-false}
+      INTEL_EXCHANGERATE_API_KEY: ${INTEL_EXCHANGERATE_API_KEY:-}
+      INTEL_WORLDBANK_ENABLED: ${INTEL_WORLDBANK_ENABLED:-false}
+      INTEL_IMF_ENABLED: ${INTEL_IMF_ENABLED:-false}
+      INTEL_GDELT_ENABLED: ${INTEL_GDELT_ENABLED:-false}
+      INTEL_OPENWEATHER_ENABLED: ${INTEL_OPENWEATHER_ENABLED:-false}
+      INTEL_OPENWEATHER_API_KEY: ${INTEL_OPENWEATHER_API_KEY:-}
+      INTEL_COMTRADE_ENABLED: ${INTEL_COMTRADE_ENABLED:-false}
+      INTEL_COMTRADE_API_KEY: ${INTEL_COMTRADE_API_KEY:-}
+      INTEL_SCHEDULER_ENABLED: ${INTEL_SCHEDULER_ENABLED:-false}
+      INTEL_SCHEDULER_INTERVAL_HOURS: ${INTEL_SCHEDULER_INTERVAL_HOURS:-24}
+    ports:
+      - "${API_PORT:-8000}:8000"
+
+volumes:
+  pgdata:

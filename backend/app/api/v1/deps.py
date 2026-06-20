@@ -1,0 +1,265 @@
+"""FastAPI dependencies: DB session, authentication, RBAC, and service wiring.
+
+Request/transaction model
+-------------------------
+``get_db`` opens one transaction per request. ``get_current_user`` validates the
+JWT, loads the user + permissions, and then sets the tenant GUC
+(``app.current_tenant``) *transaction-locally*, so PostgreSQL RLS scopes every
+subsequent business query to that tenant and the setting is cleared automatically
+when the transaction ends (no leakage across pooled connections).
+"""
+from __future__ import annotations
+
+import uuid
+from collections.abc import AsyncGenerator
+from dataclasses import dataclass, field
+
+import jwt
+from fastapi import Depends
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
+from app.core.exceptions import AuthenticationError, PermissionDeniedError
+from app.core.security import TokenTypeError, decode_access_token
+from app.intelligence.sources.factory import build_external_source
+from app.intelligence.providers.registry import build_free_providers
+from app.db.session import AsyncSessionLocal
+from app.repositories.audit_repo import AuditRepository
+from app.repositories.inventory_repo import InventoryRepository
+from app.repositories.product_repo import ProductRepository
+from app.repositories.supplier_repo import SupplierRepository
+from app.repositories.user_repo import UserRepository
+from app.repositories.warehouse_repo import WarehouseRepository
+from app.repositories.user_admin_repo import UserAdminRepository
+from app.repositories.refresh_repo import RefreshSessionRepository
+from app.services.auth_service import AuthService
+from app.services.inventory_service import InventoryService
+from app.services.product_service import ProductService
+from app.services.supplier_service import SupplierService
+from app.services.warehouse_service import WarehouseService
+from app.services.user_service import UserAdminService
+from app.reorder.repository import ReorderRepository
+from app.reorder.service import ReorderService
+from app.procurement.repository import ProcurementRepository
+from app.procurement.service import ProcurementService
+from app.procurement.email import EmailService
+from app.dashboard.repository import DashboardRepository
+from app.dashboard.service import DashboardService
+from app.demand.repository import DemandRepository
+from app.demand.service import DemandService
+from app.forecast.repository import ForecastRepository
+from app.forecast.service import ForecastService
+from app.container.repository import ContainerRepository
+from app.container.service import ContainerService
+from app.advisor.providers import build_llm_provider
+from app.advisor.service import AdvisorService
+from app.imports.repository import ImportRepository
+from app.imports.service import ImportService
+from app.intelligence.repository import IntelligenceRepository
+from app.intelligence.service import IntelligenceService
+from app.reports.repository import ReportsRepository
+from app.reports.service import ReportsService
+
+_bearer = HTTPBearer(auto_error=False)
+
+
+# --------------------------------------------------------------------------- #
+# Database session (one transaction per request)
+# --------------------------------------------------------------------------- #
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    async with AsyncSessionLocal() as session:
+        async with session.begin():  # commit on success, rollback on exception
+            yield session
+
+
+# --------------------------------------------------------------------------- #
+# Authenticated principal
+# --------------------------------------------------------------------------- #
+@dataclass
+class CurrentUser:
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    email: str
+    full_name: str
+    permissions: set[str] = field(default_factory=set)
+    roles: list[str] = field(default_factory=list)
+
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: AsyncSession = Depends(get_db),
+) -> CurrentUser:
+    if credentials is None or not credentials.credentials:
+        raise AuthenticationError("Missing bearer token")
+
+    try:
+        payload = decode_access_token(credentials.credentials)
+    except (jwt.PyJWTError, TokenTypeError) as exc:
+        raise AuthenticationError("Invalid or expired token") from exc
+
+    try:
+        user_id = uuid.UUID(payload["sub"])
+        token_tenant = uuid.UUID(payload["tenant_id"])
+    except (KeyError, ValueError) as exc:
+        raise AuthenticationError("Malformed token claims") from exc
+
+    users = UserRepository(db)
+    user = await users.get(user_id)
+    if user is None or not user.is_active:
+        raise AuthenticationError("Account not found or disabled")
+    if user.tenant_id != token_tenant:
+        raise AuthenticationError("Token/tenant mismatch")
+
+    permissions = await users.get_permission_codes(user_id)
+    roles = await users.get_role_names(user_id)
+
+    # Scope the rest of the request to this tenant (RLS). Transaction-local.
+    await db.execute(
+        text("SELECT set_config('app.current_tenant', :tenant, true)"),
+        {"tenant": str(user.tenant_id)},
+    )
+
+    return CurrentUser(
+        id=user.id,
+        tenant_id=user.tenant_id,
+        email=user.email,
+        full_name=user.full_name,
+        permissions=permissions,
+        roles=roles,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Authorization
+# --------------------------------------------------------------------------- #
+def ensure_permission(permissions: set[str], code: str) -> None:
+    """Pure permission check (unit-testable). Raises if the code is absent."""
+    if code not in permissions:
+        raise PermissionDeniedError(f"Missing required permission: {code}")
+
+
+def require_permission(code: str):
+    """Dependency factory that enforces a permission and returns the user."""
+
+    async def _checker(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+        ensure_permission(user.permissions, code)
+        return user
+
+    return _checker
+
+
+# --------------------------------------------------------------------------- #
+# Service providers
+# --------------------------------------------------------------------------- #
+def get_auth_service(db: AsyncSession = Depends(get_db)) -> AuthService:
+    return AuthService(UserRepository(db), RefreshSessionRepository(db))
+
+
+def get_product_service(db: AsyncSession = Depends(get_db)) -> ProductService:
+    return ProductService(ProductRepository(db), AuditRepository(db))
+
+
+def get_supplier_service(db: AsyncSession = Depends(get_db)) -> SupplierService:
+    return SupplierService(SupplierRepository(db), AuditRepository(db))
+
+
+def get_warehouse_service(db: AsyncSession = Depends(get_db)) -> WarehouseService:
+    return WarehouseService(WarehouseRepository(db), AuditRepository(db))
+
+
+def get_inventory_service(db: AsyncSession = Depends(get_db)) -> InventoryService:
+    return InventoryService(
+        InventoryRepository(db),
+        ProductRepository(db),
+        WarehouseRepository(db),
+        AuditRepository(db),
+    )
+
+
+def get_reorder_service(db: AsyncSession = Depends(get_db)) -> ReorderService:
+    # PO creation is delegated to the single procurement path, so the reorder
+    # service is wired with a ProcurementService (not its own PO repository).
+    procurement = ProcurementService(
+        ProcurementRepository(db),
+        InventoryRepository(db),
+        AuditRepository(db),
+        EmailService.from_settings(),
+    )
+    return ReorderService(
+        ReorderRepository(db),
+        procurement,
+        AuditRepository(db),
+        DemandRepository(db),
+        IntelligenceRepository(db),  # enables risk-aware procurement
+    )
+
+
+def get_procurement_service(db: AsyncSession = Depends(get_db)) -> ProcurementService:
+    return ProcurementService(
+        ProcurementRepository(db),
+        InventoryRepository(db),
+        AuditRepository(db),
+        EmailService.from_settings(),
+    )
+
+
+def get_dashboard_service(db: AsyncSession = Depends(get_db)) -> DashboardService:
+    return DashboardService(DashboardRepository(db))
+
+
+def get_reports_service(db: AsyncSession = Depends(get_db)) -> ReportsService:
+    return ReportsService(ReportsRepository(db))
+
+
+def get_user_admin_service(db: AsyncSession = Depends(get_db)) -> UserAdminService:
+    return UserAdminService(UserAdminRepository(db), AuditRepository(db))
+
+
+def get_demand_service(db: AsyncSession = Depends(get_db)) -> DemandService:
+    return DemandService(DemandRepository(db), AuditRepository(db))
+
+
+def get_forecast_service(db: AsyncSession = Depends(get_db)) -> ForecastService:
+    return ForecastService(
+        ForecastRepository(db),
+        DemandRepository(db),
+        AuditRepository(db),
+        IntelligenceRepository(db),  # risk-aware forecasts
+    )
+
+
+def get_container_service(db: AsyncSession = Depends(get_db)) -> ContainerService:
+    return ContainerService(ContainerRepository(db))
+
+
+def get_advisor_service(db: AsyncSession = Depends(get_db)) -> AdvisorService:
+    # The LLM narrator is built from settings: Claude when configured (key present),
+    # otherwise inert. The deterministic briefing is always served.
+    return AdvisorService(
+        ReorderRepository(db),
+        IntelligenceRepository(db),
+        ForecastRepository(db),
+        ContainerRepository(db),
+        build_llm_provider(settings),
+    )
+
+
+def get_import_service(db: AsyncSession = Depends(get_db)) -> ImportService:
+    # Generic data-import engine (first target: inventory). Reference data
+    # (warehouses/suppliers/categories/brands) is created-or-linked per the
+    # request options; opening stock is written as 'initial_import' movements.
+    return ImportService(ImportRepository(db), AuditRepository(db))
+
+
+def get_intelligence_service(db: AsyncSession = Depends(get_db)) -> IntelligenceService:
+    # The external feed source is built from settings: Freightos when configured
+    # (FREIGHTOS_ENABLED + key), otherwise inert (NullSource). Supplier risk is
+    # always computed internally; freight/etc. feeds activate via env config.
+    return IntelligenceService(
+        IntelligenceRepository(db),
+        AuditRepository(db),
+        source=build_external_source(settings),
+        extra_providers=build_free_providers(settings),
+    )

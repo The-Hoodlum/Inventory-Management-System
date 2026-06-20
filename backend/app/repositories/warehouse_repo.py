@@ -1,0 +1,48 @@
+"""Warehouse repository: get, list, create, delete."""
+from __future__ import annotations
+
+import uuid
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models import Warehouse
+from app.repositories.base import BaseRepository
+
+
+class WarehouseRepository(BaseRepository[Warehouse]):
+    model = Warehouse
+
+    async def get(self, warehouse_id: uuid.UUID) -> Warehouse | None:
+        return await self.session.get(Warehouse, warehouse_id)
+
+    async def get_by_code(self, code: str) -> Warehouse | None:
+        res = await self.session.execute(
+            select(Warehouse).where(Warehouse.code == code)
+        )
+        return res.scalar_one_or_none()
+
+    async def list(
+        self,
+        *,
+        active_only: bool = False,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[Warehouse], int]:
+        base = select(Warehouse)
+        if active_only:
+            base = base.where(Warehouse.is_active.is_(True))
+        total = await self.session.scalar(
+            select(func.count()).select_from(base.subquery())
+        )
+        stmt = (
+            base.order_by(Warehouse.code)
+            .limit(page_size)
+            .offset((page - 1) * page_size)
+        )
+        res = await self.session.execute(stmt)
+        return list(res.scalars().all()), int(total or 0)
+
+    async def delete(self, warehouse: Warehouse) -> None:
+        await self.session.delete(warehouse)
+        await self.session.flush()

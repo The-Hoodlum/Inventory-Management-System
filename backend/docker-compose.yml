@@ -1,0 +1,54 @@
+# ============================================================================
+#  Local / evaluation stack.
+#
+#  Expects the repository layout produced by this project:
+#      <root>/database/   (schema + seeds, from the database slice)
+#      <root>/backend/    (this service)
+#
+#  On first boot the Postgres container runs, in order:
+#    01 database/sql/schema.sql     - tables, RLS, functions
+#    02 docker/02_app_role.sql      - non-superuser app_user role + grants
+#    03 database/sql/seed_rbac.sql  - permissions + system roles
+#    04 database/sql/seed_demo.sql  - generic demo data (admin@demo.test / ChangeMe123!)
+#    05 database/sql/po_events.sql  - purchase-order events timeline (additive, idempotent)
+#
+#  The API connects as app_user (non-superuser) so RLS is enforced.
+# ============================================================================
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: inventory
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../database/sql/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./docker/02_app_role.sql:/docker-entrypoint-initdb.d/02_app_role.sql:ro
+      - ../database/sql/seed_rbac.sql:/docker-entrypoint-initdb.d/03_seed_rbac.sql:ro
+      - ../database/sql/seed_demo.sql:/docker-entrypoint-initdb.d/04_seed_demo.sql:ro
+      - ../database/sql/po_events.sql:/docker-entrypoint-initdb.d/05_po_events.sql:ro
+      - ../database/sql/auth_hardening.sql:/docker-entrypoint-initdb.d/06_auth_hardening.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d inventory"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://app_user:app_pw@db:5432/inventory
+      JWT_SECRET_KEY: dev-only-change-me-0123456789abcdef0123456789abcdef
+      ENVIRONMENT: development
+      CORS_ORIGINS: http://localhost:5173,http://localhost:3000
+    ports:
+      - "8000:8000"
+
+volumes:
+  pgdata:
