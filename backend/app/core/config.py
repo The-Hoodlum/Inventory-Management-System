@@ -106,6 +106,18 @@ class Settings(BaseSettings):
     advisor_max_tokens: int = 1024
     advisor_timeout_seconds: float = 30.0
 
+    # --- Conversational assistant (WhatsApp/OpenAI; optional, inert by default) ---
+    # The assistant answers natural-language questions via OpenAI function-calling over
+    # the platform's own read services (the model never touches the DB directly).
+    # Disabled unless ASSISTANT_ENABLED=true AND OPENAI_API_KEY is set.
+    assistant_enabled: bool = False
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-4o-mini"
+    openai_base_url: str = "https://api.openai.com/v1"
+    assistant_max_tokens: int = 1024
+    assistant_timeout_seconds: float = 30.0
+    assistant_max_tool_rounds: int = 5  # cap LLM<->tool loops per question
+
     # --- External intelligence providers (production feeds; all OPTIONAL, inert by default) ---
     # Each provider is off until enabled; enabling one lets ingest/the scheduler pull
     # from it and convert results into intelligence signals (which already feed risk,
@@ -176,6 +188,11 @@ class Settings(BaseSettings):
         """True only when the advisor LLM is enabled AND an API key is present;
         otherwise the advisor stays deterministic (no external call)."""
         return self.advisor_llm_enabled and bool(self.anthropic_api_key)
+
+    @property
+    def assistant_configured(self) -> bool:
+        """True only when the assistant is enabled AND an OpenAI key is present."""
+        return self.assistant_enabled and bool(self.openai_api_key)
 
 
 @lru_cache

@@ -36,7 +36,8 @@ INSERT INTO permissions (code, description) VALUES
     ('user.manage',        'Manage users and role assignments'),
     ('settings.manage',    'Manage tenant settings (FX, VAT, etc.)'),
     ('dashboard.read',     'View the dashboard'),
-    ('data.import',        'Import data from spreadsheets (products, inventory, ...)')
+    ('data.import',        'Import data from spreadsheets (products, inventory, ...)'),
+    ('assistant.use',      'Use the natural-language assistant (WhatsApp / API)')
 ON CONFLICT (code) DO NOTHING;
 
 -- ----------------------------------------------------------------------------

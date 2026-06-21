@@ -12,3 +12,4 @@ httpx>=0.27,<0.29        # external intelligence sources (Freightos, future feed
 openpyxl>=3.1,<4.0       # .xlsx parsing + template generation (data import)
 xlrd>=2.0,<3.0           # legacy .xls parsing (data import)
 python-multipart>=0.0.9,<0.1  # multipart/form-data uploads (data import)
+openai>=1.40,<2.0        # conversational assistant (OpenAI function-calling)

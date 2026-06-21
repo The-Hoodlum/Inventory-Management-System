@@ -1,5 +1,11 @@
 """Re-export all ORM models so they register on ``Base.metadata`` and can be
 imported from a single place (e.g. ``from app.models import Product``)."""
+from app.models.assistant import (
+    AssistantConversation,
+    AssistantMessage,
+    UserWarehouseAccess,
+    WhatsAppIdentity,
+)
 from app.models.catalog import (
     Brand,
     Category,
@@ -36,4 +42,5 @@ __all__ = [
     "SalesDaily", "PurchaseOrder", "PurchaseOrderLine", "ReorderRecommendation",
     "PurchaseOrderEvent", "DemandForecast", "IntelligenceSignal", "SupplierScore",
     "ImportJob", "ImportFile", "ImportError", "ImportMapping",
+    "AssistantConversation", "AssistantMessage", "UserWarehouseAccess", "WhatsAppIdentity",
 ]

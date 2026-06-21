@@ -39,3 +39,5 @@ class P:
     DASHBOARD_READ = "dashboard.read"
     # Data import (generic spreadsheet import framework)
     DATA_IMPORT = "data.import"
+    # Conversational assistant (WhatsApp / API)
+    ASSISTANT_USE = "assistant.use"

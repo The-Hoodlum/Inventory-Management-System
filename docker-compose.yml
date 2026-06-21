@@ -44,6 +44,7 @@ services:
       - ./database/sql/inventory_import.sql:/docker-entrypoint-initdb.d/13_inventory_import.sql:ro
       - ./database/sql/import_rollback.sql:/docker-entrypoint-initdb.d/14_import_rollback.sql:ro
       - ./database/sql/product_profile_flags.sql:/docker-entrypoint-initdb.d/15_product_profile_flags.sql:ro
+      - ./database/sql/assistant.sql:/docker-entrypoint-initdb.d/16_assistant.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-inventory}"]
       interval: 5s
@@ -73,6 +74,10 @@ services:
       ADVISOR_LLM_ENABLED: ${ADVISOR_LLM_ENABLED:-false}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ADVISOR_MODEL: ${ADVISOR_MODEL:-claude-opus-4-8}
+      # Conversational assistant (WhatsApp/OpenAI; inert unless enabled + key).
+      ASSISTANT_ENABLED: ${ASSISTANT_ENABLED:-false}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       # External intelligence providers + daily scheduler (all inert by default).
       INTEL_EXCHANGERATE_ENABLED: ${INTEL_EXCHANGERATE_ENABLED:-false}
       INTEL_EXCHANGERATE_API_KEY: ${INTEL_EXCHANGERATE_API_KEY:-}

@@ -22,6 +22,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.advisor.providers import build_llm_provider
 from app.advisor.service import AdvisorService
+from app.assistant.providers import build_llm_provider as build_assistant_provider
+from app.assistant.repository import AssistantRepository
+from app.assistant.service import AssistantService
 from app.container.repository import ContainerRepository
 from app.container.service import ContainerService
 from app.core.config import settings
@@ -251,6 +254,17 @@ def get_import_service(db: AsyncSession = Depends(get_db)) -> ImportService:
     # (warehouses/suppliers/categories/brands) is created-or-linked per the
     # request options; opening stock is written as 'initial_import' movements.
     return ImportService(ImportRepository(db), AuditRepository(db))
+
+
+def get_assistant_service(db: AsyncSession = Depends(get_db)) -> AssistantService:
+    # OpenAI function-calling assistant when configured (ASSISTANT_ENABLED + OPENAI_API_KEY),
+    # otherwise inert. Tools run through the repository (RLS + branch-scoped); the model
+    # never touches the DB directly.
+    return AssistantService(
+        AssistantRepository(db),
+        build_assistant_provider(settings),
+        max_tool_rounds=settings.assistant_max_tool_rounds,
+    )
 
 
 def get_intelligence_service(db: AsyncSession = Depends(get_db)) -> IntelligenceService:
