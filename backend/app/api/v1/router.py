@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.advisor.api import router as advisor_router
-from app.api.v1.endpoints import auth, inventory, products, suppliers, users, warehouses
+from app.api.v1.endpoints import auth, inventory, products, suppliers, tenant, users, warehouses
 from app.assistant.api import router as assistant_router
 from app.container.api import router as container_router
 from app.dashboard.api import router as dashboard_router
@@ -39,3 +39,4 @@ api_router.include_router(whatsapp_router, prefix="/whatsapp", tags=["whatsapp"]
 api_router.include_router(imports_router, prefix="/imports", tags=["imports"])
 api_router.include_router(intelligence_router, prefix="/intelligence", tags=["intelligence"])
 api_router.include_router(users.router, prefix="/users", tags=["users"])
+api_router.include_router(tenant.router, prefix="/tenant", tags=["tenant"])

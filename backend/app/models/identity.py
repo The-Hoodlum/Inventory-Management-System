@@ -34,6 +34,16 @@ class Tenant(Base):
     fx_rate: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False, server_default=text("1"))
     vat_rate: Mapped[Decimal] = mapped_column(Numeric(6, 4), nullable=False, server_default=text("0"))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    # --- Business-identity settings (migration 0016; industry-agnostic SaaS) ---
+    # company_name reuses `name`; default_currency reuses `base_currency`.
+    brand_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    industry: Mapped[str | None] = mapped_column(Text, nullable=True)
+    country: Mapped[str | None] = mapped_column(Text, nullable=True)
+    timezone: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'UTC'"))
+    logo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    assistant_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    assistant_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    feature_flags: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     created_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
     updated_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
 

@@ -127,3 +127,18 @@ BEGIN
     RAISE NOTICE 'Motorcycle sample data added to tenant % (branches Lusaka/Ndola/Solwezi).', v_tenant;
 END;
 $$;
+
+-- Configure the DEMO tenant's business identity (TVS Zambia). The core platform is
+-- generic; this is just tenant configuration, so the same engine serves any industry.
+-- Idempotent. (Note: demo prices are illustrative, not real ZMW values.)
+UPDATE tenants SET
+    brand_name       = 'TVS',
+    industry         = 'Motorcycles and Spare Parts',
+    country          = 'Zambia',
+    timezone         = 'Africa/Lusaka',
+    assistant_name   = 'TVS Zambia Assistant',
+    assistant_prompt = 'You assist managers and branch staff at a motorcycle and spare-parts '
+                       'dealership. Be concise and practical; prefer per-branch breakdowns.',
+    base_currency    = 'ZMW'
+WHERE slug = 'demo';
+

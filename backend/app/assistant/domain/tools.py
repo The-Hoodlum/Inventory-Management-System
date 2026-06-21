@@ -1,15 +1,16 @@
-"""OpenAI function-calling tool specs + system prompt for the assistant.
+"""OpenAI function-calling tool specs for the assistant.
 
-Pure data: the JSON schemas the model sees, and the grounding system prompt. Tool
-*execution* lives in the service/repository (DB-bound). ``TOOL_NAMES`` is the
-allow-list the service dispatches against — the model can call nothing else.
+Pure data: the JSON schemas the model sees. Tool *execution* lives in the
+service/repository (DB-bound). ``TOOL_NAMES`` is the allow-list the service dispatches
+against — the model can call nothing else. These tools are INDUSTRY-AGNOSTIC; the
+business persona/currency come from tenant config via ``domain/prompt.py``.
 """
 from __future__ import annotations
 
 _BRANCH = {
     "branch": {
         "type": "string",
-        "description": "Branch/warehouse name (e.g. Lusaka, Ndola, Solwezi). Omit for all branches.",
+        "description": "Branch/warehouse name. Omit for all branches.",
     }
 }
 
@@ -32,13 +33,10 @@ def _fn(name: str, description: str, properties: dict, required: list[str] | Non
 
 TOOL_SPECS: list[dict] = [
     _fn("get_stock_level",
-        "On-hand and available stock for items whose name/SKU matches a search term, broken down by branch.",
-        {"item_name": {"type": "string", "description": "Item name or SKU to search for, e.g. 'spark plug'."}, **_BRANCH},
+        "On-hand and available stock for items whose name/SKU matches a search term (works for any "
+        "product or model), broken down by branch.",
+        {"item_name": {"type": "string", "description": "Item name, model, or SKU to search for."}, **_BRANCH},
         ["item_name"]),
-    _fn("get_motorcycle_stock",
-        "Available stock for a motorcycle model (matches product name/SKU), broken down by branch.",
-        {"model": {"type": "string", "description": "Model name, e.g. 'HLX 150' or 'RTR 200'."}, **_BRANCH},
-        ["model"]),
     _fn("get_low_stock_items",
         "Items at or below their reorder point across ALL branches in ONE call (each item is "
         "tagged with its branch). Pass `branch` only to narrow to a single branch.",
@@ -61,9 +59,11 @@ TOOL_SPECS: list[dict] = [
          "end_date": {"type": "string", "description": "End date YYYY-MM-DD."}, **_BRANCH},
         ["start_date", "end_date"]),
     _fn("get_top_selling_items",
-        "Top-selling items by units over a date range (defaults to the last 30 days).",
+        "Top-selling items by units over a date range (defaults to the last 30 days), optionally "
+        "limited to one product category (e.g. a category name relevant to this business).",
         {"start_date": {"type": "string", "description": "Start date YYYY-MM-DD (optional)."},
          "end_date": {"type": "string", "description": "End date YYYY-MM-DD (optional)."},
+         "category": {"type": "string", "description": "Optional product category name to filter by."},
          "limit": {"type": "integer", "description": "How many items to return (default 10)."}, **_BRANCH}),
     _fn("get_fast_moving_items",
         "Fastest-moving items by units over a recent window (default last 30 days).",
@@ -76,11 +76,6 @@ TOOL_SPECS: list[dict] = [
         "Optionally filter by item and/or branch.",
         {"item_name": {"type": "string", "description": "Item name or SKU to filter by (optional)."},
          "days": {"type": "integer", "description": "Look-back window in days (default 7)."}, **_BRANCH}),
-    _fn("get_top_selling_motorcycles",
-        "Top-selling MOTORCYCLES (category 'Motorcycles') by units over a date range (default last 30 days).",
-        {"start_date": {"type": "string", "description": "Start date YYYY-MM-DD (optional)."},
-         "end_date": {"type": "string", "description": "End date YYYY-MM-DD (optional)."},
-         "limit": {"type": "integer", "description": "How many to return (default 10)."}, **_BRANCH}),
     _fn("get_slow_moving_items",
         "Slow-moving items: in stock but with the fewest units sold over a recent window (default 30 days).",
         {"days": {"type": "integer", "description": "Look-back window in days (default 30)."},
@@ -103,30 +98,8 @@ TOOL_SPECS: list[dict] = [
         "supplier, and lead time; factors in reorder point, safety stock, MOQ, and carton size.",
         {**_BRANCH}),
     _fn("get_assembly_status",
-        "Motorcycle assembly / unassembled-bike status. (Assembly is NOT tracked in this system.)",
+        "Assembly/build status of products. (Assembly is NOT tracked in this system.)",
         {**_BRANCH}),
 ]
 
 TOOL_NAMES: frozenset[str] = frozenset(t["function"]["name"] for t in TOOL_SPECS)
-
-SYSTEM_PROMPT = (
-    "You are the assistant for a motorcycle and spare-parts business with multiple branches "
-    "(e.g. Lusaka, Ndola, Solwezi). Staff message you over WhatsApp. Answer ONLY from the "
-    "provided tools — never invent stock, sales, or prices; if a tool returns nothing, say so "
-    "in one short line.\n"
-    "GROUNDING:\n"
-    "- 'Branch' = a warehouse. Pass its name to a tool's `branch` argument, or omit it for all branches.\n"
-    "- Most tools already break their results down by branch in ONE call. Prefer a single call "
-    "with no `branch` over calling the same tool once per branch.\n"
-    "- Use the date given as today for 'today'; for other dates use YYYY-MM-DD.\n"
-    "- Revenue is an ESTIMATE (units x selling price) — always call it 'estimated', never booked revenue.\n"
-    "- The system does not track assembly, and does not split motorcycles vs spare parts unless an "
-    "item's name makes it obvious. Don't fabricate those.\n"
-    "WHATSAPP STYLE — keep it short (aim for under ~8 lines):\n"
-    "- Start with a one-line headline that includes a relevant emoji, then compact bullets.\n"
-    "- Bullet format: '- <Branch>: <number>'. Make key numbers bold with *single asterisks* (WhatsApp bold).\n"
-    "- When you list per-branch numbers, end with a '*Total:* <n>' line.\n"
-    "- Use emojis sparingly and appropriately: motorcycle, wrench for parts, package for stock, "
-    "warning for low/reorder, red circle for out-of-stock, money for sales/revenue, chart for reports.\n"
-    "- Use the currency code the tools return. No tables, no markdown headings (#)."
-)

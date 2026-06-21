@@ -46,6 +46,7 @@ services:
       - ./database/sql/product_profile_flags.sql:/docker-entrypoint-initdb.d/15_product_profile_flags.sql:ro
       - ./database/sql/assistant.sql:/docker-entrypoint-initdb.d/16_assistant.sql:ro
       - ./database/sql/assistant_roles.sql:/docker-entrypoint-initdb.d/17_assistant_roles.sql:ro
+      - ./database/sql/tenant_settings.sql:/docker-entrypoint-initdb.d/18_tenant_settings.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-inventory}"]
       interval: 5s

@@ -15,20 +15,19 @@ from __future__ import annotations
 
 from app.assistant.domain.tools import TOOL_NAMES
 
-# Capability groups (by intent).
-_STOCK = {"get_stock_level", "get_motorcycle_stock"}
+# Capability groups (by intent) — industry-agnostic tool names.
+_STOCK = {"get_stock_level"}
 _SALES = {
-    "get_sales_report", "get_sales_between_dates", "get_top_selling_items",
-    "get_top_selling_motorcycles", "get_daily_summary",
+    "get_sales_report", "get_sales_between_dates", "get_top_selling_items", "get_daily_summary",
 }
-_PARTS = {"get_stock_level", "get_stock_movements"}
+_ITEM_LOOKUP = {"get_stock_level", "get_stock_movements"}
 _SERVICE = {"get_assembly_status"}
 
 # Roles with a DELIBERATELY reduced tool set. Any role NOT listed here is
 # unrestricted (full tool access), so existing system roles keep working.
 RESTRICTED_ROLE_TOOLS: dict[str, set[str]] = {
-    "Cashier": _STOCK | _SALES,        # stock lookup + sales reports only
-    "Mechanic": _PARTS | _SERVICE,     # parts lookup + service info only
+    "Cashier": _STOCK | _SALES,            # stock lookup + sales reports only
+    "Mechanic": _ITEM_LOOKUP | _SERVICE,   # item/parts lookup + service info only
 }
 
 

@@ -13,7 +13,8 @@ import json
 import uuid
 
 from app.assistant.domain.capabilities import allowed_tools
-from app.assistant.domain.tools import SYSTEM_PROMPT, TOOL_SPECS
+from app.assistant.domain.prompt import build_system_prompt
+from app.assistant.domain.tools import TOOL_SPECS
 from app.assistant.providers import LLMProvider
 from app.assistant.repository import AssistantRepository
 from app.assistant.schemas import AskResponse, WhatsAppReply
@@ -38,7 +39,8 @@ class AssistantService:
             name_map[w.name.strip().lower()] = w.id
             if w.code:
                 name_map[w.code.strip().lower()] = w.id
-        currency = await self.repo.tenant_currency()
+        config = await self.repo.tenant_config()
+        currency = config.currency
         today = dt.date.today()
 
         # Role-based tool access: only expose (and accept) the tools this user's roles allow.
@@ -82,10 +84,9 @@ class AssistantService:
             except Exception as exc:  # noqa: BLE001 — hand the error back to the model
                 return {"error": f"{name} failed: {exc}"}
 
-        # Ground the model in the real date — otherwise it guesses (e.g. a training-era
-        # date) when a question says "today"/"this week" and silently queries the wrong day.
-        system = f"{SYSTEM_PROMPT}\n\nToday's date is {today.isoformat()} ({today:%A}). " \
-                 "Use this for 'today', 'yesterday', and any relative date the user gives."
+        # Build the system prompt dynamically from tenant configuration (industry-agnostic):
+        # identity, custom instructions, currency, and the real date all come from settings.
+        system = build_system_prompt(config, today)
         run = await self.provider.run(
             system=system, user=question, tools=tools,
             tool_executor=tool_executor, max_rounds=self.max_tool_rounds,
@@ -106,9 +107,6 @@ class AssistantService:
         if name == "get_stock_level":
             term = (args.get("item_name") or "").strip()
             return {"error": "item_name is required."} if not term else await self.repo.stock_by_item(term, ids)
-        if name == "get_motorcycle_stock":
-            term = (args.get("model") or "").strip()
-            return {"error": "model is required."} if not term else await self.repo.stock_by_item(term, ids)
         if name == "get_low_stock_items":
             return await self.repo.low_stock(ids)
         if name == "get_reorder_recommendations":
@@ -131,7 +129,8 @@ class AssistantService:
             start, e1 = parse_date(args.get("start_date"), (end or today) - dt.timedelta(days=30))
             if e1 or e2:
                 return {"error": e1 or e2}
-            return await self.repo.top_items(start, end, ids, int(args.get("limit") or 10))
+            return await self.repo.top_items(start, end, ids, int(args.get("limit") or 10),
+                                             category=args.get("category"))
         if name == "get_fast_moving_items":
             days = int(args.get("days") or 30)
             return await self.repo.top_items(today - dt.timedelta(days=days), today, ids, 10)
@@ -141,12 +140,6 @@ class AssistantService:
         if name == "get_stock_movements":
             days = int(args.get("days") or 7)
             return await self.repo.stock_movements(args.get("item_name"), ids, days)
-        if name == "get_top_selling_motorcycles":
-            end, e2 = parse_date(args.get("end_date"), today)
-            start, e1 = parse_date(args.get("start_date"), (end or today) - dt.timedelta(days=30))
-            if e1 or e2:
-                return {"error": e1 or e2}
-            return await self.repo.top_motorcycles(start, end, ids, int(args.get("limit") or 10))
         if name == "get_slow_moving_items":
             days = int(args.get("days") or 30)
             return await self.repo.slow_moving(today - dt.timedelta(days=days), ids, int(args.get("limit") or 10))

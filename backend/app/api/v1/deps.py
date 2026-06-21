@@ -57,6 +57,7 @@ from app.repositories.inventory_repo import InventoryRepository
 from app.repositories.product_repo import ProductRepository
 from app.repositories.refresh_repo import RefreshSessionRepository
 from app.repositories.supplier_repo import SupplierRepository
+from app.repositories.tenant_repo import TenantRepository
 from app.repositories.user_admin_repo import UserAdminRepository
 from app.repositories.user_repo import UserRepository
 from app.repositories.warehouse_repo import WarehouseRepository
@@ -64,6 +65,7 @@ from app.services.auth_service import AuthService
 from app.services.inventory_service import InventoryService
 from app.services.product_service import ProductService
 from app.services.supplier_service import SupplierService
+from app.services.tenant_service import TenantSettingsService
 from app.services.user_service import UserAdminService
 from app.services.warehouse_service import WarehouseService
 
@@ -267,6 +269,10 @@ def get_assistant_service(db: AsyncSession = Depends(get_db)) -> AssistantServic
         build_assistant_provider(settings),
         max_tool_rounds=settings.assistant_max_tool_rounds,
     )
+
+
+def get_tenant_service(db: AsyncSession = Depends(get_db)) -> TenantSettingsService:
+    return TenantSettingsService(TenantRepository(db), AuditRepository(db))
 
 
 def get_whatsapp_channel_service(db: AsyncSession = Depends(get_db)) -> WhatsAppChannelService:

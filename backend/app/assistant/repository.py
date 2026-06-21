@@ -16,6 +16,7 @@ from sqlalchemy import Numeric, cast, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.assistant.cache import stock_cache
+from app.assistant.domain.prompt import TenantConfig
 from app.core.config import settings
 from app.models import (
     AssistantConversation,
@@ -78,6 +79,20 @@ class AssistantRepository:
                  "NULLIF(current_setting('app.current_tenant', true), '')::uuid")
         )
         return (cur or "USD").strip()
+
+    async def tenant_config(self) -> TenantConfig:
+        """Tenant business-identity used to shape the assistant's persona dynamically
+        (industry-agnostic: nothing business-specific is hard-coded in the engine)."""
+        row = (await self.session.execute(
+            text("SELECT name, brand_name, industry, base_currency, assistant_name, assistant_prompt "
+                 "FROM tenants WHERE id = NULLIF(current_setting('app.current_tenant', true), '')::uuid")
+        )).first()
+        if row is None:
+            return TenantConfig()
+        return TenantConfig(
+            company_name=row[0], brand_name=row[1], industry=row[2],
+            currency=(row[3] or "USD").strip(), assistant_name=row[4], assistant_prompt=row[5],
+        )
 
     async def user_id_for_phone(self, phone: str) -> uuid.UUID | None:
         return await self.session.scalar(
@@ -265,7 +280,8 @@ class AssistantRepository:
         }
 
     async def top_items(
-        self, start: dt.date, end: dt.date, warehouse_ids: list[uuid.UUID], limit: int
+        self, start: dt.date, end: dt.date, warehouse_ids: list[uuid.UUID], limit: int,
+        category: str | None = None,
     ) -> dict:
         total_qty = func.sum(SalesDaily.qty_sold)
         stmt = (
@@ -279,9 +295,16 @@ class AssistantRepository:
             .order_by(total_qty.desc())
             .limit(max(1, min(limit, _MAX_ROWS)))
         )
+        if category:
+            stmt = stmt.join(Category, Category.id == Product.category_id).where(
+                Category.name.ilike(f"%{category.strip()}%")
+            )
         res = await self.session.execute(stmt)
         items = [{"sku": sku, "name": name, "units_sold": _f(qty)} for sku, name, qty in res.all()]
-        return {"period": f"{start.isoformat()} to {end.isoformat()}", "items": items}
+        out = {"period": f"{start.isoformat()} to {end.isoformat()}", "items": items}
+        if category:
+            out["category"] = category
+        return out
 
     async def branch_summary(
         self, day: dt.date, warehouse_ids: list[uuid.UUID], currency: str
@@ -337,27 +360,6 @@ class AssistantRepository:
             for created, mtype, qty, sku, name, wh, reason in res.all()
         ]
         return {"days": days, "count": len(movements), "movements": movements}
-
-    async def top_motorcycles(
-        self, start: dt.date, end: dt.date, warehouse_ids: list[uuid.UUID], limit: int
-    ) -> dict:
-        total_qty = func.sum(SalesDaily.qty_sold)
-        stmt = (
-            select(Product.sku, Product.name, total_qty)
-            .join(Product, Product.id == SalesDaily.product_id)
-            .join(Category, Category.id == Product.category_id)
-            .where(
-                SalesDaily.sale_date >= start, SalesDaily.sale_date <= end,
-                SalesDaily.warehouse_id.in_(warehouse_ids),
-                Category.name.ilike("%motorcycle%"),
-            )
-            .group_by(Product.sku, Product.name)
-            .order_by(total_qty.desc())
-            .limit(max(1, min(limit, _MAX_ROWS)))
-        )
-        res = await self.session.execute(stmt)
-        items = [{"sku": sku, "name": name, "units_sold": _f(qty)} for sku, name, qty in res.all()]
-        return {"period": f"{start.isoformat()} to {end.isoformat()}", "category": "Motorcycles", "items": items}
 
     async def slow_moving(
         self, start: dt.date, warehouse_ids: list[uuid.UUID], limit: int = 10

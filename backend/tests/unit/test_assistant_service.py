@@ -37,6 +37,10 @@ class FakeRepo:
     async def tenant_currency(self):
         return "ZMW"
 
+    async def tenant_config(self):
+        from app.assistant.domain.prompt import TenantConfig
+        return TenantConfig(company_name="Demo Co", industry="Retail", currency="ZMW")
+
     async def user_id_for_phone(self, phone):
         return self.phone_user
 
@@ -71,8 +75,8 @@ class FakeRepo:
         self.calls["sales_summary"] = (start, end, ids, currency)
         return {"units_sold": 0.0}
 
-    async def top_items(self, start, end, ids, limit):
-        self.calls["top_items"] = (start, end, ids, limit)
+    async def top_items(self, start, end, ids, limit, category=None):
+        self.calls["top_items"] = (start, end, ids, limit, category)
         return {"items": []}
 
     async def branch_summary(self, day, ids, currency):
@@ -82,10 +86,6 @@ class FakeRepo:
     async def stock_movements(self, term, ids, days, limit=20):
         self.calls["stock_movements"] = (term, ids, days)
         return {"movements": []}
-
-    async def top_motorcycles(self, start, end, ids, limit):
-        self.calls["top_motorcycles"] = (start, end, ids, limit)
-        return {"items": []}
 
     async def slow_moving(self, start, ids, limit=10):
         self.calls["slow_moving"] = (start, ids, limit)
@@ -190,10 +190,17 @@ async def test_invalid_date_errors_without_calling_repo():
 async def test_top_selling_defaults_to_last_30_days():
     repo = FakeRepo()
     await _ask(repo, [("get_top_selling_items", {})])
-    start, end, _, limit = repo.calls["top_items"]
+    start, end, _, limit, category = repo.calls["top_items"]
     assert limit == 10
     assert (end - start).days == 30
     assert end == dt.date.today()
+    assert category is None
+
+
+async def test_top_selling_items_passes_category():
+    repo = FakeRepo()
+    await _ask(repo, [("get_top_selling_items", {"category": "Beverages"})])
+    assert repo.calls["top_items"][4] == "Beverages"  # generic category filter, any industry
 
 
 async def test_stock_movements_defaults_to_7_days():
@@ -222,14 +229,12 @@ async def test_branch_performance_defaults_to_30_days():
     assert (end - start).days == 30 and end == dt.date.today() and currency == "ZMW"
 
 
-async def test_top_selling_motorcycles_and_slow_moving_and_daily_summary_dispatch():
+async def test_slow_moving_and_daily_summary_dispatch():
     repo = FakeRepo()
     await _ask(repo, [
-        ("get_top_selling_motorcycles", {"limit": 3}),
         ("get_slow_moving_items", {"days": 14}),
         ("get_daily_summary", {"date": "2026-06-21"}),
     ])
-    assert repo.calls["top_motorcycles"][3] == 3
     assert (dt.date.today() - repo.calls["slow_moving"][0]).days == 14
     assert repo.calls["daily_summary"][0] == dt.date(2026, 6, 21)
 
