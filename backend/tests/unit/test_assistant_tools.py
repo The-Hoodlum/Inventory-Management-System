@@ -40,4 +40,5 @@ def test_system_prompt_grounds_the_model():
     lower = SYSTEM_PROMPT.lower()
     assert "branch" in lower
     assert "estimate" in lower  # revenue must be framed as an estimate
-    assert "only the provided tools" in lower
+    assert "provided tools" in lower  # answer only from tools
+    assert "whatsapp" in lower  # formatting guidance present

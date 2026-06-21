@@ -17,18 +17,22 @@ USER = uuid.uuid4()
 
 
 class FakeRepo:
-    def __init__(self, *, phone_user: uuid.UUID | None = None) -> None:
+    def __init__(self, *, phone_user: uuid.UUID | None = None, roles: list[str] | None = None) -> None:
         self.warehouses = [
             SimpleNamespace(id=LUSAKA, name="Lusaka", code="LUS"),
             SimpleNamespace(id=NDOLA, name="Ndola", code="NDL"),
         ]
         self.phone_user = phone_user
+        self.roles = roles if roles is not None else ["Admin"]
         self.messages: list[dict] = []
         self.calls: dict[str, tuple] = {}
         self.conversations: list[dict] = []
 
     async def accessible_warehouses(self, user_id):
         return self.warehouses
+
+    async def user_roles(self, user_id):
+        return self.roles
 
     async def tenant_currency(self):
         return "ZMW"
@@ -181,6 +185,24 @@ async def test_conversation_is_logged():
     assert roles[-1] == "assistant"
     assert repo.messages[-1]["content"] == "2 items low."
     assert repo.conversations[0]["channel"] == "api"
+
+
+async def test_role_restriction_blocks_disallowed_tool():
+    # A Cashier may do stock + sales, but NOT inventory valuation.
+    repo = FakeRepo(roles=["Cashier"])
+    _, provider = await _ask(repo, [
+        ("get_inventory_valuation", {}),       # disallowed -> error, repo untouched
+        ("get_sales_report", {"date": "2026-06-20"}),  # allowed
+    ])
+    assert "valuation" not in repo.calls
+    assert "role" in provider.results[0][1]["error"].lower()
+    assert "sales_summary" in repo.calls  # the allowed one ran
+
+
+async def test_unrestricted_role_sees_all_tools():
+    repo = FakeRepo(roles=["Branch Manager"])  # not in the restricted map -> full access
+    await _ask(repo, [("get_inventory_valuation", {})])
+    assert "valuation" in repo.calls
 
 
 async def test_system_prompt_grounds_today():

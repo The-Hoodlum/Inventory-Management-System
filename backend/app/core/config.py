@@ -117,6 +117,25 @@ class Settings(BaseSettings):
     assistant_max_tokens: int = 1024
     assistant_timeout_seconds: float = 30.0
     assistant_max_tool_rounds: int = 5  # cap LLM<->tool loops per question
+    # Short-lived in-process cache for repeated stock lookups (cuts duplicate DB hits).
+    assistant_cache_enabled: bool = True
+    assistant_cache_ttl_seconds: int = 30
+
+    # Proactive alerts (OPTIONAL, off by default). When enabled, a scheduler delivers
+    # low-stock, daily-sales, weekly, and PO-approval notifications via the WhatsApp adapter.
+    assistant_alerts_enabled: bool = False
+    assistant_alerts_interval_minutes: int = 60
+    assistant_daily_summary_hour: int = 17      # local closing hour (0-23)
+    assistant_weekly_report_weekday: int = 0    # Monday=0 .. Sunday=6
+
+    # WhatsApp channel adapter. 'mock' records messages (default; for testing).
+    # 'cloud' = Meta WhatsApp Cloud API (needs phone id + token). The assistant engine
+    # is identical for both — only this selector + credentials change.
+    whatsapp_provider: str = "mock"             # mock | cloud
+    whatsapp_phone_number_id: str | None = None
+    whatsapp_access_token: str | None = None
+    whatsapp_verify_token: str | None = None    # for the Meta webhook GET handshake
+    whatsapp_api_base_url: str = "https://graph.facebook.com/v21.0"
 
     # --- External intelligence providers (production feeds; all OPTIONAL, inert by default) ---
     # Each provider is off until enabled; enabling one lets ingest/the scheduler pull
@@ -193,6 +212,11 @@ class Settings(BaseSettings):
     def assistant_configured(self) -> bool:
         """True only when the assistant is enabled AND an OpenAI key is present."""
         return self.assistant_enabled and bool(self.openai_api_key)
+
+    @property
+    def whatsapp_cloud_configured(self) -> bool:
+        """True when the Meta WhatsApp Cloud API has both a phone-number id and token."""
+        return bool(self.whatsapp_phone_number_id and self.whatsapp_access_token)
 
 
 @lru_cache

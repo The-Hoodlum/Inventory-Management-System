@@ -50,6 +50,8 @@ INSERT INTO roles (tenant_id, name, description, is_system) VALUES
     (NULL, 'Warehouse Manager',  'Full branch operations: catalog, stock, purchase orders, reordering', TRUE),
     (NULL, 'Viewer',             'Read-only access',                                  TRUE)
 ON CONFLICT DO NOTHING;
+-- Assistant front-line roles (Branch Manager / Cashier / Mechanic) and their grants
+-- live in assistant_roles.sql so they apply identically to fresh and existing DBs.
 
 -- ----------------------------------------------------------------------------
 -- Mappings

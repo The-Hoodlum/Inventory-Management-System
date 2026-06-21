@@ -12,6 +12,7 @@ import datetime as dt
 import json
 import uuid
 
+from app.assistant.domain.capabilities import allowed_tools
 from app.assistant.domain.tools import SYSTEM_PROMPT, TOOL_SPECS
 from app.assistant.providers import LLMProvider
 from app.assistant.repository import AssistantRepository
@@ -39,6 +40,11 @@ class AssistantService:
                 name_map[w.code.strip().lower()] = w.id
         currency = await self.repo.tenant_currency()
         today = dt.date.today()
+
+        # Role-based tool access: only expose (and accept) the tools this user's roles allow.
+        roles = await self.repo.user_roles(user_id)
+        allowed = allowed_tools(roles)
+        tools = [t for t in TOOL_SPECS if t["function"]["name"] in allowed]
 
         conv = await self.repo.create_conversation(
             tenant_id=tenant_id, user_id=user_id, channel=channel, external_id=external_id
@@ -69,6 +75,8 @@ class AssistantService:
                 tenant_id=tenant_id, conversation_id=conv.id, role="tool",
                 tool_name=name, content=json.dumps(args, default=str)[:400],
             )
+            if name not in allowed:  # defence in depth — the model only saw allowed tools
+                return {"error": "That action isn't available for your role."}
             try:
                 return await self._dispatch(name, args, resolve_branch, parse_date, today, currency)
             except Exception as exc:  # noqa: BLE001 — hand the error back to the model
@@ -79,7 +87,7 @@ class AssistantService:
         system = f"{SYSTEM_PROMPT}\n\nToday's date is {today.isoformat()} ({today:%A}). " \
                  "Use this for 'today', 'yesterday', and any relative date the user gives."
         run = await self.provider.run(
-            system=system, user=question, tools=TOOL_SPECS,
+            system=system, user=question, tools=tools,
             tool_executor=tool_executor, max_rounds=self.max_tool_rounds,
         )
         await self.repo.add_message(

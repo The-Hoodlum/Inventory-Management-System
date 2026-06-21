@@ -78,7 +78,8 @@ jobs:
             database/sql/inventory_import.sql \
             database/sql/import_rollback.sql \
             database/sql/product_profile_flags.sql \
-            database/sql/assistant.sql ; do
+            database/sql/assistant.sql \
+            database/sql/assistant_roles.sql ; do
             echo "applying $f"
             psql -v ON_ERROR_STOP=1 -f "$f"
           done

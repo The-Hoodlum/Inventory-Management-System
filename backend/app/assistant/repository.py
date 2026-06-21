@@ -14,6 +14,8 @@ import uuid
 from sqlalchemy import Numeric, cast, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.assistant.cache import stock_cache
+from app.core.config import settings
 from app.models import (
     AssistantConversation,
     AssistantMessage,
@@ -21,8 +23,10 @@ from app.models import (
     Product,
     PurchaseOrder,
     ReorderRecommendation,
+    Role,
     SalesDaily,
     Supplier,
+    UserRole,
     UserWarehouseAccess,
     Warehouse,
     WhatsAppIdentity,
@@ -67,6 +71,15 @@ class AssistantRepository:
             select(WhatsAppIdentity.user_id).where(WhatsAppIdentity.phone == phone)
         )
 
+    async def user_roles(self, user_id: uuid.UUID) -> list[str]:
+        """Role names assigned to a user — used to gate which tools the assistant exposes."""
+        res = await self.session.execute(
+            select(Role.name)
+            .join(UserRole, UserRole.role_id == Role.id)
+            .where(UserRole.user_id == user_id)
+        )
+        return [r for (r,) in res.all()]
+
     # ------------------------------ logging ---------------------------- #
     async def create_conversation(
         self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, channel: str, external_id: str | None
@@ -92,6 +105,13 @@ class AssistantRepository:
 
     # ------------------------------- stock ----------------------------- #
     async def stock_by_item(self, term: str, warehouse_ids: list[uuid.UUID]) -> dict:
+        # Short-lived cache: repeated identical stock lookups (common in a chat) skip the DB.
+        cache = stock_cache() if settings.assistant_cache_enabled else None
+        cache_key = ("stock", term.strip().lower(), tuple(sorted(str(w) for w in warehouse_ids)))
+        if cache is not None:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return cached
         like = f"%{term.strip()}%"
         stmt = (
             select(Product.sku, Product.name, Warehouse.name, Inventory.qty_on_hand, Inventory.qty_available)
@@ -111,7 +131,10 @@ class AssistantRepository:
             entry["by_branch"].append({"branch": branch, "available": _f(available), "on_hand": _f(on_hand)})
             entry["total_available"] += _f(available)
         out = list(items.values())[:_MAX_ROWS]
-        return {"search": term, "matched_items": len(items), "items": out}
+        result = {"search": term, "matched_items": len(items), "items": out}
+        if cache is not None:
+            cache.set(cache_key, result)
+        return result
 
     async def low_stock(self, warehouse_ids: list[uuid.UUID]) -> dict:
         stmt = (
