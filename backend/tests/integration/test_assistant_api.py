@@ -96,3 +96,28 @@ async def test_whatsapp_mock_rejects_unregistered_number(client):
     body = r.json()
     assert body["matched_user"] is False
     assert body["ok"] is False
+
+
+async def test_meta_webhook_verify_rejected_without_token(client):
+    # No WHATSAPP_VERIFY_TOKEN configured in tests -> handshake must fail.
+    r = await client.get(
+        "/api/v1/assistant/whatsapp/webhook",
+        params={"hub.mode": "subscribe", "hub.verify_token": "wrong", "hub.challenge": "123"},
+    )
+    assert r.status_code == 403, r.text
+
+
+async def test_meta_webhook_post_is_unauthenticated_and_inert(client):
+    # Unauthenticated (Meta calls it). Inert without WHATSAPP_DEFAULT_TENANT_ID -> acknowledged.
+    text_msg = {"entry": [{"changes": [{"value": {"messages": [
+        {"from": "+260999", "type": "text", "text": {"body": "hi"}}
+    ]}}]}]}
+    r = await client.post("/api/v1/assistant/whatsapp/webhook", json=text_msg)
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] in ("received", "processed")
+    # A status callback (no message) is ignored.
+    r2 = await client.post(
+        "/api/v1/assistant/whatsapp/webhook",
+        json={"entry": [{"changes": [{"value": {"statuses": [{"status": "read"}]}}]}]},
+    )
+    assert r2.status_code == 200 and r2.json()["status"] == "ignored"
