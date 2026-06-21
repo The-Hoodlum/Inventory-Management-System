@@ -18,22 +18,30 @@ logger = get_logger(__name__)
 
 @contextlib.asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Start the daily intelligence scheduler when enabled; stop it on shutdown.
-    Off by default, so this is a no-op in tests and normal runs."""
-    task: asyncio.Task | None = None
-    stop: asyncio.Event | None = None
+    """Start enabled background schedulers (intelligence ingest, assistant alerts) and
+    stop them on shutdown. All off by default, so this is a no-op in tests/normal runs."""
+    stops: list[asyncio.Event] = []
+    tasks: list[asyncio.Task] = []
     if settings.intel_scheduler_enabled:
         from app.db.session import AsyncSessionLocal
         from app.intelligence.scheduler import IntelligenceScheduler
 
         stop = asyncio.Event()
-        scheduler = IntelligenceScheduler(AsyncSessionLocal, settings)
-        task = asyncio.create_task(scheduler.loop(stop))
+        stops.append(stop)
+        tasks.append(asyncio.create_task(IntelligenceScheduler(AsyncSessionLocal, settings).loop(stop)))
+    if settings.assistant_alerts_enabled:
+        from app.assistant.scheduler import AlertScheduler
+        from app.db.session import AsyncSessionLocal
+
+        stop = asyncio.Event()
+        stops.append(stop)
+        tasks.append(asyncio.create_task(AlertScheduler(AsyncSessionLocal, settings).loop(stop)))
     try:
         yield
     finally:
-        if task and stop:
+        for stop in stops:
             stop.set()
+        for task in tasks:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task

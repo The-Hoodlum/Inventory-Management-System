@@ -61,6 +61,16 @@ class AssistantRepository:
         allwh = await self.session.execute(select(Warehouse).order_by(Warehouse.name))
         return list(allwh.scalars().all())
 
+    async def all_warehouse_ids(self) -> list[uuid.UUID]:
+        """Every warehouse id in the current tenant (for system-wide alerts)."""
+        res = await self.session.execute(select(Warehouse.id))
+        return [wid for (wid,) in res.all()]
+
+    async def alert_recipients(self) -> list[str]:
+        """Phone numbers registered for the assistant in the current tenant (alert targets)."""
+        res = await self.session.execute(select(WhatsAppIdentity.phone))
+        return [p for (p,) in res.all()]
+
     async def tenant_currency(self) -> str:
         cur = await self.session.scalar(
             text("SELECT base_currency FROM tenants WHERE id = "

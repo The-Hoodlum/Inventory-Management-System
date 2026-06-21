@@ -136,6 +136,10 @@ class Settings(BaseSettings):
     whatsapp_access_token: str | None = None
     whatsapp_verify_token: str | None = None    # for the Meta webhook GET handshake
     whatsapp_api_base_url: str = "https://graph.facebook.com/v21.0"
+    # Single-tenant inbound routing for the Meta webhook (one business = one tenant).
+    # Unset -> the webhook acknowledges but does not route (multi-tenant phone->tenant
+    # mapping is a later step). The chat /ask path is unaffected by this.
+    whatsapp_default_tenant_id: str | None = None
 
     # --- External intelligence providers (production feeds; all OPTIONAL, inert by default) ---
     # Each provider is off until enabled; enabling one lets ingest/the scheduler pull
