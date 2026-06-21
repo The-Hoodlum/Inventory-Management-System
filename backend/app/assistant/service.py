@@ -138,6 +138,29 @@ class AssistantService:
         if name == "get_branch_summary":
             d, derr = parse_date(args.get("date"), today)
             return {"error": derr} if derr else await self.repo.branch_summary(d, ids, currency)
+        if name == "get_stock_movements":
+            days = int(args.get("days") or 7)
+            return await self.repo.stock_movements(args.get("item_name"), ids, days)
+        if name == "get_top_selling_motorcycles":
+            end, e2 = parse_date(args.get("end_date"), today)
+            start, e1 = parse_date(args.get("start_date"), (end or today) - dt.timedelta(days=30))
+            if e1 or e2:
+                return {"error": e1 or e2}
+            return await self.repo.top_motorcycles(start, end, ids, int(args.get("limit") or 10))
+        if name == "get_slow_moving_items":
+            days = int(args.get("days") or 30)
+            return await self.repo.slow_moving(today - dt.timedelta(days=days), ids, int(args.get("limit") or 10))
+        if name == "get_pending_purchase_requests":
+            return await self.repo.pending_purchase_requests(ids)
+        if name == "get_branch_performance":
+            end, e2 = parse_date(args.get("end_date"), today)
+            start, e1 = parse_date(args.get("start_date"), (end or today) - dt.timedelta(days=30))
+            if e1 or e2:
+                return {"error": e1 or e2}
+            return await self.repo.branch_performance(start, end, ids, currency)
+        if name == "get_daily_summary":
+            d, derr = parse_date(args.get("date"), today)
+            return {"error": derr} if derr else await self.repo.daily_summary(d, ids, currency)
         if name == "get_assembly_status":
             return {"available": False,
                     "message": "Assembly status is not tracked in the system yet."}

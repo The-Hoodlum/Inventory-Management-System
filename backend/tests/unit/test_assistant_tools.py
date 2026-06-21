@@ -8,6 +8,9 @@ EXPECTED = {
     "get_reorder_recommendations", "get_inventory_valuation", "get_purchase_orders",
     "get_sales_report", "get_sales_between_dates", "get_top_selling_items",
     "get_fast_moving_items", "get_branch_summary", "get_assembly_status",
+    # added in Wave B
+    "get_stock_movements", "get_top_selling_motorcycles", "get_slow_moving_items",
+    "get_pending_purchase_requests", "get_branch_performance", "get_daily_summary",
 }
 
 

@@ -19,12 +19,14 @@ from app.core.config import settings
 from app.models import (
     AssistantConversation,
     AssistantMessage,
+    Category,
     Inventory,
     Product,
     PurchaseOrder,
     ReorderRecommendation,
     Role,
     SalesDaily,
+    StockMovement,
     Supplier,
     UserRole,
     UserWarehouseAccess,
@@ -299,3 +301,158 @@ class AssistantRepository:
             for n in names
         ]
         return {"date": day.isoformat(), "currency": currency, "by_branch": by_branch}
+
+    # ------------------------- movements / analytics ------------------- #
+    async def stock_movements(
+        self, term: str | None, warehouse_ids: list[uuid.UUID], days: int, limit: int = 20
+    ) -> dict:
+        cutoff = dt.datetime.now(dt.UTC) - dt.timedelta(days=max(1, days))
+        stmt = (
+            select(StockMovement.created_at, StockMovement.movement_type, StockMovement.quantity,
+                   Product.sku, Product.name, Warehouse.name, StockMovement.reason)
+            .join(Product, Product.id == StockMovement.product_id)
+            .join(Warehouse, Warehouse.id == StockMovement.warehouse_id)
+            .where(StockMovement.warehouse_id.in_(warehouse_ids), StockMovement.created_at >= cutoff)
+            .order_by(StockMovement.created_at.desc())
+            .limit(min(limit, _MAX_ROWS))
+        )
+        if term:
+            like = f"%{term.strip()}%"
+            stmt = stmt.where(or_(Product.name.ilike(like), Product.sku.ilike(like)))
+        res = await self.session.execute(stmt)
+        movements = [
+            {"date": created.date().isoformat(), "type": mtype, "qty": _f(qty),
+             "sku": sku, "item": name, "branch": wh, "reason": reason}
+            for created, mtype, qty, sku, name, wh, reason in res.all()
+        ]
+        return {"days": days, "count": len(movements), "movements": movements}
+
+    async def top_motorcycles(
+        self, start: dt.date, end: dt.date, warehouse_ids: list[uuid.UUID], limit: int
+    ) -> dict:
+        total_qty = func.sum(SalesDaily.qty_sold)
+        stmt = (
+            select(Product.sku, Product.name, total_qty)
+            .join(Product, Product.id == SalesDaily.product_id)
+            .join(Category, Category.id == Product.category_id)
+            .where(
+                SalesDaily.sale_date >= start, SalesDaily.sale_date <= end,
+                SalesDaily.warehouse_id.in_(warehouse_ids),
+                Category.name.ilike("%motorcycle%"),
+            )
+            .group_by(Product.sku, Product.name)
+            .order_by(total_qty.desc())
+            .limit(max(1, min(limit, _MAX_ROWS)))
+        )
+        res = await self.session.execute(stmt)
+        items = [{"sku": sku, "name": name, "units_sold": _f(qty)} for sku, name, qty in res.all()]
+        return {"period": f"{start.isoformat()} to {end.isoformat()}", "category": "Motorcycles", "items": items}
+
+    async def slow_moving(
+        self, start: dt.date, warehouse_ids: list[uuid.UUID], limit: int = 10
+    ) -> dict:
+        sold = (
+            select(SalesDaily.product_id, func.sum(SalesDaily.qty_sold).label("sold"))
+            .where(SalesDaily.sale_date >= start, SalesDaily.warehouse_id.in_(warehouse_ids))
+            .group_by(SalesDaily.product_id)
+        ).subquery()
+        on_hand = func.sum(Inventory.qty_on_hand)
+        units = func.coalesce(func.max(sold.c.sold), 0)
+        stmt = (
+            select(Product.sku, Product.name, on_hand, units)
+            .join(Product, Product.id == Inventory.product_id)
+            .outerjoin(sold, sold.c.product_id == Product.id)
+            .where(Inventory.warehouse_id.in_(warehouse_ids), Product.deleted_at.is_(None))
+            .group_by(Product.sku, Product.name)
+            .having(on_hand > 0)
+            .order_by(units.asc(), on_hand.desc())
+            .limit(min(limit, _MAX_ROWS))
+        )
+        res = await self.session.execute(stmt)
+        items = [
+            {"sku": sku, "name": name, "on_hand": _f(stock), "units_sold_in_period": _f(u)}
+            for sku, name, stock, u in res.all()
+        ]
+        return {"since": start.isoformat(), "count": len(items), "items": items}
+
+    async def pending_purchase_requests(self, warehouse_ids: list[uuid.UUID]) -> dict:
+        stmt = (
+            select(PurchaseOrder.po_number, PurchaseOrder.status, Warehouse.name,
+                   PurchaseOrder.total, PurchaseOrder.currency, Supplier.name, PurchaseOrder.created_at)
+            .join(Warehouse, Warehouse.id == PurchaseOrder.warehouse_id)
+            .join(Supplier, Supplier.id == PurchaseOrder.supplier_id)
+            .where(
+                PurchaseOrder.warehouse_id.in_(warehouse_ids),
+                PurchaseOrder.status.in_(("draft", "pending_approval")),
+            )
+            .order_by(PurchaseOrder.created_at.desc())
+            .limit(_MAX_ROWS)
+        )
+        res = await self.session.execute(stmt)
+        requests = [
+            {"po_number": po, "status": st, "branch": wh, "total": _f(total),
+             "currency": ccy, "supplier": sup, "created_at": created.date().isoformat()}
+            for po, st, wh, total, ccy, sup, created in res.all()
+        ]
+        return {"count": len(requests), "requests": requests}
+
+    async def branch_performance(
+        self, start: dt.date, end: dt.date, warehouse_ids: list[uuid.UUID], currency: str
+    ) -> dict:
+        # Sales (units + estimated revenue) per branch over the period.
+        sales = await self.session.execute(
+            select(Warehouse.name, func.sum(SalesDaily.qty_sold),
+                   func.sum(SalesDaily.qty_sold * Product.selling_price))
+            .join(Product, Product.id == SalesDaily.product_id)
+            .join(Warehouse, Warehouse.id == SalesDaily.warehouse_id)
+            .where(SalesDaily.sale_date >= start, SalesDaily.sale_date <= end,
+                   SalesDaily.warehouse_id.in_(warehouse_ids))
+            .group_by(Warehouse.name)
+        )
+        sold = {n: (_f(u), _f(r)) for n, u, r in sales.all()}
+        # Stock value at cost per branch.
+        val = await self.session.execute(
+            select(Warehouse.name, func.coalesce(func.sum(Inventory.qty_on_hand * Product.cost_price), 0))
+            .join(Product, Product.id == Inventory.product_id)
+            .join(Warehouse, Warehouse.id == Inventory.warehouse_id)
+            .where(Product.deleted_at.is_(None), Inventory.warehouse_id.in_(warehouse_ids))
+            .group_by(Warehouse.name)
+        )
+        value = {n: _f(v) for n, v in val.all()}
+        # Low-stock line count per branch.
+        low = await self.session.execute(
+            select(Warehouse.name, func.count(Inventory.id))
+            .join(Product, Product.id == Inventory.product_id)
+            .join(Warehouse, Warehouse.id == Inventory.warehouse_id)
+            .where(Product.deleted_at.is_(None), Inventory.warehouse_id.in_(warehouse_ids),
+                   Product.reorder_point.isnot(None),
+                   Inventory.qty_available <= cast(Product.reorder_point, Numeric))
+            .group_by(Warehouse.name)
+        )
+        low_counts = {n: int(c) for n, c in low.all()}
+        names = sorted(set(sold) | set(value) | set(low_counts))
+        by_branch = [
+            {"branch": n, "units_sold": sold.get(n, (0.0, 0.0))[0],
+             "estimated_revenue": round(sold.get(n, (0.0, 0.0))[1], 2),
+             "stock_value": round(value.get(n, 0.0), 2), "low_stock_items": low_counts.get(n, 0)}
+            for n in names
+        ]
+        return {
+            "period": start.isoformat() if start == end else f"{start.isoformat()} to {end.isoformat()}",
+            "currency": currency, "revenue_is_estimate": True, "by_branch": by_branch,
+        }
+
+    async def daily_summary(
+        self, day: dt.date, warehouse_ids: list[uuid.UUID], currency: str
+    ) -> dict:
+        totals = await self.sales_summary(day, day, warehouse_ids, currency)
+        branches = await self.branch_summary(day, warehouse_ids, currency)
+        low = await self.low_stock(warehouse_ids)
+        pending = await self.pending_purchase_requests(warehouse_ids)
+        return {
+            "date": day.isoformat(), "currency": currency,
+            "units_sold": totals["units_sold"], "estimated_revenue": totals["estimated_revenue"],
+            "revenue_is_estimate": True, "top_item": totals["top_item"], "best_branch": totals["best_branch"],
+            "low_stock_count": low["count"], "pending_purchase_requests": pending["count"],
+            "by_branch": branches["by_branch"],
+        }

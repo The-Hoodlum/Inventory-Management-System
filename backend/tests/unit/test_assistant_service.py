@@ -79,6 +79,30 @@ class FakeRepo:
         self.calls["branch_summary"] = (day, ids, currency)
         return {"by_branch": []}
 
+    async def stock_movements(self, term, ids, days, limit=20):
+        self.calls["stock_movements"] = (term, ids, days)
+        return {"movements": []}
+
+    async def top_motorcycles(self, start, end, ids, limit):
+        self.calls["top_motorcycles"] = (start, end, ids, limit)
+        return {"items": []}
+
+    async def slow_moving(self, start, ids, limit=10):
+        self.calls["slow_moving"] = (start, ids, limit)
+        return {"items": []}
+
+    async def pending_purchase_requests(self, ids):
+        self.calls["pending_purchase_requests"] = (ids,)
+        return {"count": 0, "requests": []}
+
+    async def branch_performance(self, start, end, ids, currency):
+        self.calls["branch_performance"] = (start, end, ids, currency)
+        return {"by_branch": []}
+
+    async def daily_summary(self, day, ids, currency):
+        self.calls["daily_summary"] = (day, ids, currency)
+        return {"by_branch": []}
+
 
 class ScriptedProvider(LLMProvider):
     """Calls the executor for a fixed plan of (tool, args), then returns `answer`."""
@@ -166,6 +190,38 @@ async def test_top_selling_defaults_to_last_30_days():
     assert limit == 10
     assert (end - start).days == 30
     assert end == dt.date.today()
+
+
+async def test_stock_movements_defaults_to_7_days():
+    repo = FakeRepo()
+    await _ask(repo, [("get_stock_movements", {"item_name": "HLX"})])
+    term, ids, days = repo.calls["stock_movements"]
+    assert term == "HLX" and ids == [LUSAKA, NDOLA] and days == 7
+
+
+async def test_pending_purchase_requests_dispatches():
+    repo = FakeRepo()
+    await _ask(repo, [("get_pending_purchase_requests", {})])
+    assert repo.calls["pending_purchase_requests"] == ([LUSAKA, NDOLA],)
+
+
+async def test_branch_performance_defaults_to_30_days():
+    repo = FakeRepo()
+    await _ask(repo, [("get_branch_performance", {})])
+    start, end, ids, currency = repo.calls["branch_performance"]
+    assert (end - start).days == 30 and end == dt.date.today() and currency == "ZMW"
+
+
+async def test_top_selling_motorcycles_and_slow_moving_and_daily_summary_dispatch():
+    repo = FakeRepo()
+    await _ask(repo, [
+        ("get_top_selling_motorcycles", {"limit": 3}),
+        ("get_slow_moving_items", {"days": 14}),
+        ("get_daily_summary", {"date": "2026-06-21"}),
+    ])
+    assert repo.calls["top_motorcycles"][3] == 3
+    assert (dt.date.today() - repo.calls["slow_moving"][0]).days == 14
+    assert repo.calls["daily_summary"][0] == dt.date(2026, 6, 21)
 
 
 async def test_assembly_status_is_honest_not_fabricated():
