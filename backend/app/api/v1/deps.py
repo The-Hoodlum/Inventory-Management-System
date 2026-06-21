@@ -25,6 +25,7 @@ from app.advisor.service import AdvisorService
 from app.assistant.providers import build_llm_provider as build_assistant_provider
 from app.assistant.repository import AssistantRepository
 from app.assistant.service import AssistantService
+from app.assistant.whatsapp import build_whatsapp_adapter
 from app.container.repository import ContainerRepository
 from app.container.service import ContainerService
 from app.core.config import settings
@@ -39,6 +40,7 @@ from app.forecast.repository import ForecastRepository
 from app.forecast.service import ForecastService
 from app.imports.repository import ImportRepository
 from app.imports.service import ImportService
+from app.integrations.whatsapp.service import WhatsAppChannelService
 from app.intelligence.providers.registry import build_free_providers
 from app.intelligence.repository import IntelligenceRepository
 from app.intelligence.service import IntelligenceService
@@ -264,6 +266,18 @@ def get_assistant_service(db: AsyncSession = Depends(get_db)) -> AssistantServic
         AssistantRepository(db),
         build_assistant_provider(settings),
         max_tool_rounds=settings.assistant_max_tool_rounds,
+    )
+
+
+def get_whatsapp_channel_service(db: AsyncSession = Depends(get_db)) -> WhatsAppChannelService:
+    # Thin WhatsApp transport over the single AssistantService brain. Selects the mock or
+    # Meta Cloud adapter by config; inbound routing is inert until WHATSAPP_DEFAULT_TENANT_ID.
+    return WhatsAppChannelService(
+        assistant=get_assistant_service(db),
+        adapter=build_whatsapp_adapter(settings),
+        session=db,
+        default_tenant_id=settings.whatsapp_default_tenant_id,
+        verify_token=settings.whatsapp_verify_token,
     )
 
 

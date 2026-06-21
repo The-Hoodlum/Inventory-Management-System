@@ -95,6 +95,10 @@ class FakeRepo:
         self.calls["pending_purchase_requests"] = (ids,)
         return {"count": 0, "requests": []}
 
+    async def reorder_proposal(self, ids, currency):
+        self.calls["reorder_proposal"] = (ids, currency)
+        return {"is_proposal": True, "count": 0, "items": []}
+
     async def branch_performance(self, start, end, ids, currency):
         self.calls["branch_performance"] = (start, end, ids, currency)
         return {"by_branch": []}
@@ -203,6 +207,12 @@ async def test_pending_purchase_requests_dispatches():
     repo = FakeRepo()
     await _ask(repo, [("get_pending_purchase_requests", {})])
     assert repo.calls["pending_purchase_requests"] == ([LUSAKA, NDOLA],)
+
+
+async def test_create_reorder_proposal_is_read_only_dispatch():
+    repo = FakeRepo()
+    await _ask(repo, [("create_reorder_proposal", {"branch": "Lusaka"})])
+    assert repo.calls["reorder_proposal"] == ([LUSAKA], "ZMW")
 
 
 async def test_branch_performance_defaults_to_30_days():

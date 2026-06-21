@@ -9,6 +9,7 @@ can be handed straight to the LLM.
 from __future__ import annotations
 
 import datetime as dt
+import math
 import uuid
 
 from sqlalchemy import Numeric, cast, func, or_, select, text
@@ -405,6 +406,57 @@ class AssistantRepository:
             for po, st, wh, total, ccy, sup, created in res.all()
         ]
         return {"count": len(requests), "requests": requests}
+
+    async def reorder_proposal(self, warehouse_ids: list[uuid.UUID], currency: str) -> dict:
+        """READ-ONLY reorder proposal: for items at/below reorder point, size an order from
+        reorder point + safety stock vs available, honour MOQ, round up to full cartons, and
+        attach estimated cost, supplier, and lead time. Writes nothing — staff act on it."""
+        stmt = (
+            select(Product.sku, Product.name, Warehouse.name, Inventory.qty_available,
+                   Product.reorder_point, Product.safety_stock, Product.moq,
+                   Product.units_per_carton, Product.lead_time_days, Product.cost_price,
+                   Supplier.name, Supplier.default_lead_time_days)
+            .join(Product, Product.id == Inventory.product_id)
+            .join(Warehouse, Warehouse.id == Inventory.warehouse_id)
+            .outerjoin(Supplier, Supplier.id == Product.primary_supplier_id)
+            .where(
+                Product.deleted_at.is_(None),
+                Inventory.warehouse_id.in_(warehouse_ids),
+                Product.reorder_point.isnot(None),
+                Inventory.qty_available <= cast(Product.reorder_point, Numeric),
+            )
+            .order_by(Inventory.qty_available)
+            .limit(_MAX_ROWS)
+        )
+        res = await self.session.execute(stmt)
+        items: list[dict] = []
+        total = 0.0
+        for sku, name, branch, avail, rop, safety, moq, upc, lead, cost, sup, sup_lead in res.all():
+            avail = _f(avail)
+            rop = int(rop or 0)
+            safety = int(safety or 0)
+            moq = int(moq or 0)
+            upc = max(1, int(upc or 1))
+            deficit = max(0.0, (rop + safety) - avail)
+            cartons = math.ceil(max(deficit, moq) / upc) if (deficit > 0 or moq > 0) else 0
+            order_qty = cartons * upc
+            est_cost = order_qty * _f(cost)
+            total += est_cost
+            items.append({
+                "sku": sku, "name": name, "branch": branch, "available": avail,
+                "reorder_point": rop, "safety_stock": safety, "suggested_qty": order_qty,
+                "cartons": cartons, "estimated_cost": round(est_cost, 2),
+                "supplier": sup, "lead_time_days": int(sup_lead or lead or 0),
+                "reason": f"available {avail:g} at/below reorder {rop} (+safety {safety}); "
+                          f"MOQ {moq}, {upc}/carton",
+            })
+        return {
+            "currency": currency, "count": len(items), "estimated_total_cost": round(total, 2),
+            "is_proposal": True,
+            "note": "Read-only proposal — no purchase order created. Forecast and container "
+                    "utilisation are not yet factored in.",
+            "items": items,
+        }
 
     async def branch_performance(
         self, start: dt.date, end: dt.date, warehouse_ids: list[uuid.UUID], currency: str

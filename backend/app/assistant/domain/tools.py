@@ -97,8 +97,13 @@ TOOL_SPECS: list[dict] = [
         "One-shot daily snapshot: units sold, estimated revenue, top item, low-stock count and pending "
         "purchase requests, broken down by branch — all in a single call.",
         {"date": {"type": "string", "description": "Date YYYY-MM-DD. Omit or 'today' for today."}, **_BRANCH}),
+    _fn("create_reorder_proposal",
+        "Propose what to reorder for a branch (READ-ONLY — creates nothing). For items at/below "
+        "reorder point it suggests an order quantity rounded to full cartons, with estimated cost, "
+        "supplier, and lead time; factors in reorder point, safety stock, MOQ, and carton size.",
+        {**_BRANCH}),
     _fn("get_assembly_status",
-        "Motorcycle assembly status. (Assembly is not yet tracked in this system.)",
+        "Motorcycle assembly / unassembled-bike status. (Assembly is NOT tracked in this system.)",
         {**_BRANCH}),
 ]
 

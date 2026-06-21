@@ -11,6 +11,7 @@ from app.dashboard.api import router as dashboard_router
 from app.demand.api import router as demand_router
 from app.forecast.api import router as forecast_router
 from app.imports.api import router as imports_router
+from app.integrations.whatsapp.router import router as whatsapp_router
 from app.intelligence.api import router as intelligence_router
 from app.procurement.api import router as procurement_router
 from app.reorder.api import purchase_order_router, reorder_router
@@ -34,6 +35,7 @@ api_router.include_router(forecast_router, prefix="/forecast", tags=["forecast"]
 api_router.include_router(container_router, prefix="/container", tags=["container"])
 api_router.include_router(advisor_router, prefix="/advisor", tags=["advisor"])
 api_router.include_router(assistant_router, prefix="/assistant", tags=["assistant"])
+api_router.include_router(whatsapp_router, prefix="/whatsapp", tags=["whatsapp"])
 api_router.include_router(imports_router, prefix="/imports", tags=["imports"])
 api_router.include_router(intelligence_router, prefix="/intelligence", tags=["intelligence"])
 api_router.include_router(users.router, prefix="/users", tags=["users"])

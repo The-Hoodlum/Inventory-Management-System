@@ -152,6 +152,8 @@ class AssistantService:
             return await self.repo.slow_moving(today - dt.timedelta(days=days), ids, int(args.get("limit") or 10))
         if name == "get_pending_purchase_requests":
             return await self.repo.pending_purchase_requests(ids)
+        if name == "create_reorder_proposal":
+            return await self.repo.reorder_proposal(ids, currency)
         if name == "get_branch_performance":
             end, e2 = parse_date(args.get("end_date"), today)
             start, e1 = parse_date(args.get("start_date"), (end or today) - dt.timedelta(days=30))

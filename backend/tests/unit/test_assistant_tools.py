@@ -11,6 +11,8 @@ EXPECTED = {
     # added in Wave B
     "get_stock_movements", "get_top_selling_motorcycles", "get_slow_moving_items",
     "get_pending_purchase_requests", "get_branch_performance", "get_daily_summary",
+    # propose-only reorder (read-only)
+    "create_reorder_proposal",
 }
 
 

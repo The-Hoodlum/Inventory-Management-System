@@ -133,9 +133,10 @@ class Settings(BaseSettings):
     # is identical for both — only this selector + credentials change.
     whatsapp_provider: str = "mock"             # mock | cloud
     whatsapp_phone_number_id: str | None = None
+    whatsapp_business_account_id: str | None = None
     whatsapp_access_token: str | None = None
     whatsapp_verify_token: str | None = None    # for the Meta webhook GET handshake
-    whatsapp_api_base_url: str = "https://graph.facebook.com/v21.0"
+    whatsapp_api_base_url: str = "https://graph.facebook.com/v23.0"
     # Single-tenant inbound routing for the Meta webhook (one business = one tenant).
     # Unset -> the webhook acknowledges but does not route (multi-tenant phone->tenant
     # mapping is a later step). The chat /ask path is unaffected by this.
