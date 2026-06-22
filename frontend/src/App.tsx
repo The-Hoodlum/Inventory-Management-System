@@ -14,11 +14,13 @@ import LoginPage from "@/pages/LoginPage";
 import MovementsPage from "@/pages/MovementsPage";
 import NewPurchaseOrderPage from "@/pages/NewPurchaseOrderPage";
 import NotFoundPage from "@/pages/NotFoundPage";
+import OrderRequestsPage from "@/pages/OrderRequestsPage";
 import ProductsPage from "@/pages/ProductsPage";
 import PurchaseOrderDetailPage from "@/pages/PurchaseOrderDetailPage";
 import PurchaseOrdersPage from "@/pages/PurchaseOrdersPage";
 import ReorderPage from "@/pages/ReorderPage";
 import ReportsPage from "@/pages/ReportsPage";
+import SettingsPage from "@/pages/SettingsPage";
 import SupplierScoresPage from "@/pages/SupplierScoresPage";
 import SuppliersPage from "@/pages/SuppliersPage";
 import UsersPage from "@/pages/UsersPage";
@@ -46,6 +48,7 @@ export default function App() {
         <Route path="/intelligence" element={<IntelligencePage />} />
         <Route path="/advisor" element={<AdvisorPage />} />
         <Route path="/supplier-scores" element={<SupplierScoresPage />} />
+        <Route path="/order-requests" element={<OrderRequestsPage />} />
         <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/import/inventory" element={<ImportInventoryPage />} />
         <Route path="/imports" element={<ImportHistoryPage />} />
@@ -55,6 +58,7 @@ export default function App() {
         <Route path="/suppliers" element={<SuppliersPage />} />
         <Route path="/warehouses" element={<WarehousesPage />} />
         <Route path="/users" element={<UsersPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
       </Route>
       <Route path="*" element={<NotFoundPage />} />
     </Routes>

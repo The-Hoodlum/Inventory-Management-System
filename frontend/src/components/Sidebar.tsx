@@ -3,6 +3,7 @@ import {
   Award,
   BarChart3,
   Boxes,
+  ClipboardList,
   Container,
   FileText,
   History,
@@ -10,6 +11,7 @@ import {
   LineChart,
   Package,
   RefreshCcw,
+  Settings,
   ShieldAlert,
   Sparkles,
   Truck,
@@ -39,6 +41,7 @@ const NAV: NavItem[] = [
   { to: "/intelligence", label: "Intelligence", icon: ShieldAlert, permission: "reorder.read" },
   { to: "/advisor", label: "AI Analyst", icon: Sparkles, permission: "reorder.read" },
   { to: "/supplier-scores", label: "Supplier Scores", icon: Award, permission: "reorder.read" },
+  { to: "/order-requests", label: "Order Requests", icon: ClipboardList, permission: "order_request.read" },
   { to: "/inventory", label: "Inventory", icon: Boxes, permission: "inventory.read" },
   { to: "/movements", label: "Stock Movements", icon: History, permission: "inventory.read" },
   { to: "/products", label: "Products", icon: Package, permission: "product.read" },
@@ -47,6 +50,7 @@ const NAV: NavItem[] = [
   { to: "/suppliers", label: "Suppliers", icon: Truck, permission: "supplier.read" },
   { to: "/warehouses", label: "Warehouses", icon: Warehouse, permission: "inventory.read" },
   { to: "/users", label: "Users", icon: Users, permission: "user.manage" },
+  { to: "/settings", label: "Settings", icon: Settings, permission: "settings.manage" },
 ];
 
 export function Sidebar() {

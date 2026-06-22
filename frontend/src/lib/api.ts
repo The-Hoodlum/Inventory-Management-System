@@ -145,6 +145,7 @@ export const api = {
   post: <T>(path: string, body?: unknown, auth = true) =>
     request<T>(path, { method: "POST", body, auth }),
   patch: <T>(path: string, body?: unknown) => request<T>(path, { method: "PATCH", body }),
+  put: <T>(path: string, body?: unknown) => request<T>(path, { method: "PUT", body }),
   del: <T>(path: string) => request<T>(path, { method: "DELETE" }),
   upload: <T>(path: string, form: FormData) => request<T>(path, { method: "POST", body: form }),
 };
