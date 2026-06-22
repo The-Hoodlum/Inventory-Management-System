@@ -30,6 +30,7 @@ from app.container.repository import ContainerRepository
 from app.container.service import ContainerService
 from app.core.config import settings
 from app.core.exceptions import AuthenticationError, PermissionDeniedError
+from app.core.feature_flags import is_enabled
 from app.core.security import TokenTypeError, decode_access_token
 from app.dashboard.repository import DashboardRepository
 from app.dashboard.service import DashboardService
@@ -45,6 +46,8 @@ from app.intelligence.providers.registry import build_free_providers
 from app.intelligence.repository import IntelligenceRepository
 from app.intelligence.service import IntelligenceService
 from app.intelligence.sources.factory import build_external_source
+from app.order_requests.repository import OrderRequestRepository
+from app.order_requests.service import OrderRequestService
 from app.procurement.email import EmailService
 from app.procurement.repository import ProcurementRepository
 from app.procurement.service import ProcurementService
@@ -152,6 +155,20 @@ def require_permission(code: str):
 
     async def _checker(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
         ensure_permission(user.permissions, code)
+        return user
+
+    return _checker
+
+
+def require_feature(key: str):
+    """Dependency factory that 403s when a tenant has the given module disabled."""
+
+    async def _checker(
+        user: CurrentUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+    ) -> CurrentUser:
+        tenant = await TenantRepository(db).get(user.tenant_id)
+        if tenant is None or not is_enabled(tenant.feature_flags, key):
+            raise PermissionDeniedError(f"The '{key}' module is not enabled for this tenant.")
         return user
 
     return _checker
@@ -273,6 +290,10 @@ def get_assistant_service(db: AsyncSession = Depends(get_db)) -> AssistantServic
 
 def get_tenant_service(db: AsyncSession = Depends(get_db)) -> TenantSettingsService:
     return TenantSettingsService(TenantRepository(db), AuditRepository(db))
+
+
+def get_order_request_service(db: AsyncSession = Depends(get_db)) -> OrderRequestService:
+    return OrderRequestService(OrderRequestRepository(db), AuditRepository(db))
 
 
 def get_whatsapp_channel_service(db: AsyncSession = Depends(get_db)) -> WhatsAppChannelService:

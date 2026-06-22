@@ -44,6 +44,7 @@ class Tenant(Base):
     assistant_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     assistant_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     feature_flags: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    branding_colors: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     created_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
     updated_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
 

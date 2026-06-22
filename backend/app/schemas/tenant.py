@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from app.core.feature_flags import merged_flags, sanitize
+
 
 class TenantSettingsOut(BaseModel):
     company_name: str
@@ -16,9 +18,10 @@ class TenantSettingsOut(BaseModel):
     country: str | None = None
     timezone: str = "UTC"
     logo_url: str | None = None
+    branding_colors: dict = Field(default_factory=dict)
     assistant_name: str | None = None
     assistant_prompt: str | None = None
-    feature_flags: dict = Field(default_factory=dict)
+    feature_flags: dict = Field(default_factory=dict)  # all known flags, defaults applied
 
     @classmethod
     def from_tenant(cls, t) -> TenantSettingsOut:
@@ -30,9 +33,10 @@ class TenantSettingsOut(BaseModel):
             country=t.country,
             timezone=t.timezone,
             logo_url=t.logo_url,
+            branding_colors=getattr(t, "branding_colors", None) or {},
             assistant_name=t.assistant_name,
             assistant_prompt=t.assistant_prompt,
-            feature_flags=t.feature_flags or {},
+            feature_flags=merged_flags(t.feature_flags),
         )
 
 
@@ -46,6 +50,7 @@ class TenantSettingsUpdate(BaseModel):
     country: str | None = Field(default=None, max_length=100)
     timezone: str | None = Field(default=None, max_length=64)
     logo_url: str | None = Field(default=None, max_length=1000)
+    branding_colors: dict | None = None
     assistant_name: str | None = Field(default=None, max_length=120)
     assistant_prompt: str | None = Field(default=None, max_length=4000)
     feature_flags: dict | None = None
@@ -58,5 +63,10 @@ class TenantSettingsUpdate(BaseModel):
         out: dict = {}
         for field, value in self.model_dump(exclude_unset=True).items():
             col = self._COLUMN.get(field, field)
-            out[col] = value.upper() if field == "default_currency" else value
+            if field == "default_currency":
+                out[col] = value.upper()
+            elif field == "feature_flags":
+                out[col] = sanitize(value)  # keep only known flags, coerced to bool
+            else:
+                out[col] = value
         return out

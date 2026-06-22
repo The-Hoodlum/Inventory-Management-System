@@ -26,6 +26,7 @@ from app.models.identity import (
 from app.models.imports import ImportError, ImportFile, ImportJob, ImportMapping
 from app.models.intelligence import IntelligenceSignal, SupplierScore
 from app.models.inventory import Inventory, StockMovement, Warehouse
+from app.models.order_request import RequestAudit, RequestHeader, RequestLine
 from app.models.procurement import (
     DemandForecast,
     PurchaseOrder,
@@ -43,4 +44,5 @@ __all__ = [
     "PurchaseOrderEvent", "DemandForecast", "IntelligenceSignal", "SupplierScore",
     "ImportJob", "ImportFile", "ImportError", "ImportMapping",
     "AssistantConversation", "AssistantMessage", "UserWarehouseAccess", "WhatsAppIdentity",
+    "RequestHeader", "RequestLine", "RequestAudit",
 ]

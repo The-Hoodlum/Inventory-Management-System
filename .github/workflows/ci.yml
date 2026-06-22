@@ -80,7 +80,9 @@ jobs:
             database/sql/product_profile_flags.sql \
             database/sql/assistant.sql \
             database/sql/assistant_roles.sql \
-            database/sql/tenant_settings.sql ; do
+            database/sql/tenant_settings.sql \
+            database/sql/tenant_branding.sql \
+            database/sql/order_requests.sql ; do
             echo "applying $f"
             psql -v ON_ERROR_STOP=1 -f "$f"
           done

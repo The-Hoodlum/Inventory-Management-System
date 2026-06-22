@@ -13,6 +13,7 @@ from app.forecast.api import router as forecast_router
 from app.imports.api import router as imports_router
 from app.integrations.whatsapp.router import router as whatsapp_router
 from app.intelligence.api import router as intelligence_router
+from app.order_requests.api import router as order_requests_router
 from app.procurement.api import router as procurement_router
 from app.reorder.api import purchase_order_router, reorder_router
 from app.reports.api import router as reports_router
@@ -40,3 +41,4 @@ api_router.include_router(imports_router, prefix="/imports", tags=["imports"])
 api_router.include_router(intelligence_router, prefix="/intelligence", tags=["intelligence"])
 api_router.include_router(users.router, prefix="/users", tags=["users"])
 api_router.include_router(tenant.router, prefix="/tenant", tags=["tenant"])
+api_router.include_router(order_requests_router, prefix="/order-requests", tags=["order-requests"])
