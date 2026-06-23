@@ -19,6 +19,7 @@ from app.models import (
     RequestLine,
     StockMovement,
     User,
+    UserWarehouseAccess,
     Warehouse,
 )
 
@@ -35,6 +36,13 @@ class OrderRequestRepository:
         return await self.session.scalar(
             text("SELECT next_request_number(CAST(:t AS uuid))"), {"t": str(tenant_id)}
         )
+
+    async def user_branch_ids(self, user_id: uuid.UUID) -> set[uuid.UUID]:
+        """Warehouses a user is explicitly scoped to. Empty set = unrestricted (all branches)."""
+        res = await self.session.execute(
+            select(UserWarehouseAccess.warehouse_id).where(UserWarehouseAccess.user_id == user_id)
+        )
+        return {wid for (wid,) in res.all()}
 
     # ------------------------------- writes ---------------------------- #
     async def create(

@@ -31,6 +31,11 @@ class OrderRequestService:
     async def create(
         self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, payload: OrderRequestCreate
     ) -> OrderRequestOut:
+        # Branch users may only raise requests for a branch they're scoped to
+        # (no grants = unrestricted). Covers both the web API and the assistant path.
+        branch_ids = await self.repo.user_branch_ids(user_id)
+        if branch_ids and payload.branch_id not in branch_ids:
+            raise BusinessRuleError("You can only raise requests for your assigned branch.")
         number = await self.repo.next_request_number(tenant_id)
         header = await self.repo.create(
             tenant_id=tenant_id, request_number=number, branch_id=payload.branch_id,

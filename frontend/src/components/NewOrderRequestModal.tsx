@@ -1,27 +1,37 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
+import { useAuth } from "@/auth/AuthContext";
 import { Modal } from "@/components/Modal";
 import { Button, Spinner } from "@/components/ui";
 import { ApiError } from "@/lib/api";
+import { catalogApi } from "@/lib/catalog";
 import { formatQty } from "@/lib/format";
 import { branchAvailability, orderRequestsApi, PURPOSES } from "@/lib/orderRequests";
-import { useProducts, useWarehouses } from "@/lib/refdata";
+import { useWarehouses } from "@/lib/refdata";
 
 const INPUT =
   "rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500";
 
 interface DraftLine {
   product_id: string;
+  sku: string;
+  name: string;
   qty: string;
   remarks: string;
 }
 
 export function NewOrderRequestModal({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
+  const { user } = useAuth();
   const warehouses = useWarehouses();
-  const products = useProducts();
+
+  // Branch users only request for the branch(es) they're scoped to (empty grants = all).
+  const grants = user?.accessible_warehouse_ids ?? [];
+  const branches = grants.length
+    ? warehouses.list.filter((w) => grants.includes(w.id))
+    : warehouses.list;
 
   const [branchId, setBranchId] = useState("");
   const [purpose, setPurpose] = useState(PURPOSES[0].value);
@@ -30,8 +40,8 @@ export function NewOrderRequestModal({ onClose }: { onClose: () => void }) {
   const [lines, setLines] = useState<DraftLine[]>([]);
   const [err, setErr] = useState<string | null>(null);
 
-  // Default to the first branch once warehouses load.
-  const effectiveBranch = branchId || warehouses.list[0]?.id || "";
+  // Default to the first accessible branch once warehouses load.
+  const effectiveBranch = branchId || branches[0]?.id || "";
 
   const avail = useQuery({
     queryKey: ["branch-availability", effectiveBranch],
@@ -40,23 +50,16 @@ export function NewOrderRequestModal({ onClose }: { onClose: () => void }) {
     staleTime: 30_000,
   });
 
-  const productName = useMemo(
-    () => new Map(products.list.map((p) => [p.id, p] as const)),
-    [products.list]
-  );
-
-  const matches = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    if (!term) return [];
-    const added = new Set(lines.map((l) => l.product_id));
-    return products.list
-      .filter(
-        (p) =>
-          !added.has(p.id) &&
-          (p.name.toLowerCase().includes(term) || p.sku.toLowerCase().includes(term))
-      )
-      .slice(0, 8);
-  }, [search, products.list, lines]);
+  // Server-side product search (works for catalogs far larger than the client can hold).
+  const term = search.trim();
+  const searchQ = useQuery({
+    queryKey: ["product-search", term],
+    queryFn: () => catalogApi.products({ search: term, page: 1, page_size: 8 }),
+    enabled: term.length >= 2,
+    placeholderData: (prev) => prev,
+  });
+  const added = new Set(lines.map((l) => l.product_id));
+  const matches = (searchQ.data?.items ?? []).filter((p) => !added.has(p.id)).slice(0, 8);
 
   const create = useMutation({
     mutationFn: () =>
@@ -77,8 +80,8 @@ export function NewOrderRequestModal({ onClose }: { onClose: () => void }) {
     onError: (e) => setErr(e instanceof ApiError ? e.message : "Could not submit the request."),
   });
 
-  function addLine(productId: string) {
-    setLines((ls) => [...ls, { product_id: productId, qty: "1", remarks: "" }]);
+  function addLine(p: { id: string; sku: string; name: string }) {
+    setLines((ls) => [...ls, { product_id: p.id, sku: p.sku, name: p.name, qty: "1", remarks: "" }]);
     setSearch("");
   }
 
@@ -112,7 +115,7 @@ export function NewOrderRequestModal({ onClose }: { onClose: () => void }) {
               onChange={(e) => setBranchId(e.target.value)}
               className={`${INPUT} w-full`}
             >
-              {warehouses.list.map((w) => (
+              {branches.map((w) => (
                 <option key={w.id} value={w.id}>
                   {w.name}
                 </option>
@@ -139,10 +142,10 @@ export function NewOrderRequestModal({ onClose }: { onClose: () => void }) {
             placeholder="Search by item name or SKU"
             className={`${INPUT} w-full`}
           />
-          {search && (
+          {term.length >= 2 && (
             <div className="mt-1 max-h-44 overflow-y-auto rounded-lg border border-slate-200">
-              {products.isLoading ? (
-                <div className="p-3"><Spinner label="Loading products…" /></div>
+              {searchQ.isFetching && matches.length === 0 ? (
+                <div className="p-3"><Spinner label="Searching…" /></div>
               ) : matches.length === 0 ? (
                 <div className="p-3 text-sm text-slate-400">No matching items.</div>
               ) : (
@@ -151,7 +154,7 @@ export function NewOrderRequestModal({ onClose }: { onClose: () => void }) {
                   return (
                     <button
                       key={p.id}
-                      onClick={() => addLine(p.id)}
+                      onClick={() => addLine(p)}
                       className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-slate-50"
                     >
                       <span>
@@ -182,13 +185,12 @@ export function NewOrderRequestModal({ onClose }: { onClose: () => void }) {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {lines.map((l, i) => {
-                const p = productName.get(l.product_id);
                 const have = avail.data?.get(l.product_id);
                 return (
                   <tr key={l.product_id}>
                     <td className="py-2">
-                      <div className="font-medium text-slate-800">{p?.name ?? l.product_id}</div>
-                      <div className="font-mono text-xs text-slate-400">{p?.sku}</div>
+                      <div className="font-medium text-slate-800">{l.name}</div>
+                      <div className="font-mono text-xs text-slate-400">{l.sku}</div>
                     </td>
                     <td className="py-2 text-right font-mono text-xs text-slate-500">
                       {have === undefined ? "—" : formatQty(have)}

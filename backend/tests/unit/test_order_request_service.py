@@ -49,15 +49,19 @@ class _Session:
 
 
 class FakeRepo:
-    def __init__(self, on_hand: dict | None = None):
+    def __init__(self, on_hand: dict | None = None, branch_ids: set | None = None):
         self.session = _Session()
         self.headers: dict = {}
         self.audits: list = []
         self.issued: list = []
         self._on_hand = on_hand or {}
+        self._branch_ids = branch_ids or set()  # empty = unrestricted
 
     async def next_request_number(self, tenant_id):
         return "REQ-2026-00001"
+
+    async def user_branch_ids(self, user_id):
+        return self._branch_ids
 
     async def create(self, *, tenant_id, request_number, branch_id, requested_by, purpose, comments, lines):
         h = _Header(
@@ -123,6 +127,21 @@ def _create_payload():
 
 async def _make_pending(svc):
     return await svc.create(tenant_id=TENANT, user_id=CASHIER, payload=_create_payload())
+
+
+async def test_create_blocked_for_unassigned_branch():
+    other_branch = uuid.uuid4()
+    repo = FakeRepo(branch_ids={other_branch})  # user scoped to a different branch than BRANCH
+    svc = OrderRequestService(repo, FakeAudit())
+    with pytest.raises(BusinessRuleError):
+        await svc.create(tenant_id=TENANT, user_id=CASHIER, payload=_create_payload())  # payload.branch_id == BRANCH
+
+
+async def test_create_allowed_for_assigned_branch():
+    repo = FakeRepo(branch_ids={BRANCH})  # scoped to the request's branch
+    svc = OrderRequestService(repo, FakeAudit())
+    out = await svc.create(tenant_id=TENANT, user_id=CASHIER, payload=_create_payload())
+    assert out.status == S.PENDING
 
 
 async def test_create_is_pending_and_audited():

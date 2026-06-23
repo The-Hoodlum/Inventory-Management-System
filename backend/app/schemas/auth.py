@@ -32,3 +32,4 @@ class MeResponse(BaseModel):
     full_name: str
     roles: list[str]
     permissions: list[str]
+    accessible_warehouse_ids: list[uuid.UUID] = []  # explicit branch grants; empty = all branches

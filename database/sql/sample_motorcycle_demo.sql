@@ -142,3 +142,52 @@ UPDATE tenants SET
     base_currency    = 'ZMW'
 WHERE slug = 'demo';
 
+-- Demo users for role-based testing (idempotent). Both scoped to the Lusaka branch via
+-- user_warehouse_access, so they see only that branch. Login password: ChangeMe123!
+--   cashier@demo.com  (Cashier)        -> read-only inventory + create/track order requests
+--   manager@demo.com  (Branch Manager) -> approve/reject/issue requests for the branch
+DO $$
+DECLARE
+    v_tenant UUID; v_lusaka UUID; v_uid UUID;
+    v_role_cashier UUID; v_role_bm UUID;
+BEGIN
+    SELECT id INTO v_tenant FROM tenants WHERE slug = 'demo';
+    IF v_tenant IS NULL THEN RETURN; END IF;
+    PERFORM set_config('app.current_tenant', v_tenant::text, false);
+    SELECT id INTO v_lusaka FROM warehouses WHERE tenant_id = v_tenant AND code = 'LUS';
+    SELECT id INTO v_role_cashier FROM roles WHERE is_system AND name = 'Cashier';
+    SELECT id INTO v_role_bm FROM roles WHERE is_system AND name = 'Branch Manager';
+
+    -- Cashier
+    SELECT id INTO v_uid FROM users WHERE tenant_id = v_tenant AND email = 'cashier@demo.com';
+    IF v_uid IS NULL THEN
+        INSERT INTO users (tenant_id, email, password_hash, full_name)
+        VALUES (v_tenant, 'cashier@demo.com', crypt('ChangeMe123!', gen_salt('bf', 12)), 'Demo Cashier')
+        RETURNING id INTO v_uid;
+    END IF;
+    IF v_role_cashier IS NOT NULL THEN
+        INSERT INTO user_roles (user_id, role_id) VALUES (v_uid, v_role_cashier) ON CONFLICT DO NOTHING;
+    END IF;
+    IF v_lusaka IS NOT NULL THEN
+        INSERT INTO user_warehouse_access (tenant_id, user_id, warehouse_id)
+        VALUES (v_tenant, v_uid, v_lusaka) ON CONFLICT DO NOTHING;
+    END IF;
+
+    -- Branch Manager
+    SELECT id INTO v_uid FROM users WHERE tenant_id = v_tenant AND email = 'manager@demo.com';
+    IF v_uid IS NULL THEN
+        INSERT INTO users (tenant_id, email, password_hash, full_name)
+        VALUES (v_tenant, 'manager@demo.com', crypt('ChangeMe123!', gen_salt('bf', 12)), 'Demo Branch Manager')
+        RETURNING id INTO v_uid;
+    END IF;
+    IF v_role_bm IS NOT NULL THEN
+        INSERT INTO user_roles (user_id, role_id) VALUES (v_uid, v_role_bm) ON CONFLICT DO NOTHING;
+    END IF;
+    IF v_lusaka IS NOT NULL THEN
+        INSERT INTO user_warehouse_access (tenant_id, user_id, warehouse_id)
+        VALUES (v_tenant, v_uid, v_lusaka) ON CONFLICT DO NOTHING;
+    END IF;
+
+    RAISE NOTICE 'Demo role users ready: cashier@demo.com / manager@demo.com (ChangeMe123!), scoped to Lusaka.';
+END $$;
+

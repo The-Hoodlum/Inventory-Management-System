@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request, Response, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.deps import CurrentUser, get_auth_service, get_current_user
+from app.api.v1.deps import CurrentUser, get_auth_service, get_current_user, get_db
+from app.models import UserWarehouseAccess
 from app.schemas.auth import (
     LoginRequest,
     MeResponse,
@@ -71,7 +74,13 @@ async def logout(
 
 
 @router.get("/me", response_model=MeResponse)
-async def me(user: CurrentUser = Depends(get_current_user)) -> MeResponse:
+async def me(
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MeResponse:
+    grants = await db.execute(
+        select(UserWarehouseAccess.warehouse_id).where(UserWarehouseAccess.user_id == user.id)
+    )
     return MeResponse(
         id=user.id,
         tenant_id=user.tenant_id,
@@ -79,4 +88,5 @@ async def me(user: CurrentUser = Depends(get_current_user)) -> MeResponse:
         full_name=user.full_name,
         roles=user.roles,
         permissions=sorted(user.permissions),
+        accessible_warehouse_ids=[wid for (wid,) in grants.all()],
     )

@@ -14,6 +14,7 @@ export interface CurrentUser {
   full_name: string;
   roles: string[];
   permissions: string[];
+  accessible_warehouse_ids: string[]; // explicit branch grants; empty = all branches
 }
 
 export interface Page<T> {
