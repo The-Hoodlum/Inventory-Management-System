@@ -125,6 +125,11 @@ class OrderRequestService:
         headers = await self.repo.list_requests(**filters)
         return await self._to_out_many(headers)
 
+    async def get_by_number(self, request_number: str) -> OrderRequestOut | None:
+        """Resolve a request by its human number (for the chat approve/reject flow)."""
+        header = await self.repo.find_by_number(request_number)
+        return await self._to_out(header) if header else None
+
     async def audit_trail(self, *, request_id: uuid.UUID, viewer_id: uuid.UUID, is_admin: bool) -> list[AuditEntryOut]:
         header = await self._require(request_id)
         if not is_admin and header.requested_by != viewer_id:

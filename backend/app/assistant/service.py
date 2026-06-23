@@ -20,7 +20,13 @@ from app.assistant.providers import LLMProvider
 from app.assistant.repository import AssistantRepository
 from app.assistant.schemas import AskResponse, WhatsAppReply
 from app.order_requests.domain.status import PURPOSES
-from app.order_requests.schemas import OrderRequestCreate, OrderRequestLineCreate
+from app.order_requests.schemas import (
+    ApproveRequest,
+    LineApproval,
+    OrderRequestCreate,
+    OrderRequestLineCreate,
+    RejectRequest,
+)
 
 if TYPE_CHECKING:
     from app.order_requests.service import OrderRequestService
@@ -100,6 +106,10 @@ class AssistantService:
                         args, tenant_id=tenant_id, user_id=user_id, all_ids=all_ids,
                         resolve_branch=resolve_branch,
                     )
+                if name == "get_order_requests":
+                    return await self._list_order_requests(args, user_id=user_id, permissions=permissions)
+                if name == "act_on_order_request":
+                    return await self._act_on_order_request(args, tenant_id=tenant_id, user_id=user_id)
                 return await self._dispatch(name, args, resolve_branch, parse_date, today, currency)
             except Exception as exc:  # noqa: BLE001 — hand the error back to the model
                 return {"error": f"{name} failed: {exc}"}
@@ -231,6 +241,56 @@ class AssistantService:
             "items": [{"item": ln.name, "quantity": ln.requested_qty} for ln in out.lines],
             "note": "Pending an admin's approval; no stock has moved.",
         }
+
+    async def _list_order_requests(self, args: dict, *, user_id, permissions: set[str]) -> dict:
+        if self.order_requests is None:
+            return {"error": "Order requests aren't enabled here."}
+        is_admin = "order_request.approve" in permissions  # approvers see all; others see their own
+        filters: dict = {"limit": 20}
+        if args.get("status"):
+            filters["status"] = args["status"]
+        reqs = await self.order_requests.history(viewer_id=user_id, is_admin=is_admin, filters=filters)
+        return {
+            "count": len(reqs),
+            "requests": [
+                {"request_number": r.request_number, "branch": r.branch_name, "requester": r.requester_name,
+                 "purpose": r.purpose, "status": r.status, "item_count": len(r.lines)}
+                for r in reqs
+            ],
+        }
+
+    async def _act_on_order_request(self, args: dict, *, tenant_id, user_id) -> dict:
+        """Approve (in full) or reject a request by number. Permission already checked.
+        Approving moves no stock — issuing stays a deliberate action in the app."""
+        if self.order_requests is None:
+            return {"error": "Order requests aren't enabled here."}
+        number = (args.get("request_number") or "").strip()
+        action = (args.get("action") or "").strip().lower()
+        if not number:
+            return {"error": "request_number is required."}
+        req = await self.order_requests.get_by_number(number)
+        if req is None:
+            return {"error": f"Request {number} not found."}
+        if action == "approve":
+            payload = ApproveRequest(
+                lines=[LineApproval(line_id=ln.id, approved_qty=ln.requested_qty) for ln in req.lines]
+            )
+            out = await self.order_requests.approve(
+                tenant_id=tenant_id, actor_id=user_id, request_id=req.id, payload=payload
+            )
+            note = "Approved in full. An admin issues the stock in the app (stock moves only then)."
+        elif action == "reject":
+            reason = (args.get("reason") or "").strip()
+            if not reason:
+                return {"error": "A reason is required to reject a request."}
+            out = await self.order_requests.reject(
+                tenant_id=tenant_id, actor_id=user_id, request_id=req.id,
+                payload=RejectRequest(reason=reason),
+            )
+            note = "Rejected."
+        else:
+            return {"error": "action must be 'approve' or 'reject'."}
+        return {"request_number": out.request_number, "status": out.status, "note": note}
 
     # ------------------------------ WhatsApp --------------------------- #
     async def whatsapp_reply(self, *, tenant_id: uuid.UUID, phone: str, text: str) -> WhatsAppReply:

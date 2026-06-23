@@ -100,6 +100,18 @@ TOOL_SPECS: list[dict] = [
     _fn("get_assembly_status",
         "Assembly/build status of products. (Assembly is NOT tracked in this system.)",
         {**_BRANCH}),
+    _fn("get_order_requests",
+        "List branch order requests (requisitions), most recent first, optionally filtered by "
+        "status (pending, approved, partially_approved, rejected, issued). Branch users see only "
+        "their own; approvers see all.",
+        {"status": {"type": "string", "description": "Status filter; omit for all."}}),
+    _fn("act_on_order_request",
+        "Approve (in full) or reject an order request by its request number. Approving does NOT "
+        "move stock — an admin still issues it in the app; partial approvals are done in the app too.",
+        {"request_number": {"type": "string", "description": "e.g. REQ-2026-00007."},
+         "action": {"type": "string", "description": "approve | reject."},
+         "reason": {"type": "string", "description": "Required when rejecting."}},
+        ["request_number", "action"]),
     _fn("create_order_request",
         "Create a DRAFT branch order request (requisition) for one or more items. It starts as "
         "PENDING for an admin to approve and issue, and changes NO inventory. Use when a branch "

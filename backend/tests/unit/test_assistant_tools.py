@@ -10,6 +10,7 @@ EXPECTED = {
     "get_branch_summary", "get_assembly_status", "get_stock_movements",
     "get_slow_moving_items", "get_pending_purchase_requests", "get_branch_performance",
     "get_daily_summary", "create_reorder_proposal", "create_order_request",
+    "get_order_requests", "act_on_order_request",
 }
 
 

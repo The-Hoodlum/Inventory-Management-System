@@ -153,6 +153,8 @@ async def _ask(repo, plan, answer="done"):
 class _FakeOrderRequests:
     def __init__(self):
         self.created = []
+        self.approved = []
+        self.rejected = []
 
     async def create(self, *, tenant_id, user_id, payload):
         self.created.append(payload)
@@ -161,6 +163,69 @@ class _FakeOrderRequests:
             purpose=payload.purpose,
             lines=[SimpleNamespace(name="Oil Filter", requested_qty=ln.requested_qty) for ln in payload.lines],
         )
+
+    async def history(self, *, viewer_id, is_admin, filters):
+        self.last_history = {"viewer_id": viewer_id, "is_admin": is_admin, "filters": filters}
+        return [SimpleNamespace(request_number="REQ-2026-00007", branch_name="Lusaka",
+                                requester_name="Demo Cashier", purpose="for_sale", status="pending",
+                                lines=[SimpleNamespace()])]
+
+    async def get_by_number(self, number):
+        if number != "REQ-2026-00007":
+            return None
+        return SimpleNamespace(id=uuid.uuid4(),
+                               lines=[SimpleNamespace(id=uuid.uuid4(), requested_qty=5)])
+
+    async def approve(self, *, tenant_id, actor_id, request_id, payload):
+        self.approved.append((request_id, payload))
+        return SimpleNamespace(request_number="REQ-2026-00007", status="approved")
+
+    async def reject(self, *, tenant_id, actor_id, request_id, payload):
+        self.rejected.append((request_id, payload.reason))
+        return SimpleNamespace(request_number="REQ-2026-00007", status="rejected")
+
+
+async def test_act_on_order_request_approve():
+    repo = FakeRepo(roles=["Branch Manager"], permissions={"order_request.approve"})
+    orq = _FakeOrderRequests()
+    prov = ScriptedProvider([("act_on_order_request", {"request_number": "REQ-2026-00007", "action": "approve"})])
+    svc = AssistantService(repo, prov, order_requests=orq)
+    await svc.ask(tenant_id=TENANT, user_id=USER, question="approve REQ-2026-00007")
+    res = prov.results[0][1]
+    assert res["status"] == "approved" and len(orq.approved) == 1
+    assert orq.approved[0][1].lines[0].approved_qty == 5  # approved in full
+
+
+async def test_act_on_order_request_requires_approve_permission():
+    # Viewer sees the tool (unrestricted role) but lacks order_request.approve -> blocked.
+    repo = FakeRepo(roles=["Viewer"], permissions={"order_request.read"})
+    orq = _FakeOrderRequests()
+    prov = ScriptedProvider([("act_on_order_request", {"request_number": "REQ-2026-00007", "action": "approve"})])
+    svc = AssistantService(repo, prov, order_requests=orq)
+    await svc.ask(tenant_id=TENANT, user_id=USER, question="approve it")
+    assert "permission" in prov.results[0][1]["error"].lower()
+    assert orq.approved == []
+
+
+async def test_act_on_order_request_reject_needs_reason():
+    repo = FakeRepo(roles=["Branch Manager"], permissions={"order_request.approve"})
+    orq = _FakeOrderRequests()
+    prov = ScriptedProvider([("act_on_order_request", {"request_number": "REQ-2026-00007", "action": "reject"})])
+    svc = AssistantService(repo, prov, order_requests=orq)
+    await svc.ask(tenant_id=TENANT, user_id=USER, question="reject it")
+    assert "reason" in prov.results[0][1]["error"].lower()
+    assert orq.rejected == []
+
+
+async def test_get_order_requests_lists_for_approver():
+    repo = FakeRepo(roles=["Branch Manager"], permissions={"order_request.approve"})
+    orq = _FakeOrderRequests()
+    prov = ScriptedProvider([("get_order_requests", {"status": "pending"})])
+    svc = AssistantService(repo, prov, order_requests=orq)
+    await svc.ask(tenant_id=TENANT, user_id=USER, question="show pending requests")
+    res = prov.results[0][1]
+    assert res["count"] == 1 and res["requests"][0]["request_number"] == "REQ-2026-00007"
+    assert orq.last_history["is_admin"] is True  # approver sees all
 
 
 async def test_create_order_request_requires_permission():

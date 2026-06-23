@@ -74,6 +74,12 @@ class OrderRequestRepository:
             select(RequestHeader).where(RequestHeader.id == request_id).with_for_update()
         )
 
+    async def find_by_number(self, request_number: str) -> RequestHeader | None:
+        """Resolve a human-facing request number (REQ-YYYY-00001) to its header."""
+        return await self.session.scalar(
+            select(RequestHeader).where(RequestHeader.request_number == request_number.strip())
+        )
+
     async def add_audit(
         self, *, tenant_id: uuid.UUID, request_id: uuid.UUID, user_id: uuid.UUID | None,
         action: str, old_status: str | None, new_status: str | None,
