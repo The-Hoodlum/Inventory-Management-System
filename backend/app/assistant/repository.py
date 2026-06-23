@@ -23,10 +23,12 @@ from app.models import (
     AssistantMessage,
     Category,
     Inventory,
+    Permission,
     Product,
     PurchaseOrder,
     ReorderRecommendation,
     Role,
+    RolePermission,
     SalesDaily,
     StockMovement,
     Supplier,
@@ -107,6 +109,29 @@ class AssistantRepository:
             .where(UserRole.user_id == user_id)
         )
         return [r for (r,) in res.all()]
+
+    async def user_permissions(self, user_id: uuid.UUID) -> set[str]:
+        """Permission codes a user holds (via roles) — gates the assistant's write tools."""
+        res = await self.session.execute(
+            select(Permission.code)
+            .join(RolePermission, RolePermission.permission_id == Permission.id)
+            .join(UserRole, UserRole.role_id == RolePermission.role_id)
+            .where(UserRole.user_id == user_id)
+        )
+        return {code for (code,) in res.all()}
+
+    async def find_product(self, term: str) -> tuple[uuid.UUID, str, str] | None:
+        """Best single product match by name/SKU (for turning a chat phrase into a line).
+        Returns (id, sku, name) or None."""
+        like = f"%{term.strip()}%"
+        row = (await self.session.execute(
+            select(Product.id, Product.sku, Product.name)
+            .where(Product.deleted_at.is_(None),
+                   or_(Product.name.ilike(like), Product.sku.ilike(like)))
+            .order_by(func.length(Product.name))  # prefer the most specific (shortest) name
+            .limit(1)
+        )).first()
+        return (row[0], row[1], row[2]) if row else None
 
     # ------------------------------ logging ---------------------------- #
     async def create_conversation(

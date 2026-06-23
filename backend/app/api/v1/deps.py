@@ -285,6 +285,8 @@ def get_assistant_service(db: AsyncSession = Depends(get_db)) -> AssistantServic
         AssistantRepository(db),
         build_assistant_provider(settings),
         max_tool_rounds=settings.assistant_max_tool_rounds,
+        # enables the permission-gated create_order_request write tool
+        order_requests=OrderRequestService(OrderRequestRepository(db), AuditRepository(db)),
     )
 
 

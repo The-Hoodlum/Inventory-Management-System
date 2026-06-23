@@ -14,16 +14,20 @@ LUSAKA = uuid.uuid4()
 NDOLA = uuid.uuid4()
 TENANT = uuid.uuid4()
 USER = uuid.uuid4()
+P1 = uuid.uuid4()
 
 
 class FakeRepo:
-    def __init__(self, *, phone_user: uuid.UUID | None = None, roles: list[str] | None = None) -> None:
+    def __init__(self, *, phone_user: uuid.UUID | None = None, roles: list[str] | None = None,
+                 permissions: set[str] | None = None, product=None) -> None:
         self.warehouses = [
             SimpleNamespace(id=LUSAKA, name="Lusaka", code="LUS"),
             SimpleNamespace(id=NDOLA, name="Ndola", code="NDL"),
         ]
         self.phone_user = phone_user
         self.roles = roles if roles is not None else ["Admin"]
+        self.permissions = permissions if permissions is not None else set()
+        self.product = product  # (id, sku, name) | None for find_product
         self.messages: list[dict] = []
         self.calls: dict[str, tuple] = {}
         self.conversations: list[dict] = []
@@ -33,6 +37,13 @@ class FakeRepo:
 
     async def user_roles(self, user_id):
         return self.roles
+
+    async def user_permissions(self, user_id):
+        return self.permissions
+
+    async def find_product(self, term):
+        self.calls["find_product"] = (term,)
+        return self.product
 
     async def tenant_currency(self):
         return "ZMW"
@@ -137,6 +148,57 @@ async def _ask(repo, plan, answer="done"):
     svc, provider = _service(repo, plan, answer)
     resp = await svc.ask(tenant_id=TENANT, user_id=USER, question="q")
     return resp, provider
+
+
+class _FakeOrderRequests:
+    def __init__(self):
+        self.created = []
+
+    async def create(self, *, tenant_id, user_id, payload):
+        self.created.append(payload)
+        return SimpleNamespace(
+            request_number="REQ-2026-00009", status="pending", branch_name="Lusaka",
+            purpose=payload.purpose,
+            lines=[SimpleNamespace(name="Oil Filter", requested_qty=ln.requested_qty) for ln in payload.lines],
+        )
+
+
+async def test_create_order_request_requires_permission():
+    repo = FakeRepo(roles=["Cashier"], permissions=set())  # lacks order_request.create
+    orq = _FakeOrderRequests()
+    prov = ScriptedProvider([("create_order_request",
+                              {"items": [{"item": "Oil Filter", "quantity": 5}], "branch": "Lusaka"})])
+    svc = AssistantService(repo, prov, order_requests=orq)
+    await svc.ask(tenant_id=TENANT, user_id=USER, question="request 5 oil filters")
+    assert "permission" in prov.results[0][1]["error"].lower()
+    assert orq.created == []  # nothing written
+
+
+async def test_create_order_request_creates_pending():
+    repo = FakeRepo(roles=["Cashier"], permissions={"order_request.create"}, product=(P1, "OF-1", "Oil Filter"))
+    orq = _FakeOrderRequests()
+    prov = ScriptedProvider([("create_order_request",
+                              {"items": [{"item": "Oil Filter", "quantity": 5}],
+                               "branch": "Lusaka", "purpose": "for_sale"})])
+    svc = AssistantService(repo, prov, order_requests=orq)
+    await svc.ask(tenant_id=TENANT, user_id=USER, question="request 5 oil filters")
+    res = prov.results[0][1]
+    assert res["created"] is True and res["request_number"] == "REQ-2026-00009"
+    assert len(orq.created) == 1
+    payload = orq.created[0]
+    assert payload.branch_id == LUSAKA and payload.purpose == "for_sale"
+    assert len(payload.lines) == 1 and payload.lines[0].product_id == P1 and payload.lines[0].requested_qty == 5
+
+
+async def test_create_order_request_unknown_item_errors():
+    repo = FakeRepo(roles=["Cashier"], permissions={"order_request.create"}, product=None)
+    orq = _FakeOrderRequests()
+    prov = ScriptedProvider([("create_order_request",
+                              {"items": [{"item": "Nonexistent", "quantity": 2}], "branch": "Lusaka"})])
+    svc = AssistantService(repo, prov, order_requests=orq)
+    await svc.ask(tenant_id=TENANT, user_id=USER, question="request 2 widgets")
+    assert "couldn't find" in prov.results[0][1]["error"].lower()
+    assert orq.created == []
 
 
 async def test_named_branch_scopes_to_that_warehouse():

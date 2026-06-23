@@ -9,7 +9,7 @@ EXPECTED = {
     "get_sales_between_dates", "get_top_selling_items", "get_fast_moving_items",
     "get_branch_summary", "get_assembly_status", "get_stock_movements",
     "get_slow_moving_items", "get_pending_purchase_requests", "get_branch_performance",
-    "get_daily_summary", "create_reorder_proposal",
+    "get_daily_summary", "create_reorder_proposal", "create_order_request",
 }
 
 

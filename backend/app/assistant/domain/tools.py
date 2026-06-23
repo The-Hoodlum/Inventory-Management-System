@@ -100,6 +100,27 @@ TOOL_SPECS: list[dict] = [
     _fn("get_assembly_status",
         "Assembly/build status of products. (Assembly is NOT tracked in this system.)",
         {**_BRANCH}),
+    _fn("create_order_request",
+        "Create a DRAFT branch order request (requisition) for one or more items. It starts as "
+        "PENDING for an admin to approve and issue, and changes NO inventory. Use when a branch "
+        "user asks to request or order stock for their branch.",
+        {"items": {
+            "type": "array",
+            "description": "Items to request.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "item": {"type": "string", "description": "Item name or SKU."},
+                    "quantity": {"type": "number", "description": "Quantity requested."},
+                },
+                "required": ["item", "quantity"],
+                "additionalProperties": False,
+            },
+        },
+         "purpose": {"type": "string",
+                     "description": "for_sale | shelf_replenishment | workshop_use | office_use | other."},
+         **_BRANCH},
+        ["items"]),
 ]
 
 TOOL_NAMES: frozenset[str] = frozenset(t["function"]["name"] for t in TOOL_SPECS)

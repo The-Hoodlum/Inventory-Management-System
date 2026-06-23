@@ -22,12 +22,18 @@ _SALES = {
 }
 _ITEM_LOOKUP = {"get_stock_level", "get_stock_movements"}
 _SERVICE = {"get_assembly_status"}
+_REQUESTS = {"create_order_request"}  # raise a requisition (also permission-gated at dispatch)
 
 # Roles with a DELIBERATELY reduced tool set. Any role NOT listed here is
 # unrestricted (full tool access), so existing system roles keep working.
 RESTRICTED_ROLE_TOOLS: dict[str, set[str]] = {
-    "Cashier": _STOCK | _SALES,            # stock lookup + sales reports only
-    "Mechanic": _ITEM_LOOKUP | _SERVICE,   # item/parts lookup + service info only
+    "Cashier": _STOCK | _SALES | _REQUESTS,  # stock + sales + raise order requests
+    "Mechanic": _ITEM_LOOKUP | _SERVICE,     # item/parts lookup + service info only
+}
+
+# Write tools require a permission (not just role visibility) — enforced in the service.
+WRITE_TOOL_PERMISSION: dict[str, str] = {
+    "create_order_request": "order_request.create",
 }
 
 

@@ -11,22 +11,32 @@ from __future__ import annotations
 import datetime as dt
 import json
 import uuid
+from typing import TYPE_CHECKING
 
-from app.assistant.domain.capabilities import allowed_tools
+from app.assistant.domain.capabilities import WRITE_TOOL_PERMISSION, allowed_tools
 from app.assistant.domain.prompt import build_system_prompt
 from app.assistant.domain.tools import TOOL_SPECS
 from app.assistant.providers import LLMProvider
 from app.assistant.repository import AssistantRepository
 from app.assistant.schemas import AskResponse, WhatsAppReply
+from app.order_requests.domain.status import PURPOSES
+from app.order_requests.schemas import OrderRequestCreate, OrderRequestLineCreate
+
+if TYPE_CHECKING:
+    from app.order_requests.service import OrderRequestService
 
 _ALL_BRANCH = ("", "all", "none", "any")
 
 
 class AssistantService:
-    def __init__(self, repo: AssistantRepository, provider: LLMProvider, *, max_tool_rounds: int = 5) -> None:
+    def __init__(
+        self, repo: AssistantRepository, provider: LLMProvider, *, max_tool_rounds: int = 5,
+        order_requests: OrderRequestService | None = None,
+    ) -> None:
         self.repo = repo
         self.provider = provider
         self.max_tool_rounds = max_tool_rounds
+        self.order_requests = order_requests  # enables the create_order_request write tool
 
     async def ask(
         self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, question: str,
@@ -46,6 +56,8 @@ class AssistantService:
         # Role-based tool access: only expose (and accept) the tools this user's roles allow.
         roles = await self.repo.user_roles(user_id)
         allowed = allowed_tools(roles)
+        # Write tools (e.g. create_order_request) are additionally gated by permission.
+        permissions = await self.repo.user_permissions(user_id)
         tools = [t for t in TOOL_SPECS if t["function"]["name"] in allowed]
 
         conv = await self.repo.create_conversation(
@@ -79,7 +91,15 @@ class AssistantService:
             )
             if name not in allowed:  # defence in depth — the model only saw allowed tools
                 return {"error": "That action isn't available for your role."}
+            required = WRITE_TOOL_PERMISSION.get(name)
+            if required and required not in permissions:
+                return {"error": "You don't have permission to do that."}
             try:
+                if name == "create_order_request":
+                    return await self._create_order_request(
+                        args, tenant_id=tenant_id, user_id=user_id, all_ids=all_ids,
+                        resolve_branch=resolve_branch,
+                    )
                 return await self._dispatch(name, args, resolve_branch, parse_date, today, currency)
             except Exception as exc:  # noqa: BLE001 — hand the error back to the model
                 return {"error": f"{name} failed: {exc}"}
@@ -160,6 +180,57 @@ class AssistantService:
             return {"available": False,
                     "message": "Assembly status is not tracked in the system yet."}
         return {"error": f"Unknown tool '{name}'."}
+
+    async def _create_order_request(
+        self, args: dict, *, tenant_id, user_id, all_ids, resolve_branch,
+    ) -> dict:
+        """Create a PENDING requisition from a chat request (no inventory change).
+        Permission already checked by the caller; admins approve/issue elsewhere."""
+        if self.order_requests is None:
+            return {"error": "Order requests aren't enabled here."}
+        branch_arg = args.get("branch")
+        if branch_arg:
+            ids, berr = resolve_branch(branch_arg)
+            if berr:
+                return {"error": berr}
+            branch_id = ids[0]
+        elif len(all_ids) == 1:
+            branch_id = all_ids[0]
+        else:
+            return {"error": "Please say which branch this request is for."}
+
+        items = args.get("items") or []
+        lines: list[OrderRequestLineCreate] = []
+        unresolved: list[str] = []
+        for it in items:
+            term = str((it or {}).get("item") or "").strip()
+            qty = (it or {}).get("quantity")
+            if not term or qty is None or float(qty) <= 0:
+                unresolved.append(term or "(unnamed item)")
+                continue
+            match = await self.repo.find_product(term)
+            if match is None:
+                unresolved.append(term)
+                continue
+            lines.append(OrderRequestLineCreate(product_id=match[0], requested_qty=float(qty)))
+        if unresolved:
+            return {"error": f"Couldn't find: {', '.join(unresolved)}. Use the exact item name or SKU."}
+        if not lines:
+            return {"error": "No valid items to request."}
+
+        purpose = args.get("purpose")
+        if purpose not in PURPOSES:
+            purpose = "other"
+        out = await self.order_requests.create(
+            tenant_id=tenant_id, user_id=user_id,
+            payload=OrderRequestCreate(branch_id=branch_id, purpose=purpose, lines=lines),
+        )
+        return {
+            "created": True, "request_number": out.request_number, "status": out.status,
+            "branch": out.branch_name, "purpose": out.purpose,
+            "items": [{"item": ln.name, "quantity": ln.requested_qty} for ln in out.lines],
+            "note": "Pending an admin's approval; no stock has moved.",
+        }
 
     # ------------------------------ WhatsApp --------------------------- #
     async def whatsapp_reply(self, *, tenant_id: uuid.UUID, phone: str, text: str) -> WhatsAppReply:
