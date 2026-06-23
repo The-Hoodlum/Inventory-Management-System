@@ -123,7 +123,7 @@ class OrderRequestService:
         if not is_admin:
             filters = {**filters, "requested_by": viewer_id}  # branch users see only their own
         headers = await self.repo.list_requests(**filters)
-        return [await self._to_out(h) for h in headers]
+        return await self._to_out_many(headers)
 
     async def audit_trail(self, *, request_id: uuid.UUID, viewer_id: uuid.UUID, is_admin: bool) -> list[AuditEntryOut]:
         header = await self._require(request_id)
@@ -175,9 +175,28 @@ class OrderRequestService:
         )
 
     async def _to_out(self, header) -> OrderRequestOut:
+        """Single-header response (create/approve/reject/issue paths)."""
         prod = await self.repo.product_index([ln.product_id for ln in header.lines])
         wh = await self.repo.warehouse_names([header.branch_id])
         users = await self.repo.user_names([header.requested_by, header.approved_by, header.issued_by])
+        return self._build_out(header, prod, wh, users)
+
+    async def _to_out_many(self, headers: list) -> list[OrderRequestOut]:
+        """List response: fetch all enrichment maps ONCE across every header (avoids the
+        N+1 of resolving product/branch/user names per row)."""
+        if not headers:
+            return []
+        product_ids = {ln.product_id for h in headers for ln in h.lines}
+        branch_ids = {h.branch_id for h in headers}
+        user_ids = {uid for h in headers for uid in (h.requested_by, h.approved_by, h.issued_by) if uid}
+        prod = await self.repo.product_index(list(product_ids))
+        wh = await self.repo.warehouse_names(list(branch_ids))
+        users = await self.repo.user_names(list(user_ids))
+        return [self._build_out(h, prod, wh, users) for h in headers]
+
+    @staticmethod
+    def _build_out(header, prod: dict, wh: dict, users: dict) -> OrderRequestOut:
+        """Map a header (+ prefetched name lookups) to the response model. Pure."""
         lines = [
             OrderRequestLineOut(
                 id=ln.id, product_id=ln.product_id,

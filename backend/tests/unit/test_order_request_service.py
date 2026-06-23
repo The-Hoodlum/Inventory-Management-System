@@ -54,6 +54,7 @@ class FakeRepo:
         self.headers: dict = {}
         self.audits: list = []
         self.issued: list = []
+        self.calls: dict = {}
         self._on_hand = on_hand or {}
         self._branch_ids = branch_ids or set()  # empty = unrestricted
 
@@ -94,13 +95,22 @@ class FakeRepo:
         self.issued.append((line.product_id, qty))
         return None
 
+    async def list_requests(self, **filters):
+        rows = list(self.headers.values())
+        if "requested_by" in filters:
+            rows = [h for h in rows if h.requested_by == filters["requested_by"]]
+        return rows
+
     async def product_index(self, ids):
+        self.calls["product_index"] = self.calls.get("product_index", 0) + 1
         return {i: ("SKU", "Name") for i in ids}
 
     async def warehouse_names(self, ids):
+        self.calls["warehouse_names"] = self.calls.get("warehouse_names", 0) + 1
         return {i: "Lusaka" for i in ids}
 
     async def user_names(self, ids):
+        self.calls["user_names"] = self.calls.get("user_names", 0) + 1
         return {i: "User" for i in ids if i}
 
 
@@ -142,6 +152,20 @@ async def test_create_allowed_for_assigned_branch():
     svc = OrderRequestService(repo, FakeAudit())
     out = await svc.create(tenant_id=TENANT, user_id=CASHIER, payload=_create_payload())
     assert out.status == S.PENDING
+
+
+async def test_history_batches_enrichment_no_n_plus_1():
+    repo = FakeRepo()
+    svc = OrderRequestService(repo, FakeAudit())
+    for _ in range(3):  # three requests
+        await svc.create(tenant_id=TENANT, user_id=CASHIER, payload=_create_payload())
+    repo.calls.clear()
+    out = await svc.history(viewer_id=ADMIN, is_admin=True, filters={})
+    assert len(out) == 3
+    # enrichment fetched ONCE for the whole page, not once per request
+    assert repo.calls["product_index"] == 1
+    assert repo.calls["warehouse_names"] == 1
+    assert repo.calls["user_names"] == 1
 
 
 async def test_create_is_pending_and_audited():
