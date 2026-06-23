@@ -8,6 +8,7 @@ from app.assistant.alerts import (
     AlertService,
     build_daily_summary_message,
     build_low_stock_message,
+    build_order_requests_message,
     build_pending_pr_message,
     build_weekly_report_message,
     due_alert_kinds,
@@ -48,10 +49,18 @@ def test_daily_and_weekly_messages():
     assert "Weekly report" in weekly and "Total:" in weekly
 
 
+def test_order_requests_message_or_none():
+    assert build_order_requests_message({"count": 0, "requests": []}) is None
+    msg = build_order_requests_message(
+        {"count": 1, "requests": [{"request_number": "REQ-2026-00007", "branch": "Lusaka", "item_count": 3}]}
+    )
+    assert "awaiting approval" in msg and "REQ-2026-00007" in msg and "Lusaka" in msg
+
+
 def test_due_alert_kinds_windows():
-    # low_stock + pending always due
+    # low_stock + pending POs + pending order requests always due
     base = due_alert_kinds(dt.datetime(2026, 6, 23, 9, 0), _SETTINGS)  # Tue 09:00
-    assert base == {"low_stock", "pending_pr"}
+    assert base == {"low_stock", "pending_pr", "order_requests"}
     # closing hour -> add daily
     at_close = due_alert_kinds(dt.datetime(2026, 6, 23, 17, 0), _SETTINGS)  # Tue 17:00
     assert "daily" in at_close and "weekly" not in at_close
@@ -73,6 +82,12 @@ class _FakeAlertRepo:
     async def pending_purchase_requests(self, ids):
         return {"count": 0, "requests": []}
 
+    async def pending_order_requests(self, ids):
+        return {"count": 2, "requests": [
+            {"request_number": "REQ-2026-00007", "branch": "Lusaka", "item_count": 3},
+            {"request_number": "REQ-2026-00008", "branch": "Ndola", "item_count": 1},
+        ]}
+
     async def daily_summary(self, day, ids, ccy):
         return {"date": str(day), "currency": ccy, "units_sold": 5, "estimated_revenue": 100,
                 "top_item": "X", "best_branch": "Lusaka", "low_stock_count": 1, "pending_purchase_requests": 0}
@@ -85,9 +100,11 @@ class _FakeAlertRepo:
 async def test_alert_service_broadcasts_to_recipients():
     adapter = MockWhatsAppAdapter()
     svc = AlertService(_FakeAlertRepo(), adapter)
-    sent = await svc.run_due({"low_stock", "pending_pr", "daily", "weekly"}, currency="USD", today=dt.date(2026, 6, 21))
+    sent = await svc.run_due({"low_stock", "pending_pr", "order_requests", "daily", "weekly"},
+                             currency="USD", today=dt.date(2026, 6, 21))
     assert sent["low_stock"] == 2   # 2 recipients
     assert sent["pending_pr"] == 0  # nothing pending -> no message -> 0
+    assert sent["order_requests"] == 2  # 2 pending requisitions -> message -> 2 recipients
     assert sent["daily"] == 2 and sent["weekly"] == 2
-    # 3 messages (low/daily/weekly) x 2 recipients = 6 deliveries
-    assert len(adapter.sent) == 6
+    # 4 messages (low/order_requests/daily/weekly) x 2 recipients = 8 deliveries
+    assert len(adapter.sent) == 8

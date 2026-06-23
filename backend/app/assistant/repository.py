@@ -27,6 +27,8 @@ from app.models import (
     Product,
     PurchaseOrder,
     ReorderRecommendation,
+    RequestHeader,
+    RequestLine,
     Role,
     RolePermission,
     SalesDaily,
@@ -431,6 +433,26 @@ class AssistantRepository:
             {"po_number": po, "status": st, "branch": wh, "total": _f(total),
              "currency": ccy, "supplier": sup, "created_at": created.date().isoformat()}
             for po, st, wh, total, ccy, sup, created in res.all()
+        ]
+        return {"count": len(requests), "requests": requests}
+
+    async def pending_order_requests(self, warehouse_ids: list[uuid.UUID]) -> dict:
+        """Branch requisitions awaiting approval — for the proactive admin alert."""
+        lines = func.count(RequestLine.id)
+        stmt = (
+            select(RequestHeader.request_number, Warehouse.name, RequestHeader.requested_date, lines)
+            .join(Warehouse, Warehouse.id == RequestHeader.branch_id)
+            .outerjoin(RequestLine, RequestLine.request_id == RequestHeader.id)
+            .where(RequestHeader.status == "pending", RequestHeader.branch_id.in_(warehouse_ids))
+            .group_by(RequestHeader.request_number, Warehouse.name, RequestHeader.requested_date)
+            .order_by(RequestHeader.requested_date.desc())
+            .limit(_MAX_ROWS)
+        )
+        res = await self.session.execute(stmt)
+        requests = [
+            {"request_number": num, "branch": branch, "item_count": int(n),
+             "requested_at": rd.date().isoformat()}
+            for num, branch, rd, n in res.all()
         ]
         return {"count": len(requests), "requests": requests}
 

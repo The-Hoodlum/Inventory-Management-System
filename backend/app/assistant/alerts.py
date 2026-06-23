@@ -63,10 +63,24 @@ def build_pending_pr_message(pending: dict) -> str | None:
     return f"📝 *{pending['count']} purchase request(s)* awaiting approval:\n" + "\n".join(lines)
 
 
+def build_order_requests_message(pending: dict) -> str | None:
+    reqs = pending.get("requests", [])
+    if not reqs:
+        return None
+    lines = [f"- {r['request_number']} ({r['branch']}): {r['item_count']} item(s)"
+             for r in reqs[:_MAX_BULLETS]]
+    more = len(reqs) - len(lines)
+    if more > 0:
+        lines.append(f"...and {more} more")
+    return (f"📝 *{pending['count']} order request(s)* awaiting approval — reply "
+            f"\"approve REQ-…\" or \"reject REQ-…\":\n" + "\n".join(lines))
+
+
 def due_alert_kinds(now: dt.datetime, settings) -> set[str]:
-    """Which alert kinds are due at ``now``. Low-stock + pending run every cycle; the
-    daily summary fires at the closing hour; the weekly report on its weekday + hour."""
-    kinds = {"low_stock", "pending_pr"}
+    """Which alert kinds are due at ``now``. Low-stock, pending POs, and pending order
+    requests run every cycle; the daily summary fires at the closing hour; the weekly
+    report on its weekday + hour."""
+    kinds = {"low_stock", "pending_pr", "order_requests"}
     if now.hour == settings.assistant_daily_summary_hour:
         kinds.add("daily")
         if now.weekday() == settings.assistant_weekly_report_weekday:
@@ -96,6 +110,9 @@ class AlertService:
         if "pending_pr" in kinds:
             msg = build_pending_pr_message(await self.repo.pending_purchase_requests(ids))
             sent["pending_pr"] = await self._broadcast(msg)
+        if "order_requests" in kinds:
+            msg = build_order_requests_message(await self.repo.pending_order_requests(ids))
+            sent["order_requests"] = await self._broadcast(msg)
         if "daily" in kinds:
             summary = await self.repo.daily_summary(today, ids, currency)
             sent["daily"] = await self._broadcast(build_daily_summary_message(summary))
