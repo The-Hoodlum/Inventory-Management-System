@@ -73,6 +73,9 @@ class FakeRepo:
     async def get(self, request_id):
         return self.headers.get(request_id)
 
+    async def get_for_update(self, request_id):
+        return self.headers.get(request_id)
+
     async def add_audit(self, **kw):
         self.audits.append(kw)
 

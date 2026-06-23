@@ -59,6 +59,13 @@ class OrderRequestRepository:
     async def get(self, request_id: uuid.UUID) -> RequestHeader | None:
         return await self.session.scalar(select(RequestHeader).where(RequestHeader.id == request_id))
 
+    async def get_for_update(self, request_id: uuid.UUID) -> RequestHeader | None:
+        """Row-locked fetch (SELECT ... FOR UPDATE) so concurrent state transitions on the
+        same request serialise — prevents e.g. a double-issue that would deduct stock twice."""
+        return await self.session.scalar(
+            select(RequestHeader).where(RequestHeader.id == request_id).with_for_update()
+        )
+
     async def add_audit(
         self, *, tenant_id: uuid.UUID, request_id: uuid.UUID, user_id: uuid.UUID | None,
         action: str, old_status: str | None, new_status: str | None,

@@ -44,7 +44,7 @@ class OrderRequestService:
     async def approve(
         self, *, tenant_id: uuid.UUID, actor_id: uuid.UUID, request_id: uuid.UUID, payload: ApproveRequest
     ) -> OrderRequestOut:
-        header = await self._require(request_id)
+        header = await self._require(request_id, lock=True)
         if header.status != S.PENDING:
             raise BusinessRuleError(f"Only pending requests can be approved (status={header.status}).")
         approvals = {a.line_id: a.approved_qty for a in payload.lines}
@@ -69,7 +69,7 @@ class OrderRequestService:
     async def reject(
         self, *, tenant_id: uuid.UUID, actor_id: uuid.UUID, request_id: uuid.UUID, payload: RejectRequest
     ) -> OrderRequestOut:
-        header = await self._require(request_id)
+        header = await self._require(request_id, lock=True)
         if not S.can_transition(header.status, S.REJECTED):
             raise BusinessRuleError(f"Cannot reject a request in status {header.status}.")
         header.status = S.REJECTED
@@ -84,7 +84,8 @@ class OrderRequestService:
     async def issue(
         self, *, tenant_id: uuid.UUID, actor_id: uuid.UUID, request_id: uuid.UUID
     ) -> OrderRequestOut:
-        header = await self._require(request_id)
+        header = await self._require(request_id, lock=True)
+        prev_status = header.status
         if not S.can_transition(header.status, S.ISSUED):
             raise BusinessRuleError(f"Only approved requests can be issued (status={header.status}).")
         for line in header.lines:
@@ -101,7 +102,7 @@ class OrderRequestService:
         header.issued_by = actor_id
         header.issued_date = dt.datetime.now(dt.UTC)
         await self.repo.session.flush()
-        await self._audit(tenant_id, header.id, actor_id, "issued", S.APPROVED, S.ISSUED)
+        await self._audit(tenant_id, header.id, actor_id, "issued", prev_status, S.ISSUED)
         return await self._to_out(header)
 
     # ------------------------------- reads ----------------------------- #
@@ -151,8 +152,9 @@ class OrderRequestService:
         }
 
     # ------------------------------ helpers ---------------------------- #
-    async def _require(self, request_id: uuid.UUID) -> object:
-        header = await self.repo.get(request_id)
+    async def _require(self, request_id: uuid.UUID, *, lock: bool = False) -> object:
+        # lock=True row-locks the header so concurrent transitions serialise (no double-issue).
+        header = await (self.repo.get_for_update(request_id) if lock else self.repo.get(request_id))
         if header is None:
             raise NotFoundError("Order request not found")
         return header
