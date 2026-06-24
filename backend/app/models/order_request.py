@@ -36,6 +36,11 @@ class RequestHeader(Base):
     issued_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"))
     issued_date: Mapped[dt.datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
     comments: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Receipt confirmation (issued -> completed). 'completed' is a deliberate, explicit step
+    # by the receiving user and never happens automatically just because stock was issued.
+    completed_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"))
+    completed_date: Mapped[dt.datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    completion_remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
 
     lines: Mapped[list[RequestLine]] = relationship(
@@ -56,6 +61,11 @@ class RequestLine(Base):
     approved_qty: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, server_default=text("0"))
     issued_qty: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, server_default=text("0"))
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Per-line receipt reconciliation captured at completion time (all optional / nullable):
+    # what was actually received vs. missing vs. damaged on arrival at the branch.
+    received_qty: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    missing_qty: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    damaged_qty: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
 
 
 class RequestAudit(Base):

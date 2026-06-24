@@ -153,11 +153,40 @@ class ImportRepository:
         await self.session.flush()
         return wh
 
+    async def update_warehouse(self, warehouse: Warehouse, *, attrs: dict[str, Any]) -> Warehouse:
+        for col, val in attrs.items():
+            setattr(warehouse, col, val)
+        await self.session.flush()
+        return warehouse
+
+    async def create_warehouse_full(
+        self, tenant_id: uuid.UUID, *, name: str, code: str, attrs: dict[str, Any]
+    ) -> Warehouse:
+        wh = Warehouse(tenant_id=tenant_id, name=name, code=code, **attrs)
+        self.session.add(wh)
+        await self.session.flush()
+        return wh
+
     async def find_supplier(self, name: str) -> Supplier | None:
         return await self.suppliers.get_by_name(name)
 
     async def create_supplier(self, tenant_id: uuid.UUID, name: str) -> Supplier:
         sup = Supplier(tenant_id=tenant_id, name=name)  # currency defaults to tenant convention
+        self.session.add(sup)
+        await self.session.flush()
+        return sup
+
+    async def update_supplier(self, supplier: Supplier, *, attrs: dict[str, Any]) -> Supplier:
+        for col, val in attrs.items():
+            setattr(supplier, col, val)
+        supplier.updated_at = _now()
+        await self.session.flush()
+        return supplier
+
+    async def create_supplier_full(
+        self, tenant_id: uuid.UUID, *, name: str, attrs: dict[str, Any]
+    ) -> Supplier:
+        sup = Supplier(tenant_id=tenant_id, name=name, **attrs)
         self.session.add(sup)
         await self.session.flush()
         return sup

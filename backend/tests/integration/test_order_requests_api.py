@@ -159,3 +159,70 @@ async def test_reject_requires_reason_and_sets_status(client):
                           json={"reason": "Not needed"})
     assert r.status_code == 200 and r.json()["status"] == "rejected"
     assert r.json()["comments"] == "Not needed"
+
+
+async def test_issue_then_complete_records_receipt(client):
+    admin_h = await _headers(client, ADMIN_EMAIL, ADMIN_PASSWORD)
+    email, password = await _make_cashier(client, admin_h)
+    cashier_h = await _headers(client, email, password)
+    product_id, warehouse_id = await _find_stocked_inventory(client, admin_h)
+
+    r = await client.post("/api/v1/order-requests", headers=cashier_h, json={
+        "branch_id": warehouse_id, "purpose": "for_sale",
+        "lines": [{"product_id": product_id, "requested_qty": 1}],
+    })
+    assert r.status_code == 201, r.text
+    req = r.json()
+    request_id, line_id = req["id"], req["lines"][0]["id"]
+
+    r = await client.post(f"/api/v1/order-requests/{request_id}/approve", headers=admin_h,
+                          json={"lines": [{"line_id": line_id, "approved_qty": 1}]})
+    assert r.status_code == 200, r.text
+    r = await client.post(f"/api/v1/order-requests/{request_id}/issue", headers=admin_h)
+    assert r.status_code == 200 and r.json()["status"] == "issued"
+
+    # Once issued it can no longer be cancelled (business rule -> 400)...
+    r = await client.post(f"/api/v1/order-requests/{request_id}/cancel", headers=admin_h, json={})
+    assert r.status_code == 400, r.text
+    # ...and completion requires receipt remarks (422 without them).
+    r = await client.post(f"/api/v1/order-requests/{request_id}/complete", headers=admin_h, json={})
+    assert r.status_code == 422
+
+    # Confirm receipt with a discrepancy (the single unit went missing in transit).
+    r = await client.post(f"/api/v1/order-requests/{request_id}/complete", headers=admin_h, json={
+        "remarks": "Received short — 1 missing in transit",
+        "lines": [{"line_id": line_id, "received_qty": 0, "missing_qty": 1}],
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "completed"
+    assert body["completion_remarks"] == "Received short — 1 missing in transit"
+    assert body["completed_date"] is not None
+    line = body["lines"][0]
+    assert line["received_qty"] == 0 and line["missing_qty"] == 1
+
+    # 'completed' is a separate, explicit, audited step — issuing never auto-completes.
+    r = await client.get(f"/api/v1/order-requests/{request_id}/audit", headers=admin_h)
+    actions = [a["action"] for a in r.json()]
+    assert {"issued", "completed"}.issubset(set(actions))
+
+
+async def test_cancel_request_by_requester(client):
+    admin_h = await _headers(client, ADMIN_EMAIL, ADMIN_PASSWORD)
+    email, password = await _make_cashier(client, admin_h)
+    cashier_h = await _headers(client, email, password)
+    product_id, warehouse_id = await _find_stocked_inventory(client, admin_h)
+
+    r = await client.post("/api/v1/order-requests", headers=cashier_h, json={
+        "branch_id": warehouse_id, "purpose": "office_use",
+        "lines": [{"product_id": product_id, "requested_qty": 1}],
+    })
+    assert r.status_code == 201, r.text
+    request_id = r.json()["id"]
+
+    # A requester can cancel their own pending request (before it is issued).
+    r = await client.post(f"/api/v1/order-requests/{request_id}/cancel", headers=cashier_h,
+                          json={"reason": "No longer needed"})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "cancelled"
+    assert r.json()["comments"] == "No longer needed"

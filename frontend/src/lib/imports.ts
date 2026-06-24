@@ -83,6 +83,7 @@ export interface ImportJobList {
 }
 
 export const importsApi = {
+  targets: () => api.get<ImportTarget[]>("/imports/targets"),
   getTarget: (key: string) => api.get<ImportTarget>(`/imports/targets/${key}`),
 
   upload: (key: string, file: File) => {

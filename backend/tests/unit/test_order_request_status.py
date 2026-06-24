@@ -35,3 +35,18 @@ def test_outstanding():
     assert S.outstanding(10, 6) == 4
     assert S.outstanding(5, 5) == 0
     assert S.outstanding(5, 7) == 0  # never negative
+
+
+def test_issued_completes_only_via_explicit_step():
+    assert S.can_transition(S.ISSUED, S.COMPLETED)      # issued -> completed
+    assert not S.can_transition(S.COMPLETED, S.ISSUED)  # completed is terminal
+    assert not S.can_transition(S.COMPLETED, S.CANCELLED)
+    assert S.COMPLETED in S.STATUSES
+
+
+def test_cancel_allowed_before_issue_only():
+    assert S.can_transition(S.PENDING, S.CANCELLED)
+    assert S.can_transition(S.APPROVED, S.CANCELLED)
+    assert S.can_transition(S.PARTIALLY_APPROVED, S.CANCELLED)
+    assert not S.can_transition(S.ISSUED, S.CANCELLED)     # too late once issued
+    assert not S.can_transition(S.REJECTED, S.CANCELLED)
