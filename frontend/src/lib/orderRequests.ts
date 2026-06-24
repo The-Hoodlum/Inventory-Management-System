@@ -12,9 +12,11 @@ export type RequestStatus =
   | "completed";
 
 export const PURPOSES: { value: string; label: string }[] = [
-  { value: "for_sale", label: "For Sale" },
+  { value: "for_sale", label: "Sale Fulfilment" },
   { value: "shelf_replenishment", label: "Shelf Replenishment" },
-  { value: "workshop_use", label: "Workshop Use" },
+  { value: "branch_transfer", label: "Branch Transfer" },
+  { value: "workshop_use", label: "Workshop Consumption" },
+  { value: "stock_adjustment", label: "Stock Adjustment" },
   { value: "office_use", label: "Office Use" },
   { value: "other", label: "Other" },
 ];
