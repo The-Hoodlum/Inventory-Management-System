@@ -34,6 +34,7 @@ export function NewOrderRequestModal({ onClose }: { onClose: () => void }) {
     : warehouses.list;
 
   const [branchId, setBranchId] = useState("");
+  const [destinationId, setDestinationId] = useState("");
   const [purpose, setPurpose] = useState(PURPOSES[0].value);
   const [comments, setComments] = useState("");
   const [search, setSearch] = useState("");
@@ -65,6 +66,7 @@ export function NewOrderRequestModal({ onClose }: { onClose: () => void }) {
     mutationFn: () =>
       orderRequestsApi.create({
         branch_id: effectiveBranch,
+        destination_branch_id: purpose === "branch_transfer" ? destinationId || null : null,
         purpose,
         comments: comments.trim() || null,
         lines: lines.map((l) => ({
@@ -85,8 +87,12 @@ export function NewOrderRequestModal({ onClose }: { onClose: () => void }) {
     setSearch("");
   }
 
+  const isTransfer = purpose === "branch_transfer";
   const valid =
-    !!effectiveBranch && lines.length > 0 && lines.every((l) => Number(l.qty) > 0);
+    !!effectiveBranch &&
+    lines.length > 0 &&
+    lines.every((l) => Number(l.qty) > 0) &&
+    (!isTransfer || (!!destinationId && destinationId !== effectiveBranch));
 
   return (
     <Modal
@@ -133,6 +139,26 @@ export function NewOrderRequestModal({ onClose }: { onClose: () => void }) {
             </select>
           </label>
         </div>
+
+        {isTransfer && (
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium text-slate-700">Destination location</span>
+            <select
+              value={destinationId}
+              onChange={(e) => setDestinationId(e.target.value)}
+              className={`${INPUT} w-full`}
+            >
+              <option value="">— choose destination —</option>
+              {warehouses.list
+                .filter((w) => w.id !== effectiveBranch)
+                .map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name}
+                  </option>
+                ))}
+            </select>
+          </label>
+        )}
 
         <div>
           <span className="mb-1 block text-sm font-medium text-slate-700">Search inventory</span>

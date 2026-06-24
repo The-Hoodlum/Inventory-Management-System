@@ -53,6 +53,7 @@ services:
       - ./database/sql/import_targets_supplier_warehouse.sql:/docker-entrypoint-initdb.d/22_import_targets_supplier_warehouse.sql:ro
       - ./database/sql/order_request_purposes.sql:/docker-entrypoint-initdb.d/23_order_request_purposes.sql:ro
       - ./database/sql/seed_demo_locations.sql:/docker-entrypoint-initdb.d/24_seed_demo_locations.sql:ro
+      - ./database/sql/order_request_transfers.sql:/docker-entrypoint-initdb.d/25_order_request_transfers.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-inventory}"]
       interval: 5s

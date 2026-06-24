@@ -57,6 +57,7 @@ class FakeRepo:
         self.headers: dict = {}
         self.audits: list = []
         self.issued: list = []
+        self.transfers: list = []
         self.calls: dict = {}
         self._on_hand = on_hand or {}
         self._branch_ids = branch_ids or set()  # empty = unrestricted
@@ -67,9 +68,11 @@ class FakeRepo:
     async def user_branch_ids(self, user_id):
         return self._branch_ids
 
-    async def create(self, *, tenant_id, request_number, branch_id, requested_by, purpose, comments, lines):
+    async def create(self, *, tenant_id, request_number, branch_id, requested_by, purpose, comments,
+                     lines, destination_branch_id=None):
         h = _Header(
             id=uuid.uuid4(), tenant_id=tenant_id, request_number=request_number, branch_id=branch_id,
+            destination_branch_id=destination_branch_id,
             requested_by=requested_by, purpose=purpose, status="pending", comments=comments,
             requested_date=dt.datetime.now(dt.UTC), approved_by=None, approved_date=None,
             issued_by=None, issued_date=None,
@@ -96,6 +99,14 @@ class FakeRepo:
             return f"Insufficient stock for product {line.product_id}"
         line.issued_qty = qty
         self.issued.append((line.product_id, qty))
+        return None
+
+    async def transfer_line(self, *, tenant_id, line, source_id, dest_id, qty, user_id, request_id):
+        avail = self._on_hand.get(line.product_id, Decimal("9999"))
+        if avail < qty:
+            return f"Insufficient stock for product {line.product_id}"
+        line.issued_qty = qty
+        self.transfers.append((line.product_id, qty, source_id, dest_id))
         return None
 
     async def list_requests(self, **filters):
@@ -356,3 +367,32 @@ async def test_complete_records_receipt_and_discrepancy():
     first = next(ln for ln in completed.lines if ln.id == line_ids[0])
     assert first.received_qty == 9 and first.missing_qty == 1
     assert any(a["action"] == "completed" for a in repo.audits)
+
+
+async def test_branch_transfer_requires_destination():
+    svc, _ = _svc()
+    with pytest.raises(BusinessRuleError):
+        await svc.create(tenant_id=TENANT, user_id=CASHIER, payload=OrderRequestCreate(
+            branch_id=BRANCH, purpose="branch_transfer",
+            lines=[OrderRequestLineCreate(product_id=P1, requested_qty=1)],
+        ))
+
+
+async def test_branch_transfer_issue_credits_destination():
+    repo = FakeRepo()
+    svc = OrderRequestService(repo, FakeAudit())
+    dest = uuid.uuid4()
+    out = await svc.create(tenant_id=TENANT, user_id=CASHIER, payload=OrderRequestCreate(
+        branch_id=BRANCH, destination_branch_id=dest, purpose="branch_transfer",
+        lines=[OrderRequestLineCreate(product_id=P1, requested_qty=4)],
+    ))
+    assert out.destination_branch_id == dest
+    line_id = out.lines[0].id
+    await svc.approve(tenant_id=TENANT, actor_id=ADMIN, request_id=out.id,
+                      payload=ApproveRequest(lines=[LineApproval(line_id=line_id, approved_qty=4)]))
+    issued = await svc.issue(tenant_id=TENANT, actor_id=ADMIN, request_id=out.id)
+    assert issued.status == S.ISSUED
+    # Routed through transfer_line (source -> destination), not a plain issue.
+    assert len(repo.transfers) == 1 and repo.issued == []
+    pid, qty, src, dst = repo.transfers[0]
+    assert pid == P1 and src == BRANCH and dst == dest and float(qty) == 4

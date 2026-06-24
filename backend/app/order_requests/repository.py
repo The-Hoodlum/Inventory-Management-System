@@ -48,9 +48,11 @@ class OrderRequestRepository:
     async def create(
         self, *, tenant_id: uuid.UUID, request_number: str, branch_id: uuid.UUID,
         requested_by: uuid.UUID, purpose: str, comments: str | None, lines: list[dict],
+        destination_branch_id: uuid.UUID | None = None,
     ) -> RequestHeader:
         header = RequestHeader(
             tenant_id=tenant_id, request_number=request_number, branch_id=branch_id,
+            destination_branch_id=destination_branch_id,
             requested_by=requested_by, purpose=purpose, status="pending", comments=comments,
         )
         self.session.add(header)
@@ -119,6 +121,58 @@ class OrderRequestRepository:
             tenant_id=tenant_id, product_id=line.product_id, warehouse_id=branch_id,
             movement_type="issue", quantity=-qty, reference_type="order_request",
             reference_id=request_id, reason="Order request issue", user_id=user_id,
+        ))
+        line.issued_qty = qty
+        await self.session.flush()
+        return None
+
+    async def transfer_line(
+        self, *, tenant_id: uuid.UUID, line: RequestLine, source_id: uuid.UUID,
+        dest_id: uuid.UUID, qty: Decimal, user_id: uuid.UUID, request_id: uuid.UUID,
+    ) -> str | None:
+        """Move `qty` of the line's product source -> destination: debit source, credit
+        destination, and record paired transfer_out / transfer_in movements. Returns an
+        error string if the source has insufficient stock, else None. Both inventory rows
+        are locked in a deterministic order (by warehouse id) to avoid deadlocks."""
+        if qty <= 0:
+            return None
+        locked: dict[uuid.UUID, Inventory] = {}
+        for wid in sorted({source_id, dest_id}, key=str):
+            inv = await self.session.scalar(
+                select(Inventory).where(
+                    Inventory.product_id == line.product_id, Inventory.warehouse_id == wid
+                ).with_for_update()
+            )
+            if inv is None:
+                inv = Inventory(
+                    tenant_id=tenant_id, product_id=line.product_id, warehouse_id=wid,
+                    qty_on_hand=Decimal("0"), qty_reserved=Decimal("0"),
+                    qty_damaged=Decimal("0"), version=0,
+                )
+                self.session.add(inv)
+                await self.session.flush()
+            locked[wid] = inv
+        src, dst = locked[source_id], locked[dest_id]
+        if src.qty_on_hand < qty:
+            return (
+                f"Insufficient stock for product {line.product_id} at the source "
+                f"(on hand {_f(src.qty_on_hand):g}, need {_f(qty):g})"
+            )
+        src.qty_on_hand = src.qty_on_hand - qty
+        src.version = (src.version or 0) + 1
+        dst.qty_on_hand = dst.qty_on_hand + qty
+        dst.version = (dst.version or 0) + 1
+        self.session.add(StockMovement(
+            tenant_id=tenant_id, product_id=line.product_id, warehouse_id=source_id,
+            movement_type="transfer_out", quantity=-qty, reference_type="order_request",
+            reference_id=request_id, from_warehouse_id=source_id, to_warehouse_id=dest_id,
+            reason="Order request transfer", user_id=user_id,
+        ))
+        self.session.add(StockMovement(
+            tenant_id=tenant_id, product_id=line.product_id, warehouse_id=dest_id,
+            movement_type="transfer_in", quantity=qty, reference_type="order_request",
+            reference_id=request_id, from_warehouse_id=source_id, to_warehouse_id=dest_id,
+            reason="Order request transfer", user_id=user_id,
         ))
         line.issued_qty = qty
         await self.session.flush()
