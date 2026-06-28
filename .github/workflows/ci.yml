@@ -88,7 +88,11 @@ jobs:
             database/sql/order_request_purposes.sql \
             database/sql/seed_demo_locations.sql \
             database/sql/order_request_transfers.sql \
-            database/sql/inventory_reservations.sql ; do
+            database/sql/inventory_reservations.sql \
+            database/sql/branches.sql \
+            database/sql/seed_demo_branches.sql \
+            database/sql/stock_transfers.sql \
+            database/sql/stock_transfer_ledger.sql ; do
             echo "applying $f"
             psql -v ON_ERROR_STOP=1 -f "$f"
           done
