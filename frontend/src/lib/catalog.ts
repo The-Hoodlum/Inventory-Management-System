@@ -65,6 +65,7 @@ export interface WarehouseInput {
   code: string;
   name: string;
   address?: string | null;
+  branch_id?: string | null;
   is_active: boolean;
 }
 

@@ -56,6 +56,7 @@ from app.reorder.service import ReorderService
 from app.reports.repository import ReportsRepository
 from app.reports.service import ReportsService
 from app.repositories.audit_repo import AuditRepository
+from app.repositories.branch_repo import BranchRepository
 from app.repositories.inventory_repo import InventoryRepository
 from app.repositories.product_repo import ProductRepository
 from app.repositories.refresh_repo import RefreshSessionRepository
@@ -65,6 +66,7 @@ from app.repositories.user_admin_repo import UserAdminRepository
 from app.repositories.user_repo import UserRepository
 from app.repositories.warehouse_repo import WarehouseRepository
 from app.services.auth_service import AuthService
+from app.services.branch_service import BranchService
 from app.services.inventory_service import InventoryService
 from app.services.product_service import ProductService
 from app.services.supplier_service import SupplierService
@@ -191,6 +193,10 @@ def get_supplier_service(db: AsyncSession = Depends(get_db)) -> SupplierService:
 
 def get_warehouse_service(db: AsyncSession = Depends(get_db)) -> WarehouseService:
     return WarehouseService(WarehouseRepository(db), AuditRepository(db))
+
+
+def get_branch_service(db: AsyncSession = Depends(get_db)) -> BranchService:
+    return BranchService(BranchRepository(db), AuditRepository(db))
 
 
 def get_inventory_service(db: AsyncSession = Depends(get_db)) -> InventoryService:

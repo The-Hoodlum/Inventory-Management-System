@@ -39,6 +39,9 @@ class RequestHeader(Base):
     approved_date: Mapped[dt.datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
     issued_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"))
     issued_date: Mapped[dt.datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    # Receipt: who/when the destination confirmed arrival (issued/in_transit -> received).
+    received_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"))
+    received_date: Mapped[dt.datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
     comments: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Receipt confirmation (issued -> completed). 'completed' is a deliberate, explicit step
     # by the receiving user and never happens automatically just because stock was issued.
@@ -70,6 +73,9 @@ class RequestLine(Base):
     received_qty: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
     missing_qty: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
     damaged_qty: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    # Received MORE than issued (over-delivery). Reconciliation invariant:
+    #   received_qty + missing_qty + damaged_qty = issued_qty + extra_qty
+    extra_qty: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
 
 
 class RequestAudit(Base):
@@ -84,4 +90,38 @@ class RequestAudit(Base):
     action: Mapped[str] = mapped_column(Text, nullable=False)
     old_status: Mapped[str | None] = mapped_column(Text, nullable=True)
     new_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class StockTransferLedger(Base):
+    """Append-only, immutable per-line transfer event log (full snapshot). The app
+    only ever INSERTs (app_user has no UPDATE/DELETE grant). See sql/stock_transfer_ledger.sql."""
+
+    __tablename__ = "stock_transfer_ledger"
+
+    id: Mapped[uuid.UUID] = mapped_column(_UUID, primary_key=True, server_default=text("gen_random_uuid()"))
+    tenant_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    request_id: Mapped[uuid.UUID] = mapped_column(_UUID, nullable=False)
+    request_number: Mapped[str] = mapped_column(Text, nullable=False)
+    line_id: Mapped[uuid.UUID] = mapped_column(_UUID, nullable=False)
+    product_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("products.id", ondelete="RESTRICT"), nullable=False)
+    event: Mapped[str] = mapped_column(Text, nullable=False)
+    qty_requested: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    qty_approved: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    qty_issued: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    qty_received: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    qty_missing: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    qty_damaged: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    qty_extra: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    source_branch_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, nullable=True)
+    source_location_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, nullable=True)
+    dest_branch_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, nullable=True)
+    dest_location_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, nullable=True)
+    transfer_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    requested_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, nullable=True)
+    approved_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, nullable=True)
+    issued_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, nullable=True)
+    received_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))

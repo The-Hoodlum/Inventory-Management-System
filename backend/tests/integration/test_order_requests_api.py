@@ -91,21 +91,23 @@ async def test_full_request_flow_create_approve_issue(client):
                           json={"lines": [{"line_id": line_id, "approved_qty": 1}]})
     assert r.status_code == 403, r.text  # cashier lacks order_request.approve
 
-    # 3) Admin approves in full
+    # 3) Admin approves in full -> stock is RESERVED (available drops now, on-hand unchanged)
+    avail_before = await _qty(client, admin_h, product_id, warehouse_id)
     r = await client.post(f"/api/v1/order-requests/{request_id}/approve", headers=admin_h,
                           json={"lines": [{"line_id": line_id, "approved_qty": 1}]})
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "approved"
+    avail_after_approve = await _qty(client, admin_h, product_id, warehouse_id)
+    assert avail_after_approve == avail_before - 1  # reserved at approval
 
-    # 4) Admin issues -> inventory deducted
-    before = await _qty(client, admin_h, product_id, warehouse_id)
+    # 4) Admin issues -> reservation consumed + on-hand deducted (available unchanged)
     r = await client.post(f"/api/v1/order-requests/{request_id}/issue", headers=admin_h)
     assert r.status_code == 200, r.text
     issued = r.json()
     assert issued["status"] == "issued"
     assert issued["lines"][0]["issued_qty"] == 1
     after = await _qty(client, admin_h, product_id, warehouse_id)
-    assert after == before - 1  # exactly one unit deducted at issue time
+    assert after == avail_after_approve  # consume nets out: on-hand -1, reserved -1
 
     # 5) Audit trail records the transitions
     r = await client.get(f"/api/v1/order-requests/{request_id}/audit", headers=admin_h)

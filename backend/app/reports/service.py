@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from decimal import Decimal
 
 from app.reports import compute
 from app.reports.repository import ReportsRepository
@@ -11,6 +12,8 @@ from app.reports.schemas import (
     AgingBucket,
     AgingItem,
     InventoryAgingReport,
+    StockPositionReport,
+    StockPositionRow,
     SupplierPerformanceReport,
     SupplierPerformanceRow,
 )
@@ -56,6 +59,44 @@ class ReportsService:
             for b in result.buckets
         ]
         return InventoryAgingReport(as_of=as_of, buckets=buckets, items=items)
+
+    async def get_stock_position(
+        self, *, branch_id: uuid.UUID | None = None, warehouse_id: uuid.UUID | None = None
+    ) -> StockPositionReport:
+        as_of = dt.datetime.now(dt.UTC)
+        rows = await self.repo.stock_position(branch_id=branch_id, warehouse_id=warehouse_id)
+        in_transit = await self.repo.in_transit_by_location(branch_id=branch_id, warehouse_id=warehouse_id)
+
+        merged: dict[tuple[uuid.UUID, uuid.UUID], StockPositionRow] = {}
+        for r in rows:
+            key = (r["location_id"], r["product_id"])
+            merged[key] = StockPositionRow(
+                branch_id=r["branch_id"], branch_name=r["branch_name"],
+                location_id=r["location_id"], location_name=r["location_name"],
+                product_id=r["product_id"], sku=r["sku"], name=r["name"],
+                on_hand=r["on_hand"], reserved=r["reserved"], available=r["available"],
+                in_transit=in_transit.get(key, Decimal("0")),
+            )
+        # In-transit toward a location that has no inventory row yet (first delivery).
+        leftover = {k: v for k, v in in_transit.items() if k not in merged}
+        if leftover:
+            products = await self.repo.product_lookup()       # id -> (sku, name, cost)
+            locations = await self.repo.locations_lookup()    # id -> (branch_id, loc_name, branch_name)
+            for (loc_id, prod_id), qty in leftover.items():
+                bid, loc_name, bname = locations.get(loc_id, (None, None, None))
+                if branch_id is not None and bid != branch_id:
+                    continue
+                sku, name, _cost = products.get(prod_id, (None, None, None))
+                merged[(loc_id, prod_id)] = StockPositionRow(
+                    branch_id=bid, branch_name=bname, location_id=loc_id, location_name=loc_name,
+                    product_id=prod_id, sku=sku, name=name,
+                    on_hand=Decimal("0"), reserved=Decimal("0"), available=Decimal("0"),
+                    in_transit=qty,
+                )
+        result = sorted(
+            merged.values(), key=lambda x: ((x.branch_name or ""), (x.location_name or ""), (x.name or ""))
+        )
+        return StockPositionReport(as_of=as_of, rows=result)
 
     async def get_supplier_performance(
         self, window_days: int | None = 365

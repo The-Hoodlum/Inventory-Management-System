@@ -9,7 +9,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 
 import { api } from "@/lib/api";
-import type { Page, Product, Supplier, Warehouse } from "@/types/api";
+import type { Branch, Page, Product, Supplier, Warehouse } from "@/types/api";
 
 async function fetchAll<T>(path: string, pageSize = 200, cap = 5000): Promise<T[]> {
   const out: T[] = [];
@@ -40,6 +40,16 @@ export function useSuppliers(): RefData<Supplier> {
   const q = useQuery({
     queryKey: ["ref", "suppliers"],
     queryFn: () => fetchAll<Supplier>("/suppliers"),
+    staleTime: STALE,
+  });
+  const map = useMemo(() => toMap(q.data), [q.data]);
+  return { list: q.data ?? [], map, isLoading: q.isLoading, isError: q.isError };
+}
+
+export function useBranches(): RefData<Branch> {
+  const q = useQuery({
+    queryKey: ["ref", "branches"],
+    queryFn: () => fetchAll<Branch>("/branches"),
     staleTime: STALE,
   });
   const map = useMemo(() => toMap(q.data), [q.data]);

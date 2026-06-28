@@ -6,12 +6,14 @@ import { Modal } from "@/components/Modal";
 import { Field, emptyToNull, inputClass } from "@/components/form";
 import { Button } from "@/components/ui";
 import { catalogApi, type WarehouseInput } from "@/lib/catalog";
+import { useBranches } from "@/lib/refdata";
 import type { Warehouse } from "@/types/api";
 
 interface FormState {
   code: string;
   name: string;
   address: string;
+  branch_id: string;
   is_active: boolean;
 }
 
@@ -26,10 +28,12 @@ export function WarehouseFormModal({
 }) {
   const qc = useQueryClient();
   const { hasPermission } = useAuth();
+  const branches = useBranches();
   const [form, setForm] = useState<FormState>(() => ({
     code: initial?.code ?? "",
     name: initial?.name ?? "",
     address: initial?.address ?? "",
+    branch_id: initial?.branch_id ?? "",
     is_active: initial?.is_active ?? true,
   }));
   const [err, setErr] = useState<string | null>(null);
@@ -50,6 +54,7 @@ export function WarehouseFormModal({
         code: form.code.trim(),
         name: form.name.trim(),
         address: emptyToNull(form.address),
+        branch_id: form.branch_id || null,
         is_active: form.is_active,
       };
       return mode === "create"
@@ -132,6 +137,20 @@ export function WarehouseFormModal({
             value={form.address}
             onChange={(e) => set("address", e.target.value)}
           />
+        </Field>
+        <Field label="Branch" hint="The site this location belongs to">
+          <select
+            className={inputClass}
+            value={form.branch_id}
+            onChange={(e) => set("branch_id", e.target.value)}
+          >
+            <option value="">— unassigned —</option>
+            {branches.list.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+              </option>
+            ))}
+          </select>
         </Field>
         <label className="flex items-center gap-2 text-sm text-slate-600">
           <input
