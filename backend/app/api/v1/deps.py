@@ -57,6 +57,7 @@ from app.reports.repository import ReportsRepository
 from app.reports.service import ReportsService
 from app.repositories.audit_repo import AuditRepository
 from app.repositories.branch_repo import BranchRepository
+from app.repositories.customer_repo import CustomerRepository
 from app.repositories.inventory_repo import InventoryRepository
 from app.repositories.product_repo import ProductRepository
 from app.repositories.refresh_repo import RefreshSessionRepository
@@ -65,8 +66,11 @@ from app.repositories.tenant_repo import TenantRepository
 from app.repositories.user_admin_repo import UserAdminRepository
 from app.repositories.user_repo import UserRepository
 from app.repositories.warehouse_repo import WarehouseRepository
+from app.sales.repository import SalesRepository
+from app.sales.service import SalesService
 from app.services.auth_service import AuthService
 from app.services.branch_service import BranchService
+from app.services.customer_service import CustomerService
 from app.services.inventory_service import InventoryService
 from app.services.product_service import ProductService
 from app.services.supplier_service import SupplierService
@@ -197,6 +201,14 @@ def get_warehouse_service(db: AsyncSession = Depends(get_db)) -> WarehouseServic
 
 def get_branch_service(db: AsyncSession = Depends(get_db)) -> BranchService:
     return BranchService(BranchRepository(db), AuditRepository(db))
+
+
+def get_customer_service(db: AsyncSession = Depends(get_db)) -> CustomerService:
+    return CustomerService(CustomerRepository(db), AuditRepository(db))
+
+
+def get_sales_service(db: AsyncSession = Depends(get_db)) -> SalesService:
+    return SalesService(SalesRepository(db), AuditRepository(db))
 
 
 def get_inventory_service(db: AsyncSession = Depends(get_db)) -> InventoryService:

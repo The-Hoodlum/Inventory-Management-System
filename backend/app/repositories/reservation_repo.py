@@ -23,8 +23,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Inventory, InventoryReservation, StockMovement
 
-# Reservations raised by an order-request / transfer are keyed to the line, so a
-# partial issue can consume part of a line's hold and leave the rest reserved.
+# Reservations are keyed to the demand LINE that raised them, so a partial issue can
+# consume part of a line's hold and leave the rest reserved. The reference_type names
+# the demand kind ('order_request_line' for transfers, 'sales_order_line' for sales).
 REF_TYPE = "order_request_line"
 
 
@@ -34,7 +35,7 @@ class ReservationRepository:
 
     async def reserve(
         self, *, tenant_id: uuid.UUID, inv: Inventory, qty: Decimal,
-        reference_id: uuid.UUID, user_id: uuid.UUID | None,
+        reference_id: uuid.UUID, user_id: uuid.UUID | None, reference_type: str = REF_TYPE,
     ) -> InventoryReservation:
         """Hold ``qty`` against an already-locked inventory row. The caller must have
         verified availability (``qty_available >= qty``) under the same lock."""
@@ -42,22 +43,24 @@ class ReservationRepository:
         inv.version = (inv.version or 0) + 1
         reservation = InventoryReservation(
             tenant_id=tenant_id, product_id=inv.product_id, warehouse_id=inv.warehouse_id,
-            qty=qty, status="active", reference_type=REF_TYPE, reference_id=reference_id,
+            qty=qty, status="active", reference_type=reference_type, reference_id=reference_id,
             created_by=user_id,
         )
         self.session.add(reservation)
         self.session.add(StockMovement(
             tenant_id=tenant_id, product_id=inv.product_id, warehouse_id=inv.warehouse_id,
-            movement_type="reserve", quantity=-qty, reference_type="order_request",
-            reference_id=reference_id, reason="Stock reserved on approval", user_id=user_id,
+            movement_type="reserve", quantity=-qty, reference_type=reference_type,
+            reference_id=reference_id, reason="Stock reserved", user_id=user_id,
         ))
         await self.session.flush()
         return reservation
 
-    async def active_for(self, reference_id: uuid.UUID) -> InventoryReservation | None:
+    async def active_for(
+        self, reference_id: uuid.UUID, reference_type: str = REF_TYPE
+    ) -> InventoryReservation | None:
         return await self.session.scalar(
             select(InventoryReservation).where(
-                InventoryReservation.reference_type == REF_TYPE,
+                InventoryReservation.reference_type == reference_type,
                 InventoryReservation.reference_id == reference_id,
                 InventoryReservation.status == "active",
             ).with_for_update()

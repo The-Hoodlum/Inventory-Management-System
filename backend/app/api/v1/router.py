@@ -7,6 +7,7 @@ from app.advisor.api import router as advisor_router
 from app.api.v1.endpoints import (
     auth,
     branches,
+    customers,
     inventory,
     products,
     suppliers,
@@ -26,12 +27,14 @@ from app.order_requests.api import router as order_requests_router
 from app.procurement.api import router as procurement_router
 from app.reorder.api import purchase_order_router, reorder_router
 from app.reports.api import router as reports_router
+from app.sales.api import router as sales_router
 
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(products.router, prefix="/products", tags=["products"])
 api_router.include_router(suppliers.router, prefix="/suppliers", tags=["suppliers"])
 api_router.include_router(branches.router, prefix="/branches", tags=["branches"])
+api_router.include_router(customers.router, prefix="/customers", tags=["customers"])
 api_router.include_router(warehouses.router, prefix="/warehouses", tags=["warehouses"])
 api_router.include_router(inventory.router, prefix="/inventory", tags=["inventory"])
 api_router.include_router(reorder_router, prefix="/reorder", tags=["reorder"])
@@ -52,3 +55,4 @@ api_router.include_router(intelligence_router, prefix="/intelligence", tags=["in
 api_router.include_router(users.router, prefix="/users", tags=["users"])
 api_router.include_router(tenant.router, prefix="/tenant", tags=["tenant"])
 api_router.include_router(order_requests_router, prefix="/order-requests", tags=["order-requests"])
+api_router.include_router(sales_router, prefix="/sales", tags=["sales"])
