@@ -1,0 +1,344 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Plus, Trash2 } from "lucide-react";
+import { useState } from "react";
+
+import { useAuth } from "@/auth/AuthContext";
+import { Modal } from "@/components/Modal";
+import { PageHeader } from "@/components/PageHeader";
+import { Button, Card, Spinner, StatusBadge } from "@/components/ui";
+import { ApiError } from "@/lib/api";
+import { catalogApi } from "@/lib/catalog";
+import { useCustomers } from "@/lib/customers";
+import { formatDate, formatMoney, titleCase } from "@/lib/format";
+import { useBranches, useWarehouses } from "@/lib/refdata";
+import { PAYMENT_METHODS, type PaymentMethod, salesApi } from "@/lib/sales";
+
+const INPUT =
+  "rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500";
+const TH = "px-4 py-2.5 text-left text-xs font-medium uppercase tracking-wide text-slate-500";
+const THR = "px-4 py-2.5 text-right text-xs font-medium uppercase tracking-wide text-slate-500";
+
+type Tab = "orders" | "quotations" | "invoices";
+
+export default function SalesPage() {
+  const { hasPermission } = useAuth();
+  const canOrder = hasPermission("sales.order");
+  const [tab, setTab] = useState<Tab>("orders");
+  const [showNew, setShowNew] = useState(false);
+  const [orderId, setOrderId] = useState<string | null>(null);
+  const [payInvoice, setPayInvoice] = useState<string | null>(null);
+
+  const orders = useQuery({ queryKey: ["sales", "orders"], queryFn: () => salesApi.listOrders(), enabled: tab === "orders" });
+  const quotes = useQuery({ queryKey: ["sales", "quotes"], queryFn: () => salesApi.listQuotations(), enabled: tab === "quotations" });
+  const invoices = useQuery({ queryKey: ["sales", "invoices"], queryFn: () => salesApi.listInvoices(), enabled: tab === "invoices" });
+
+  return (
+    <div>
+      <PageHeader
+        title="Sales"
+        description="Quotations, sales orders, deliveries and invoices — fully linked and traceable."
+        actions={canOrder ? (
+          <Button onClick={() => setShowNew(true)}><Plus className="h-4 w-4" /> New order</Button>
+        ) : undefined}
+      />
+
+      <div className="mb-4 flex gap-1 border-b border-slate-200">
+        {(["orders", "quotations", "invoices"] as Tab[]).map((t) => (
+          <button key={t} onClick={() => setTab(t)}
+            className={"rounded-t-lg px-4 py-2 text-sm font-medium transition " +
+              (tab === t ? "border-b-2 border-brand-600 text-brand-700" : "text-slate-500 hover:text-slate-700")}>
+            {titleCase(t)}
+          </button>
+        ))}
+      </div>
+
+      {tab === "orders" && (
+        <DocTable q={orders} cols={["Order #", "Customer", "Location", "Status", "Total", "Date"]}
+          row={(o) => (
+            <tr key={o.id} onClick={() => setOrderId(o.id)} className="cursor-pointer hover:bg-slate-50">
+              <td className="px-4 py-3 font-mono text-[13px] font-medium">{o.so_number}</td>
+              <td className="px-4 py-3 text-slate-600">{o.customer_name ?? "—"}</td>
+              <td className="px-4 py-3 text-slate-600">{o.location_name ?? "—"}</td>
+              <td className="px-4 py-3"><StatusBadge status={o.status} /></td>
+              <td className="px-4 py-3 text-right font-mono">{formatMoney(o.grand_total)}</td>
+              <td className="px-4 py-3 text-slate-500">{formatDate(o.created_at)}</td>
+            </tr>
+          )} />
+      )}
+      {tab === "quotations" && (
+        <DocTable q={quotes} cols={["Quote #", "Customer", "Status", "Total", "Valid until", "Date"]}
+          row={(o) => (
+            <tr key={o.id} className="hover:bg-slate-50">
+              <td className="px-4 py-3 font-mono text-[13px] font-medium">{o.quote_number}</td>
+              <td className="px-4 py-3 text-slate-600">{o.customer_name ?? "—"}</td>
+              <td className="px-4 py-3"><StatusBadge status={o.status} /></td>
+              <td className="px-4 py-3 text-right font-mono">{formatMoney(o.grand_total)}</td>
+              <td className="px-4 py-3 text-slate-500">{o.valid_until ?? "—"}</td>
+              <td className="px-4 py-3 text-slate-500">{formatDate(o.created_at)}</td>
+            </tr>
+          )} />
+      )}
+      {tab === "invoices" && (
+        <DocTable q={invoices} cols={["Invoice #", "Customer", "Status", "Total", "Balance", ""]}
+          row={(o) => (
+            <tr key={o.id} className="hover:bg-slate-50">
+              <td className="px-4 py-3 font-mono text-[13px] font-medium">{o.invoice_number}</td>
+              <td className="px-4 py-3 text-slate-600">{o.customer_name ?? "—"}</td>
+              <td className="px-4 py-3"><StatusBadge status={o.status} /></td>
+              <td className="px-4 py-3 text-right font-mono">{formatMoney(o.grand_total)}</td>
+              <td className="px-4 py-3 text-right font-mono">{formatMoney(o.balance)}</td>
+              <td className="px-4 py-3 text-right">
+                {o.balance > 0 && hasPermission("sales.payment") && (
+                  <Button variant="secondary" onClick={() => setPayInvoice(o.id)}>Record payment</Button>
+                )}
+              </td>
+            </tr>
+          )} />
+      )}
+
+      {showNew && <NewOrderModal onClose={() => setShowNew(false)} />}
+      {orderId && <OrderDetailModal orderId={orderId} onClose={() => setOrderId(null)} onPay={setPayInvoice} />}
+      {payInvoice && <PaymentModal invoiceId={payInvoice} onClose={() => setPayInvoice(null)} />}
+    </div>
+  );
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function DocTable({ q, cols, row }: { q: any; cols: string[]; row: (o: any) => React.ReactNode }) {
+  if (q.isLoading) return <div className="flex h-40 items-center justify-center"><Spinner label="Loading…" /></div>;
+  const items = q.data ?? [];
+  if (items.length === 0) return <Card className="p-10 text-center text-sm text-slate-400">Nothing here yet.</Card>;
+  return (
+    <Card className="overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50"><tr className="border-b border-slate-200">
+            {cols.map((c, i) => <th key={c || i} className={i >= 3 ? THR : TH}>{c}</th>)}
+          </tr></thead>
+          <tbody className="divide-y divide-slate-100">{items.map(row)}</tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+function NewOrderModal({ onClose }: { onClose: () => void }) {
+  const qc = useQueryClient();
+  const customers = useCustomers();
+  const warehouses = useWarehouses();
+  const branches = useBranches();
+  const locLabel = (w: { name: string; branch_id: string | null }) => {
+    const b = w.branch_id ? branches.map.get(w.branch_id) : undefined;
+    return b ? `${b.name} · ${w.name}` : w.name;
+  };
+  const [customerId, setCustomerId] = useState("");
+  const [locationId, setLocationId] = useState("");
+  const [search, setSearch] = useState("");
+  const [lines, setLines] = useState<{ product_id: string; sku: string; name: string; qty: string; unit_price: string }[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+
+  const term = search.trim();
+  const searchQ = useQuery({
+    queryKey: ["product-search", term], enabled: term.length >= 2,
+    queryFn: () => catalogApi.products({ search: term, page: 1, page_size: 8 }),
+    placeholderData: (p) => p,
+  });
+  const added = new Set(lines.map((l) => l.product_id));
+  const matches = (searchQ.data?.items ?? []).filter((p) => !added.has(p.id)).slice(0, 8);
+
+  const create = useMutation({
+    mutationFn: () => salesApi.createOrder({
+      customer_id: customerId, location_id: locationId,
+      lines: lines.map((l) => ({ product_id: l.product_id, qty: Number(l.qty), unit_price: Number(l.unit_price) })),
+    }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["sales"] }); onClose(); },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : "Could not create order."),
+  });
+
+  const valid = customerId && locationId && lines.length > 0 && lines.every((l) => Number(l.qty) > 0);
+
+  return (
+    <Modal title="New sales order" size="xl" onClose={onClose} footer={
+      <>
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button disabled={!valid || create.isPending} onClick={() => { setErr(null); create.mutate(); }}>
+          {create.isPending ? "Creating…" : "Create order"}
+        </Button>
+      </>
+    }>
+      <div className="space-y-4">
+        {err && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block text-sm"><span className="mb-1 block font-medium text-slate-700">Customer</span>
+            <select value={customerId} onChange={(e) => setCustomerId(e.target.value)} className={`${INPUT} w-full`}>
+              <option value="">— choose —</option>
+              {(customers.data?.items ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select></label>
+          <label className="block text-sm"><span className="mb-1 block font-medium text-slate-700">Selling location</span>
+            <select value={locationId} onChange={(e) => setLocationId(e.target.value)} className={`${INPUT} w-full`}>
+              <option value="">— choose —</option>
+              {warehouses.list.map((w) => <option key={w.id} value={w.id}>{locLabel(w)}</option>)}
+            </select></label>
+        </div>
+        <div>
+          <span className="mb-1 block text-sm font-medium text-slate-700">Add products</span>
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name or SKU" className={`${INPUT} w-full`} />
+          {term.length >= 2 && matches.length > 0 && (
+            <div className="mt-1 max-h-40 overflow-y-auto rounded-lg border border-slate-200">
+              {matches.map((p) => (
+                <button key={p.id} onClick={() => { setLines((ls) => [...ls, { product_id: p.id, sku: p.sku, name: p.name, qty: "1", unit_price: String(Number(p.selling_price ?? 0)) }]); setSearch(""); }}
+                  className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-slate-50">
+                  <span><span className="font-medium">{p.name}</span> <span className="font-mono text-xs text-slate-400">{p.sku}</span></span>
+                  <Plus className="h-3.5 w-3.5 text-brand-600" />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        {lines.length > 0 && (
+          <table className="w-full text-sm">
+            <thead><tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+              <th className="py-2 font-medium">Item</th><th className="py-2 text-right font-medium">Qty</th>
+              <th className="py-2 text-right font-medium">Unit price</th><th /></tr></thead>
+            <tbody className="divide-y divide-slate-100">
+              {lines.map((l, i) => (
+                <tr key={l.product_id}>
+                  <td className="py-2"><div className="font-medium text-slate-800">{l.name}</div>
+                    <div className="font-mono text-xs text-slate-400">{l.sku}</div></td>
+                  <td className="py-2 text-right"><input type="number" min={1} value={l.qty}
+                    onChange={(e) => setLines((ls) => ls.map((x, j) => j === i ? { ...x, qty: e.target.value } : x))}
+                    className={`${INPUT} w-16 text-right`} /></td>
+                  <td className="py-2 text-right"><input type="number" min={0} value={l.unit_price}
+                    onChange={(e) => setLines((ls) => ls.map((x, j) => j === i ? { ...x, unit_price: e.target.value } : x))}
+                    className={`${INPUT} w-24 text-right`} /></td>
+                  <td className="py-2 text-right"><button onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}
+                    className="text-slate-400 hover:text-red-600"><Trash2 className="h-4 w-4" /></button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+function OrderDetailModal({ orderId, onClose, onPay }: { orderId: string; onClose: () => void; onPay: (id: string) => void }) {
+  const qc = useQueryClient();
+  const [err, setErr] = useState<string | null>(null);
+  const { data: o, isLoading } = useQuery({ queryKey: ["sales", "order", orderId], queryFn: () => salesApi.getOrder(orderId) });
+  const refresh = () => { void qc.invalidateQueries({ queryKey: ["sales"] }); };
+  const onErr = (e: unknown) => setErr(e instanceof ApiError ? e.message : "Action failed.");
+
+  const confirm = useMutation({ mutationFn: () => salesApi.confirmOrder(orderId), onSuccess: refresh, onError: onErr });
+  const deliver = useMutation({ mutationFn: () => salesApi.deliverOrder(orderId), onSuccess: refresh, onError: onErr });
+  const invoice = useMutation({
+    mutationFn: () => salesApi.createInvoice({ sales_order_id: orderId }),
+    onSuccess: (inv) => { refresh(); onClose(); onPay(inv.id); }, onError: onErr,
+  });
+
+  const status = o?.status ?? "";
+  const busy = confirm.isPending || deliver.isPending || invoice.isPending;
+  const { hasPermission } = useAuth();
+
+  return (
+    <Modal title={o ? `Order ${o.so_number}` : "Sales order"} size="xl" onClose={onClose} footer={
+      <>
+        <Button variant="secondary" onClick={onClose}>Close</Button>
+        {o && status === "draft" && hasPermission("sales.order") && (
+          <Button disabled={busy} onClick={() => { setErr(null); confirm.mutate(); }}>
+            {confirm.isPending ? "Reserving…" : "Confirm & reserve"}</Button>)}
+        {o && ["confirmed", "reserved", "picking", "partially_delivered"].includes(status) && hasPermission("sales.deliver") && (
+          <Button disabled={busy} onClick={() => { setErr(null); deliver.mutate(); }}>
+            {deliver.isPending ? "Delivering…" : "Deliver (issue stock)"}</Button>)}
+        {o && ["partially_delivered", "delivered", "confirmed", "reserved"].includes(status) && hasPermission("sales.invoice") && (
+          <Button disabled={busy} onClick={() => { setErr(null); invoice.mutate(); }}>
+            {invoice.isPending ? "Invoicing…" : "Create invoice"}</Button>)}
+      </>
+    }>
+      {isLoading || !o ? <div className="flex h-32 items-center justify-center"><Spinner label="Loading…" /></div> : (
+        <div className="space-y-4">
+          {err && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
+          <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+            <F label="Status"><StatusBadge status={o.status} /></F>
+            <F label="Customer">{o.customer_name ?? "—"}</F>
+            <F label="Location">{o.location_name ?? "—"}</F>
+            <F label="Total">{formatMoney(o.grand_total)}</F>
+            {o.quote_number && <F label="From quote">{o.quote_number}</F>}
+          </div>
+          <table className="w-full text-sm">
+            <thead><tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+              <th className="py-2 font-medium">Item</th><th className="py-2 text-right font-medium">Qty</th>
+              <th className="py-2 text-right font-medium">Reserved</th><th className="py-2 text-right font-medium">Delivered</th>
+              <th className="py-2 text-right font-medium">Price</th><th className="py-2 text-right font-medium">Total</th></tr></thead>
+            <tbody className="divide-y divide-slate-100">
+              {o.lines.map((l) => (
+                <tr key={l.id}>
+                  <td className="py-2"><div className="font-medium text-slate-800">{l.name ?? l.product_id}</div>
+                    <div className="font-mono text-xs text-slate-400">{l.sku}</div></td>
+                  <td className="py-2 text-right font-mono">{l.qty}</td>
+                  <td className="py-2 text-right font-mono text-amber-700">{l.reserved_qty}</td>
+                  <td className="py-2 text-right font-mono text-emerald-700">{l.delivered_qty}</td>
+                  <td className="py-2 text-right font-mono">{formatMoney(l.unit_price)}</td>
+                  <td className="py-2 text-right font-mono">{formatMoney(l.line_total)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function PaymentModal({ invoiceId, onClose }: { invoiceId: string; onClose: () => void }) {
+  const qc = useQueryClient();
+  const { data: inv } = useQuery({ queryKey: ["sales", "invoice", invoiceId], queryFn: () => salesApi.getInvoice(invoiceId) });
+  const [rows, setRows] = useState<{ method: PaymentMethod; amount: string }[]>([{ method: "cash", amount: "" }]);
+  const [err, setErr] = useState<string | null>(null);
+  const balance = inv?.balance ?? 0;
+  const entered = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+
+  const pay = useMutation({
+    mutationFn: () => salesApi.pay(invoiceId, rows.filter((r) => Number(r.amount) > 0).map((r) => ({ method: r.method, amount: Number(r.amount) }))),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["sales"] }); onClose(); },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : "Payment failed."),
+  });
+
+  return (
+    <Modal title={inv ? `Pay ${inv.invoice_number}` : "Record payment"} size="md" onClose={onClose} footer={
+      <>
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button disabled={entered <= 0 || entered > balance + 0.001 || pay.isPending}
+          onClick={() => { setErr(null); pay.mutate(); }}>
+          {pay.isPending ? "Recording…" : "Record payment"}</Button>
+      </>
+    }>
+      <div className="space-y-3">
+        {err && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
+        <div className="flex justify-between text-sm"><span className="text-slate-500">Outstanding balance</span>
+          <span className="font-mono font-semibold">{formatMoney(balance)}</span></div>
+        {rows.map((r, i) => (
+          <div key={i} className="grid grid-cols-2 gap-2">
+            <select value={r.method} onChange={(e) => setRows((rs) => rs.map((x, j) => j === i ? { ...x, method: e.target.value as PaymentMethod } : x))} className={INPUT}>
+              {PAYMENT_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+            <input type="number" min={0} value={r.amount} placeholder="Amount"
+              onChange={(e) => setRows((rs) => rs.map((x, j) => j === i ? { ...x, amount: e.target.value } : x))}
+              className={`${INPUT} text-right`} />
+          </div>
+        ))}
+        <div className="flex items-center justify-between">
+          <button onClick={() => setRows((rs) => [...rs, { method: "card", amount: "" }])} className="text-xs text-brand-600 hover:underline">+ Split payment</button>
+          <button onClick={() => setRows((rs) => rs.map((x, i) => i === 0 ? { ...x, amount: String(balance) } : x))} className="text-xs text-slate-500 hover:underline">Pay full</button>
+        </div>
+        {entered > balance + 0.001 && <div className="text-sm text-red-600">Exceeds the outstanding balance.</div>}
+      </div>
+    </Modal>
+  );
+}
+
+function F({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div className="flex items-center gap-2"><span className="text-slate-400">{label}:</span>
+    <span className="font-medium text-slate-700">{children}</span></div>;
+}
