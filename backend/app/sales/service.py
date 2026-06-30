@@ -35,7 +35,7 @@ from app.models import (
 from app.repositories.audit_repo import AuditRepository
 from app.sales.domain import pricing
 from app.sales.domain import status as S
-from app.sales.repository import SalesRepository
+from app.sales.repository import SO_LINE_REF, SalesRepository
 from app.sales.schemas import (
     ConvertToOrder,
     CreditNoteCreate,
@@ -62,6 +62,8 @@ from app.sales.schemas import (
     SalesOrderLineOut,
     SalesOrderOut,
 )
+from app.schemas.inventory import ReceiptLine, ReceiveStockRequest
+from app.services.inventory_service import InventoryService
 
 
 def _d(v) -> Decimal:
@@ -73,9 +75,15 @@ def _f(v) -> float:
 
 
 class SalesService:
-    def __init__(self, repo: SalesRepository, audit: AuditRepository) -> None:
+    def __init__(
+        self, repo: SalesRepository, audit: AuditRepository, inventory: InventoryService
+    ) -> None:
         self.repo = repo
         self.audit = audit
+        # Stock moves ONLY through the inventory service — the single source of truth
+        # for qty_on_hand, the ledger, the audit trail, and demand. Sales never mutates
+        # inventory itself.
+        self.inventory = inventory
 
     # ============================== quotation ============================= #
     async def create_quotation(
@@ -229,14 +237,15 @@ class SalesService:
             qty = max(Decimal("0"), min(qty, outstanding))
             if qty <= 0:
                 continue
-            err = await self.repo.deduct_line(
-                tenant_id=tenant_id, product_id=line.product_id, location_id=so.location_id,
-                qty=qty, user_id=user_id, reference_id=note.id,
-                reason=f"Sales delivery {note.delivery_number}", reservation_ref=line.id,
-                demand_source="sale",
+            # Deduct via the single inventory path: consumes this line's own reservation,
+            # writes the 'issue' ledger entry + audit log, and feeds demand. Raises on
+            # shortfall, rolling back the whole delivery.
+            await self.inventory.issue_against_reservation(
+                tenant_id=tenant_id, user_id=user_id, product_id=line.product_id,
+                warehouse_id=so.location_id, quantity=qty, reference_type="sales_delivery",
+                reference_id=note.id, reason=f"Sales delivery {note.delivery_number}",
+                reservation_ref=line.id, reservation_ref_type=SO_LINE_REF, demand_source="sale",
             )
-            if err:
-                raise BusinessRuleError(err)  # rolls back the whole delivery
             line.delivered_qty = _d(line.delivered_qty) + qty
             self.repo.session.add(DeliveryNoteLine(
                 tenant_id=tenant_id, delivery_note_id=note.id, sales_order_line_id=line.id,
@@ -385,13 +394,14 @@ class SalesService:
         await self.repo.session.flush()
         for line in so.lines:
             qty = _d(line.qty)
-            err = await self.repo.deduct_line(
-                tenant_id=tenant_id, product_id=line.product_id, location_id=payload.location_id,
-                qty=qty, user_id=user_id, reference_id=note.id,
-                reason=f"POS sale {note.delivery_number}", reservation_ref=None, demand_source="pos",
+            # POS holds no prior reservation but must still respect others' holds — the
+            # same inventory path enforces availability and writes ledger + audit + demand.
+            await self.inventory.issue_against_reservation(
+                tenant_id=tenant_id, user_id=user_id, product_id=line.product_id,
+                warehouse_id=payload.location_id, quantity=qty, reference_type="sales_delivery",
+                reference_id=note.id, reason=f"POS sale {note.delivery_number}",
+                reservation_ref=None, demand_source="pos",
             )
-            if err:
-                raise BusinessRuleError(err)
             line.delivered_qty = qty
             self.repo.session.add(DeliveryNoteLine(
                 tenant_id=tenant_id, delivery_note_id=note.id, sales_order_line_id=line.id,
@@ -454,12 +464,16 @@ class SalesService:
         ret.lines = lines
         self.repo.session.add(ret)
         await self.repo.session.flush()
-        for line in ret.lines:
-            await self.repo.restock_line(
-                tenant_id=tenant_id, product_id=line.product_id, location_id=payload.location_id,
-                qty=_d(line.qty), user_id=user_id, reference_id=ret.id,
-                reason=f"Customer return {ret.return_number}",
-            )
+        # Restock through the single inventory path: one 'receipt' movement + audit log
+        # per line, into the chosen return location — identical to a manual receive.
+        await self.inventory.receive(
+            tenant_id=tenant_id, user_id=user_id,
+            req=ReceiveStockRequest(
+                warehouse_id=payload.location_id,
+                lines=[ReceiptLine(product_id=ln.product_id, quantity=_d(ln.qty)) for ln in ret.lines],
+                reference_type="sales_return", reference_id=ret.id,
+            ),
+        )
         await self._audit(tenant_id, user_id, "sales_return", ret.id, "received", None, S.RET_RECEIVED)
         return await self._return_out(ret)
 

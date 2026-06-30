@@ -61,6 +61,7 @@ from app.repositories.customer_repo import CustomerRepository
 from app.repositories.inventory_repo import InventoryRepository
 from app.repositories.product_repo import ProductRepository
 from app.repositories.refresh_repo import RefreshSessionRepository
+from app.repositories.reservation_repo import ReservationRepository
 from app.repositories.supplier_repo import SupplierRepository
 from app.repositories.tenant_repo import TenantRepository
 from app.repositories.user_admin_repo import UserAdminRepository
@@ -207,16 +208,23 @@ def get_customer_service(db: AsyncSession = Depends(get_db)) -> CustomerService:
     return CustomerService(CustomerRepository(db), AuditRepository(db))
 
 
-def get_sales_service(db: AsyncSession = Depends(get_db)) -> SalesService:
-    return SalesService(SalesRepository(db), AuditRepository(db))
-
-
 def get_inventory_service(db: AsyncSession = Depends(get_db)) -> InventoryService:
     return InventoryService(
         InventoryRepository(db),
         ProductRepository(db),
         WarehouseRepository(db),
         AuditRepository(db),
+        ReservationRepository(db),
+    )
+
+
+def get_sales_service(db: AsyncSession = Depends(get_db)) -> SalesService:
+    # Sales delegates every stock movement to the inventory service (single write path),
+    # so it is wired with one — sharing the request session/transaction.
+    return SalesService(
+        SalesRepository(db),
+        AuditRepository(db),
+        get_inventory_service(db),
     )
 
 

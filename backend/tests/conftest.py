@@ -79,6 +79,7 @@ class FakeInventoryRepo:
     def __init__(self) -> None:
         self._rows: dict[tuple[uuid.UUID, uuid.UUID], Any] = {}
         self.movements: list[Any] = []
+        self.demand: list[Any] = []
 
     def seed(self, product_id, warehouse_id, on_hand, reserved=0, damaged=0, version=0, tenant_id=None):
         inv = SimpleNamespace(
@@ -118,6 +119,9 @@ class FakeInventoryRepo:
         mv = SimpleNamespace(id=uuid.uuid4(), **fields)
         self.movements.append(mv)
         return mv
+
+    async def record_demand(self, **fields: Any):
+        self.demand.append(SimpleNamespace(**fields))
 
     async def list_inventory(self, **kwargs: Any):
         rows = list(self._rows.values())
