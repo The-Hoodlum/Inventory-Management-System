@@ -129,6 +129,44 @@ export interface PosResult {
   receipt: Receipt;
 }
 
+export const RETURN_REASONS: { value: string; label: string }[] = [
+  { value: "damaged", label: "Damaged" },
+  { value: "wrong_item", label: "Wrong Item" },
+  { value: "warranty", label: "Warranty" },
+  { value: "changed_mind", label: "Customer Changed Mind" },
+  { value: "other", label: "Other" },
+];
+
+export interface ReturnDoc {
+  id: string;
+  return_number: string;
+  invoice_id: string | null;
+  invoice_number: string | null;
+  customer_id: string;
+  customer_name: string | null;
+  location_id: string | null;
+  location_name: string | null;
+  reason: string;
+  status: string;
+  created_at: string;
+  lines: { id: string; product_id: string; sku: string | null; name: string | null; qty: number; reason: string | null }[];
+}
+
+export interface CreditNote extends DocBase {
+  credit_note_number: string;
+  invoice_id: string | null;
+  invoice_number: string | null;
+  return_id: string | null;
+  applied_at: string | null;
+  lines: PricedLineOut[];
+}
+
+export interface ReturnLineIn {
+  product_id: string;
+  qty: number;
+  invoice_line_id?: string | null;
+}
+
 export const salesApi = {
   // quotations
   listQuotations: (status = "") =>
@@ -163,4 +201,13 @@ export const salesApi = {
   // POS
   posCheckout: (body: { location_id: string; customer_id?: string | null; lines: PricedLineIn[]; payments: PaymentLineIn[] }) =>
     api.post<PosResult>("/sales/pos/checkout", body),
+
+  // returns + credit notes
+  listReturns: () => api.get<ReturnDoc[]>("/sales/returns"),
+  createReturn: (body: { invoice_id: string; location_id: string; reason: string; lines: ReturnLineIn[] }) =>
+    api.post<ReturnDoc>("/sales/returns", body),
+  listCreditNotes: () => api.get<CreditNote[]>("/sales/credit-notes"),
+  createCreditNote: (return_id: string) => api.post<CreditNote>("/sales/credit-notes", { return_id }),
+  creditNoteAction: (id: string, action: "approve" | "apply" | "cancel") =>
+    api.post<CreditNote>(`/sales/credit-notes/${id}/${action}`),
 };
