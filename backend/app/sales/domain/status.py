@@ -62,11 +62,30 @@ def so_delivery_outcome(line_pairs: list[tuple[float, float]]) -> str:
     return SO_DELIVERED if fully else SO_PARTIALLY_DELIVERED
 
 
-def invoice_status_after_payment(grand_total, amount_paid) -> str:
-    """PAID when fully settled, PARTIALLY_PAID when some paid, else SENT."""
-    total, paid = Decimal(str(grand_total)), Decimal(str(amount_paid))
+def invoice_status_after_payment(grand_total, settled) -> str:
+    """PAID when fully settled (payments + applied credits), PARTIALLY_PAID when some
+    settled, else SENT."""
+    total, paid = Decimal(str(grand_total)), Decimal(str(settled))
     if paid + _EPS >= total and total > 0:
         return INV_PAID
     if paid > _EPS:
         return INV_PARTIALLY_PAID
     return INV_SENT
+
+
+# --- return ---
+RETURN_REASONS = frozenset({"damaged", "wrong_item", "warranty", "changed_mind", "other"})
+RET_DRAFT, RET_RECEIVED, RET_CREDITED, RET_CANCELLED = "draft", "received", "credited", "cancelled"
+
+# --- credit note ---
+CN_DRAFT, CN_APPROVED, CN_APPLIED, CN_CANCELLED = "draft", "approved", "applied", "cancelled"
+_CN_ALLOWED = {
+    CN_DRAFT: {CN_APPROVED, CN_CANCELLED},
+    CN_APPROVED: {CN_APPLIED, CN_CANCELLED},
+    CN_APPLIED: set(),
+    CN_CANCELLED: set(),
+}
+
+
+def cn_can_transition(old: str, new: str) -> bool:
+    return new in _CN_ALLOWED.get(old, set())

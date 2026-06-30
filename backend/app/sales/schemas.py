@@ -171,6 +171,7 @@ class InvoiceOut(_DocOut):
     due_date: dt.date | None = None
     payment_terms: str | None = None
     amount_paid: float = 0.0
+    credit_total: float = 0.0
     balance: float = 0.0
     lines: list[PricedLineOut] = []
 
@@ -229,6 +230,78 @@ class PosResult(BaseModel):
     delivery_note: DeliveryNoteOut
     invoice: InvoiceOut
     receipt: ReceiptOut
+
+
+# ------------------------------ returns ------------------------------------ #
+class ReturnLineIn(BaseModel):
+    product_id: uuid.UUID
+    qty: float = Field(gt=0)
+    invoice_line_id: uuid.UUID | None = None
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class ReturnCreate(BaseModel):
+    """Receive returned goods back into a chosen branch + location, against an invoice."""
+    invoice_id: uuid.UUID
+    location_id: uuid.UUID  # where the goods return (e.g. Returns Area / Main Warehouse)
+    branch_id: uuid.UUID | None = None
+    reason: str = Field(default="other", pattern="^(damaged|wrong_item|warranty|changed_mind|other)$")
+    notes: str | None = Field(default=None, max_length=2000)
+    lines: list[ReturnLineIn] = Field(min_length=1)
+
+
+class ReturnLineOut(BaseModel):
+    id: uuid.UUID
+    product_id: uuid.UUID
+    sku: str | None = None
+    name: str | None = None
+    qty: float
+    reason: str | None = None
+
+
+class ReturnOut(BaseModel):
+    id: uuid.UUID
+    return_number: str
+    invoice_id: uuid.UUID | None = None
+    invoice_number: str | None = None
+    customer_id: uuid.UUID
+    customer_name: str | None = None
+    branch_id: uuid.UUID | None = None
+    location_id: uuid.UUID | None = None
+    location_name: str | None = None
+    reason: str
+    status: str
+    notes: str | None = None
+    received_at: dt.datetime | None = None
+    created_at: dt.datetime
+    lines: list[ReturnLineOut] = []
+
+
+# ---------------------------- credit notes --------------------------------- #
+class CreditNoteCreate(BaseModel):
+    """Raise a credit note for a return (default) — lines + pricing come from the
+    original invoice. A credit note never edits the invoice; applying it offsets it."""
+    return_id: uuid.UUID
+
+
+class CreditNoteOut(BaseModel):
+    id: uuid.UUID
+    credit_note_number: str
+    invoice_id: uuid.UUID | None = None
+    invoice_number: str | None = None
+    return_id: uuid.UUID | None = None
+    customer_id: uuid.UUID
+    customer_name: str | None = None
+    branch_id: uuid.UUID | None = None
+    status: str
+    subtotal: float = 0.0
+    discount_total: float = 0.0
+    tax_total: float = 0.0
+    grand_total: float = 0.0
+    notes: str | None = None
+    applied_at: dt.datetime | None = None
+    created_at: dt.datetime
+    lines: list[PricedLineOut] = []
 
 
 # ------------------------------ status actions ----------------------------- #

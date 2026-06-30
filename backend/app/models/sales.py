@@ -174,6 +174,7 @@ class Invoice(Base):
     tax_total: Mapped[Decimal] = _num()
     grand_total: Mapped[Decimal] = _num()
     amount_paid: Mapped[Decimal] = _num()
+    credit_total: Mapped[Decimal] = _num()  # applied credit notes (invoice stays immutable)
     created_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
     updated_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
@@ -242,3 +243,80 @@ class PaymentAllocation(Base):
     payment_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("payments.id", ondelete="CASCADE"), nullable=False)
     invoice_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("invoices.id", ondelete="RESTRICT"), nullable=False)
     amount: Mapped[Decimal] = _num()
+
+
+# --------------------------- Returns + Credit notes ------------------------ #
+class Return(Base):
+    __tablename__ = "returns"
+
+    id: Mapped[uuid.UUID] = mapped_column(_UUID, primary_key=True, server_default=text("gen_random_uuid()"))
+    tenant_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    return_number: Mapped[str] = mapped_column(Text, nullable=False)
+    invoice_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("invoices.id", ondelete="SET NULL"))
+    customer_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("customers.id", ondelete="RESTRICT"), nullable=False)
+    branch_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("branches.id", ondelete="RESTRICT"))
+    location_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("warehouses.id", ondelete="RESTRICT"))
+    reason: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'other'"))
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'received'"))
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"))
+    received_at: Mapped[dt.datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+    lines: Mapped[list[ReturnLine]] = relationship(
+        "ReturnLine", cascade="all, delete-orphan", lazy="selectin", order_by="ReturnLine.id"
+    )
+
+
+class ReturnLine(Base):
+    __tablename__ = "return_lines"
+
+    id: Mapped[uuid.UUID] = mapped_column(_UUID, primary_key=True, server_default=text("gen_random_uuid()"))
+    tenant_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    return_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("returns.id", ondelete="CASCADE"), nullable=False)
+    invoice_line_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("invoice_lines.id", ondelete="SET NULL"))
+    product_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("products.id", ondelete="RESTRICT"), nullable=False)
+    qty: Mapped[Decimal] = _num()
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class CreditNote(Base):
+    __tablename__ = "credit_notes"
+
+    id: Mapped[uuid.UUID] = mapped_column(_UUID, primary_key=True, server_default=text("gen_random_uuid()"))
+    tenant_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    credit_note_number: Mapped[str] = mapped_column(Text, nullable=False)
+    invoice_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("invoices.id", ondelete="SET NULL"))
+    return_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("returns.id", ondelete="SET NULL"))
+    customer_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("customers.id", ondelete="RESTRICT"), nullable=False)
+    branch_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("branches.id", ondelete="RESTRICT"))
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'draft'"))
+    subtotal: Mapped[Decimal] = _num()
+    discount_total: Mapped[Decimal] = _num()
+    tax_total: Mapped[Decimal] = _num()
+    grand_total: Mapped[Decimal] = _num()
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"))
+    applied_at: Mapped[dt.datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+    lines: Mapped[list[CreditNoteLine]] = relationship(
+        "CreditNoteLine", cascade="all, delete-orphan", lazy="selectin", order_by="CreditNoteLine.id"
+    )
+
+
+class CreditNoteLine(Base):
+    __tablename__ = "credit_note_lines"
+
+    id: Mapped[uuid.UUID] = mapped_column(_UUID, primary_key=True, server_default=text("gen_random_uuid()"))
+    tenant_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    credit_note_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("credit_notes.id", ondelete="CASCADE"), nullable=False)
+    product_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("products.id", ondelete="RESTRICT"), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    qty: Mapped[Decimal] = _num()
+    unit_price: Mapped[Decimal] = _num()
+    discount_pct: Mapped[Decimal] = _num()
+    tax_pct: Mapped[Decimal] = _num()
+    line_total: Mapped[Decimal] = _num()

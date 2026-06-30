@@ -17,12 +17,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     Branch,
+    CreditNote,
     Customer,
     DeliveryNote,
     Inventory,
     Invoice,
+    InvoiceLine,
     Product,
     Quotation,
+    Return,
     SalesOrder,
     StockMovement,
     Warehouse,
@@ -79,6 +82,65 @@ class SalesRepository:
 
     async def get_customer(self, cid: uuid.UUID) -> Customer | None:
         return await self.session.scalar(select(Customer).where(Customer.id == cid))
+
+    async def get_return(self, rid: uuid.UUID) -> Return | None:
+        return await self.session.scalar(select(Return).where(Return.id == rid))
+
+    async def get_credit_note(self, cid: uuid.UUID, *, lock: bool = False) -> CreditNote | None:
+        stmt = select(CreditNote).where(CreditNote.id == cid)
+        if lock:
+            stmt = stmt.with_for_update()
+        return await self.session.scalar(stmt)
+
+    async def invoice_line_index(self, invoice_id: uuid.UUID) -> dict[uuid.UUID, InvoiceLine]:
+        """product_id -> invoice line, for pricing a credit note from the original sale."""
+        res = await self.session.execute(
+            select(InvoiceLine).where(InvoiceLine.invoice_id == invoice_id)
+        )
+        return {ln.product_id: ln for ln in res.scalars().all()}
+
+    async def list_returns(self, *, status: str | None, limit: int) -> list[Return]:
+        stmt = select(Return)
+        if status:
+            stmt = stmt.where(Return.status == status)
+        stmt = stmt.order_by(Return.created_at.desc()).limit(limit)
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def list_credit_notes(self, *, status: str | None, limit: int) -> list[CreditNote]:
+        stmt = select(CreditNote)
+        if status:
+            stmt = stmt.where(CreditNote.status == status)
+        stmt = stmt.order_by(CreditNote.created_at.desc()).limit(limit)
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def restock_line(
+        self, *, tenant_id: uuid.UUID, product_id: uuid.UUID, location_id: uuid.UUID,
+        qty: Decimal, user_id: uuid.UUID, reference_id: uuid.UUID, reason: str,
+    ) -> None:
+        """Customer return: ADD `qty` back into the chosen location's on-hand and write a
+        'receipt' stock movement (the inventory ledger). Creates the row if needed."""
+        if qty <= 0:
+            return
+        inv = await self.session.scalar(
+            select(Inventory).where(
+                Inventory.product_id == product_id, Inventory.warehouse_id == location_id
+            ).with_for_update()
+        )
+        if inv is None:
+            inv = Inventory(
+                tenant_id=tenant_id, product_id=product_id, warehouse_id=location_id,
+                qty_on_hand=Decimal("0"), qty_reserved=Decimal("0"), qty_damaged=Decimal("0"), version=0,
+            )
+            self.session.add(inv)
+            await self.session.flush()
+        inv.qty_on_hand = inv.qty_on_hand + qty
+        inv.version = (inv.version or 0) + 1
+        self.session.add(StockMovement(
+            tenant_id=tenant_id, product_id=product_id, warehouse_id=location_id,
+            movement_type="receipt", quantity=qty, reference_type="sales_return",
+            reference_id=reference_id, reason=reason, user_id=user_id,
+        ))
+        await self.session.flush()
 
     async def product_prices(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, Decimal]:
         if not ids:

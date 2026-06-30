@@ -59,3 +59,12 @@ def test_invoice_status_after_payment():
     assert S.invoice_status_after_payment(100, 40) == S.INV_PARTIALLY_PAID
     assert S.invoice_status_after_payment(100, 100) == S.INV_PAID
     assert S.invoice_status_after_payment(100, 100.0001) == S.INV_PAID  # rounding tolerance
+
+
+def test_credit_note_transitions():
+    assert S.cn_can_transition(S.CN_DRAFT, S.CN_APPROVED)
+    assert S.cn_can_transition(S.CN_APPROVED, S.CN_APPLIED)
+    assert S.cn_can_transition(S.CN_DRAFT, S.CN_CANCELLED)
+    assert not S.cn_can_transition(S.CN_DRAFT, S.CN_APPLIED)   # must approve first
+    assert not S.cn_can_transition(S.CN_APPLIED, S.CN_CANCELLED)  # terminal
+    assert "damaged" in S.RETURN_REASONS and "warranty" in S.RETURN_REASONS

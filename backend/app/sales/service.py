@@ -15,6 +15,8 @@ from sqlalchemy import select
 
 from app.core.exceptions import BusinessRuleError, NotFoundError
 from app.models import (
+    CreditNote,
+    CreditNoteLine,
     Customer,
     DeliveryNote,
     DeliveryNoteLine,
@@ -25,6 +27,8 @@ from app.models import (
     Quotation,
     QuotationLine,
     Receipt,
+    Return,
+    ReturnLine,
     SalesOrder,
     SalesOrderLine,
 )
@@ -34,6 +38,8 @@ from app.sales.domain import status as S
 from app.sales.repository import SalesRepository
 from app.sales.schemas import (
     ConvertToOrder,
+    CreditNoteCreate,
+    CreditNoteOut,
     DeliveryConfirm,
     DeliveryCreate,
     DeliveryLineOut,
@@ -49,6 +55,9 @@ from app.sales.schemas import (
     QuotationCreate,
     QuotationOut,
     ReceiptOut,
+    ReturnCreate,
+    ReturnLineOut,
+    ReturnOut,
     SalesOrderCreate,
     SalesOrderLineOut,
     SalesOrderOut,
@@ -423,6 +432,102 @@ class SalesService:
         await self.repo.session.flush()
         return walkin.id
 
+    # =============================== returns ============================= #
+    async def create_return(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, payload: ReturnCreate
+    ) -> ReturnOut:
+        """Receive returned goods back into the chosen branch+location (a stock INFLOW
+        through the inventory ledger), against an invoice."""
+        invoice = await self._require(self.repo.get_invoice(payload.invoice_id), "Invoice")
+        lines = [
+            ReturnLine(tenant_id=tenant_id, product_id=ln.product_id, qty=_d(ln.qty),
+                       invoice_line_id=ln.invoice_line_id, reason=ln.reason)
+            for ln in payload.lines
+        ]
+        ret = Return(
+            tenant_id=tenant_id, return_number=await self.repo.number(tenant_id, "return", "RET"),
+            invoice_id=invoice.id, customer_id=invoice.customer_id,
+            branch_id=payload.branch_id or invoice.branch_id, location_id=payload.location_id,
+            reason=payload.reason, status=S.RET_RECEIVED, notes=payload.notes,
+            created_by=user_id, received_at=dt.datetime.now(dt.UTC),
+        )
+        ret.lines = lines
+        self.repo.session.add(ret)
+        await self.repo.session.flush()
+        for line in ret.lines:
+            await self.repo.restock_line(
+                tenant_id=tenant_id, product_id=line.product_id, location_id=payload.location_id,
+                qty=_d(line.qty), user_id=user_id, reference_id=ret.id,
+                reason=f"Customer return {ret.return_number}",
+            )
+        await self._audit(tenant_id, user_id, "sales_return", ret.id, "received", None, S.RET_RECEIVED)
+        return await self._return_out(ret)
+
+    # ============================= credit notes ========================== #
+    async def create_credit_note(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, payload: CreditNoteCreate
+    ) -> CreditNoteOut:
+        ret = await self._require(self.repo.get_return(payload.return_id), "Return")
+        if ret.status == S.RET_CANCELLED:
+            raise BusinessRuleError("Cannot credit a cancelled return.")
+        price_index = await self.repo.invoice_line_index(ret.invoice_id) if ret.invoice_id else {}
+        cn_lines: list[CreditNoteLine] = []
+        totals_in = []
+        for rl in ret.lines:
+            ref = price_index.get(rl.product_id)
+            unit = _d(ref.unit_price) if ref else Decimal("0")
+            disc = _d(ref.discount_pct) if ref else Decimal("0")
+            tax = _d(ref.tax_pct) if ref else Decimal("0")
+            lt = pricing.line_total(rl.qty, unit, disc, tax)
+            cn_lines.append(CreditNoteLine(
+                tenant_id=tenant_id, product_id=rl.product_id, description=ref.description if ref else None,
+                qty=_d(rl.qty), unit_price=unit, discount_pct=disc, tax_pct=tax, line_total=lt,
+            ))
+            totals_in.append({"qty": _f(rl.qty), "unit_price": _f(unit), "discount_pct": _f(disc), "tax_pct": _f(tax)})
+        totals = pricing.document_totals(totals_in)
+        cn = CreditNote(
+            tenant_id=tenant_id, credit_note_number=await self.repo.number(tenant_id, "credit_note", "CN"),
+            invoice_id=ret.invoice_id, return_id=ret.id, customer_id=ret.customer_id,
+            branch_id=ret.branch_id, status=S.CN_DRAFT, created_by=user_id, **totals,
+        )
+        cn.lines = cn_lines
+        self.repo.session.add(cn)
+        await self.repo.session.flush()
+        ret.status = S.RET_CREDITED
+        await self._audit(tenant_id, user_id, "sales_credit_note", cn.id, "created", None, S.CN_DRAFT)
+        return await self._credit_note_out(cn)
+
+    async def credit_note_transition(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, cn_id: uuid.UUID, new: str
+    ) -> CreditNoteOut:
+        cn = await self._require(self.repo.get_credit_note(cn_id, lock=True), "Credit note")
+        if not S.cn_can_transition(cn.status, new):
+            raise BusinessRuleError(f"Cannot move credit note from {cn.status} to {new}.")
+        old, cn.status = cn.status, new
+        if new == S.CN_APPLIED:
+            cn.applied_at = dt.datetime.now(dt.UTC)
+            # Offset the invoice without editing it: bump credit_total + recompute status.
+            if cn.invoice_id:
+                invoice = await self._require(self.repo.get_invoice(cn.invoice_id, lock=True), "Invoice")
+                invoice.credit_total = _d(invoice.credit_total) + _d(cn.grand_total)
+                settled = _d(invoice.amount_paid) + _d(invoice.credit_total)
+                invoice.status = S.invoice_status_after_payment(invoice.grand_total, settled)
+        await self.repo.session.flush()
+        await self._audit(tenant_id, user_id, "sales_credit_note", cn.id, new, old, new)
+        return await self._credit_note_out(cn)
+
+    async def get_return(self, return_id: uuid.UUID) -> ReturnOut:
+        return await self._return_out(await self._require(self.repo.get_return(return_id), "Return"))
+
+    async def get_credit_note(self, cn_id: uuid.UUID) -> CreditNoteOut:
+        return await self._credit_note_out(await self._require(self.repo.get_credit_note(cn_id), "Credit note"))
+
+    async def list_returns(self, **f) -> list[ReturnOut]:
+        return [await self._return_out(r) for r in await self.repo.list_returns(**f)]
+
+    async def list_credit_notes(self, **f) -> list[CreditNoteOut]:
+        return [await self._credit_note_out(c) for c in await self.repo.list_credit_notes(**f)]
+
     # ================================ reads ============================== #
     async def get_quotation(self, quote_id: uuid.UUID) -> QuotationOut:
         return await self._quote_out(await self._require(self.repo.get_quote(quote_id), "Quotation"))
@@ -565,8 +670,43 @@ class SalesService:
             status=inv.status, currency=inv.currency, invoice_date=inv.invoice_date, due_date=inv.due_date,
             payment_terms=inv.payment_terms, subtotal=_f(inv.subtotal), discount_total=_f(inv.discount_total),
             tax_total=_f(inv.tax_total), grand_total=_f(inv.grand_total), amount_paid=_f(inv.amount_paid),
-            balance=_f(inv.grand_total) - _f(inv.amount_paid), created_at=inv.created_at,
+            credit_total=_f(inv.credit_total),
+            balance=_f(inv.grand_total) - _f(inv.amount_paid) - _f(inv.credit_total), created_at=inv.created_at,
             lines=await self._priced_line_outs(inv.lines),
+        )
+
+    async def _return_out(self, ret: Return) -> ReturnOut:
+        cust = await self.repo.customer_names([ret.customer_id])
+        loc = await self.repo.location_names([ret.location_id])
+        prod = await self.repo.product_index([ln.product_id for ln in ret.lines])
+        inv_no = None
+        if ret.invoice_id:
+            inv = await self.repo.get_invoice(ret.invoice_id)
+            inv_no = inv.invoice_number if inv else None
+        lines = [
+            ReturnLineOut(id=ln.id, product_id=ln.product_id, sku=prod.get(ln.product_id, (None, None))[0],
+                          name=prod.get(ln.product_id, (None, None))[1], qty=_f(ln.qty), reason=ln.reason)
+            for ln in ret.lines
+        ]
+        return ReturnOut(
+            id=ret.id, return_number=ret.return_number, invoice_id=ret.invoice_id, invoice_number=inv_no,
+            customer_id=ret.customer_id, customer_name=cust.get(ret.customer_id), branch_id=ret.branch_id,
+            location_id=ret.location_id, location_name=loc.get(ret.location_id), reason=ret.reason,
+            status=ret.status, notes=ret.notes, received_at=ret.received_at, created_at=ret.created_at, lines=lines,
+        )
+
+    async def _credit_note_out(self, cn: CreditNote) -> CreditNoteOut:
+        cust = await self.repo.customer_names([cn.customer_id])
+        inv_no = None
+        if cn.invoice_id:
+            inv = await self.repo.get_invoice(cn.invoice_id)
+            inv_no = inv.invoice_number if inv else None
+        return CreditNoteOut(
+            id=cn.id, credit_note_number=cn.credit_note_number, invoice_id=cn.invoice_id, invoice_number=inv_no,
+            return_id=cn.return_id, customer_id=cn.customer_id, customer_name=cust.get(cn.customer_id),
+            branch_id=cn.branch_id, status=cn.status, subtotal=_f(cn.subtotal), discount_total=_f(cn.discount_total),
+            tax_total=_f(cn.tax_total), grand_total=_f(cn.grand_total), notes=cn.notes, applied_at=cn.applied_at,
+            created_at=cn.created_at, lines=await self._priced_line_outs(cn.lines),
         )
 
     async def _receipt_out(self, receipt: Receipt) -> ReceiptOut:

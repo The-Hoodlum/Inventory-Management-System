@@ -48,6 +48,8 @@ from app.models.procurement import (
     SalesDaily,
 )
 from app.models.sales import (
+    CreditNote,
+    CreditNoteLine,
     DeliveryNote,
     DeliveryNoteLine,
     Invoice,
@@ -57,6 +59,8 @@ from app.models.sales import (
     Quotation,
     QuotationLine,
     Receipt,
+    Return,
+    ReturnLine,
     SalesOrder,
     SalesOrderLine,
 )
@@ -74,4 +78,5 @@ __all__ = [
     "Quotation", "QuotationLine", "SalesOrder", "SalesOrderLine",
     "DeliveryNote", "DeliveryNoteLine", "Invoice", "InvoiceLine",
     "Payment", "PaymentAllocation", "Receipt",
+    "Return", "ReturnLine", "CreditNote", "CreditNoteLine",
 ]

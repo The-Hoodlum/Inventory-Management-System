@@ -11,10 +11,13 @@ from app.api.v1.deps import (
     require_feature,
     require_permission,
 )
+from app.core.exceptions import BusinessRuleError
 from app.core.permissions import P
 from app.sales.schemas import (
     CancelBody,
     ConvertToOrder,
+    CreditNoteCreate,
+    CreditNoteOut,
     DeliveryConfirm,
     DeliveryCreate,
     DeliveryNoteOut,
@@ -27,6 +30,8 @@ from app.sales.schemas import (
     QuotationOut,
     ReceiptOut,
     RejectBody,
+    ReturnCreate,
+    ReturnOut,
     SalesOrderCreate,
     SalesOrderOut,
 )
@@ -258,3 +263,76 @@ async def pos_checkout(
     svc: SalesService = Depends(get_sales_service),
 ) -> PosResult:
     return await svc.pos_checkout(tenant_id=user.tenant_id, user_id=user.id, payload=payload)
+
+
+# --------------------------- returns + credit notes ------------------------ #
+@router.post("/returns", response_model=ReturnOut, status_code=201)
+async def create_return(
+    payload: ReturnCreate,
+    user: CurrentUser = Depends(require_permission(P.SALES_RETURN)),
+    svc: SalesService = Depends(get_sales_service),
+) -> ReturnOut:
+    return await svc.create_return(tenant_id=user.tenant_id, user_id=user.id, payload=payload)
+
+
+@router.get("/returns", response_model=list[ReturnOut])
+async def list_returns(
+    status_filter: str | None = Query(default=None, alias="status"),
+    limit: int = Query(default=100, ge=1, le=500),
+    _: CurrentUser = Depends(require_permission(P.SALES_READ)),
+    svc: SalesService = Depends(get_sales_service),
+) -> list[ReturnOut]:
+    return await svc.list_returns(status=status_filter, limit=limit)
+
+
+@router.get("/returns/{return_id}", response_model=ReturnOut)
+async def get_return(
+    return_id: uuid.UUID,
+    _: CurrentUser = Depends(require_permission(P.SALES_READ)),
+    svc: SalesService = Depends(get_sales_service),
+) -> ReturnOut:
+    return await svc.get_return(return_id)
+
+
+@router.post("/credit-notes", response_model=CreditNoteOut, status_code=201)
+async def create_credit_note(
+    payload: CreditNoteCreate,
+    user: CurrentUser = Depends(require_permission(P.SALES_RETURN)),
+    svc: SalesService = Depends(get_sales_service),
+) -> CreditNoteOut:
+    return await svc.create_credit_note(tenant_id=user.tenant_id, user_id=user.id, payload=payload)
+
+
+@router.get("/credit-notes", response_model=list[CreditNoteOut])
+async def list_credit_notes(
+    status_filter: str | None = Query(default=None, alias="status"),
+    limit: int = Query(default=100, ge=1, le=500),
+    _: CurrentUser = Depends(require_permission(P.SALES_READ)),
+    svc: SalesService = Depends(get_sales_service),
+) -> list[CreditNoteOut]:
+    return await svc.list_credit_notes(status=status_filter, limit=limit)
+
+
+@router.get("/credit-notes/{cn_id}", response_model=CreditNoteOut)
+async def get_credit_note(
+    cn_id: uuid.UUID,
+    _: CurrentUser = Depends(require_permission(P.SALES_READ)),
+    svc: SalesService = Depends(get_sales_service),
+) -> CreditNoteOut:
+    return await svc.get_credit_note(cn_id)
+
+
+@router.post("/credit-notes/{cn_id}/{action}", response_model=CreditNoteOut)
+async def credit_note_action(
+    cn_id: uuid.UUID,
+    action: str,
+    user: CurrentUser = Depends(require_permission(P.SALES_RETURN)),
+    svc: SalesService = Depends(get_sales_service),
+) -> CreditNoteOut:
+    # action in approve | apply | cancel
+    mapping = {"approve": "approved", "apply": "applied", "cancel": "cancelled"}
+    if action not in mapping:
+        raise BusinessRuleError(f"Unknown credit-note action '{action}'.")
+    return await svc.credit_note_transition(
+        tenant_id=user.tenant_id, user_id=user.id, cn_id=cn_id, new=mapping[action]
+    )

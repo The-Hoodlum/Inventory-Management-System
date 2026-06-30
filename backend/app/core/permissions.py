@@ -58,4 +58,5 @@ class P:
     SALES_INVOICE = "sales.invoice"    # create/send invoices
     SALES_PAYMENT = "sales.payment"    # record payments + issue receipts
     SALES_MANAGE = "sales.manage"      # approve discounts, cancel, override
+    SALES_RETURN = "sales.return"      # process customer returns + credit notes
     POS_USE = "pos.use"                # operate the POS fast-sale checkout

@@ -54,9 +54,9 @@ class CustomerRepository:
         return list(res.scalars().all()), int(total or 0)
 
     async def outstanding_balance(self, customer_id: uuid.UUID) -> float:
-        """Sum of (grand_total - amount_paid) over open invoices for this customer."""
+        """Sum of (grand_total - amount_paid - applied credits) over open invoices."""
         total = await self.session.scalar(
-            select(func.coalesce(func.sum(Invoice.grand_total - Invoice.amount_paid), 0))
+            select(func.coalesce(func.sum(Invoice.grand_total - Invoice.amount_paid - Invoice.credit_total), 0))
             .where(Invoice.customer_id == customer_id, Invoice.status != "cancelled")
         )
         return float(total or 0)
