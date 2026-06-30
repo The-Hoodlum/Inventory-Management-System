@@ -25,6 +25,7 @@ STATUSES = frozenset({PENDING, APPROVED, PARTIALLY_APPROVED, REJECTED, ISSUED, C
 APPROVED_STATES = frozenset({APPROVED, PARTIALLY_APPROVED})
 
 # --- purposes ---
+BRANCH_TRANSFER = "branch_transfer"  # moves stock from source branch -> destination
 PURPOSES = frozenset({
     "for_sale", "shelf_replenishment", "workshop_use", "office_use",
     "branch_transfer", "stock_adjustment", "other",

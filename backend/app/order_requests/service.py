@@ -43,9 +43,18 @@ class OrderRequestService:
         branch_ids = await self.repo.user_branch_ids(user_id)
         if branch_ids and payload.branch_id not in branch_ids:
             raise BusinessRuleError("You can only raise requests for your assigned branch.")
+        # A branch transfer moves stock to a different destination location.
+        dest_id = None
+        if payload.purpose == S.BRANCH_TRANSFER:
+            if payload.destination_branch_id is None:
+                raise BusinessRuleError("A branch transfer needs a destination location.")
+            if payload.destination_branch_id == payload.branch_id:
+                raise BusinessRuleError("Source and destination locations must differ.")
+            dest_id = payload.destination_branch_id
         number = await self.repo.next_request_number(tenant_id)
         header = await self.repo.create(
             tenant_id=tenant_id, request_number=number, branch_id=payload.branch_id,
+            destination_branch_id=dest_id,
             requested_by=user_id, purpose=payload.purpose, comments=payload.comments,
             lines=[ln.model_dump() for ln in payload.lines],
         )
@@ -100,14 +109,21 @@ class OrderRequestService:
         prev_status = header.status
         if not S.can_transition(header.status, S.ISSUED):
             raise BusinessRuleError(f"Only approved requests can be issued (status={header.status}).")
+        is_transfer = header.purpose == S.BRANCH_TRANSFER and header.destination_branch_id is not None
         for line in header.lines:
             qty = Decimal(str(line.approved_qty or 0))
             if qty <= 0:
                 continue
-            err = await self.repo.issue_line(
-                tenant_id=tenant_id, line=line, branch_id=header.branch_id, qty=qty,
-                user_id=actor_id, request_id=header.id,
-            )
+            if is_transfer:
+                err = await self.repo.transfer_line(
+                    tenant_id=tenant_id, line=line, source_id=header.branch_id,
+                    dest_id=header.destination_branch_id, qty=qty, user_id=actor_id, request_id=header.id,
+                )
+            else:
+                err = await self.repo.issue_line(
+                    tenant_id=tenant_id, line=line, branch_id=header.branch_id, qty=qty,
+                    user_id=actor_id, request_id=header.id,
+                )
             if err:
                 raise BusinessRuleError(err)  # rolls back the whole issue (one transaction)
         header.status = S.ISSUED
@@ -247,7 +263,9 @@ class OrderRequestService:
     async def _to_out(self, header) -> OrderRequestOut:
         """Single-header response (create/approve/reject/issue paths)."""
         prod = await self.repo.product_index([ln.product_id for ln in header.lines])
-        wh = await self.repo.warehouse_names([header.branch_id])
+        wh = await self.repo.warehouse_names(
+            [i for i in [header.branch_id, getattr(header, "destination_branch_id", None)] if i]
+        )
         users = await self.repo.user_names(
             [header.requested_by, header.approved_by, header.issued_by,
              getattr(header, "completed_by", None)]
@@ -260,7 +278,9 @@ class OrderRequestService:
         if not headers:
             return []
         product_ids = {ln.product_id for h in headers for ln in h.lines}
-        branch_ids = {h.branch_id for h in headers}
+        branch_ids = {h.branch_id for h in headers} | {
+            h.destination_branch_id for h in headers if getattr(h, "destination_branch_id", None)
+        }
         user_ids = {
             uid for h in headers
             for uid in (h.requested_by, h.approved_by, h.issued_by, getattr(h, "completed_by", None))
@@ -291,7 +311,10 @@ class OrderRequestService:
         ]
         return OrderRequestOut(
             id=header.id, request_number=header.request_number, branch_id=header.branch_id,
-            branch_name=wh.get(header.branch_id), requested_by=header.requested_by,
+            branch_name=wh.get(header.branch_id),
+            destination_branch_id=getattr(header, "destination_branch_id", None),
+            destination_branch_name=wh.get(getattr(header, "destination_branch_id", None)),
+            requested_by=header.requested_by,
             requester_name=users.get(header.requested_by), purpose=header.purpose, status=header.status,
             requested_date=header.requested_date, approved_by=header.approved_by,
             approved_date=header.approved_date, issued_by=header.issued_by, issued_date=header.issued_date,

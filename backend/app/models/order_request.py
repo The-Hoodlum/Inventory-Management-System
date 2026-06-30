@@ -27,6 +27,10 @@ class RequestHeader(Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
     request_number: Mapped[str] = mapped_column(Text, nullable=False)
     branch_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("warehouses.id", ondelete="RESTRICT"), nullable=False)
+    # Destination location for branch_transfer requests (credited at issue time); null otherwise.
+    destination_branch_id: Mapped[uuid.UUID | None] = mapped_column(
+        _UUID, ForeignKey("warehouses.id", ondelete="RESTRICT"), nullable=True
+    )
     requested_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"))
     purpose: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))

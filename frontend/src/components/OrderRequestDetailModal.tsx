@@ -183,6 +183,9 @@ export function OrderRequestDetailModal({
             <Field label="Status"><StatusBadge status={req.status} /></Field>
             <Field label="Purpose">{titleCase(req.purpose)}</Field>
             <Field label="Branch">{req.branch_name ?? "—"}</Field>
+            {req.destination_branch_name && (
+              <Field label="Destination">{req.destination_branch_name}</Field>
+            )}
             <Field label="Requested by">{req.requester_name ?? "—"}</Field>
             <Field label="Requested">{formatDate(req.requested_date)}</Field>
             {req.issued_date && <Field label="Issued">{formatDate(req.issued_date)}</Field>}

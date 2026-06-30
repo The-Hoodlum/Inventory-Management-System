@@ -41,6 +41,8 @@ export interface OrderRequest {
   request_number: string;
   branch_id: string;
   branch_name: string | null;
+  destination_branch_id: string | null;
+  destination_branch_name: string | null;
   requested_by: string | null;
   requester_name: string | null;
   purpose: string;
@@ -108,6 +110,7 @@ export interface LineCreateInput {
 
 export interface CreateInput {
   branch_id: string;
+  destination_branch_id?: string | null; // required for branch_transfer
   purpose: string;
   comments?: string | null;
   lines: LineCreateInput[];

@@ -17,6 +17,7 @@ class OrderRequestLineCreate(BaseModel):
 
 class OrderRequestCreate(BaseModel):
     branch_id: uuid.UUID
+    destination_branch_id: uuid.UUID | None = None  # required for branch_transfer
     purpose: str
     comments: str | None = Field(default=None, max_length=1000)
     lines: list[OrderRequestLineCreate] = Field(min_length=1)
@@ -83,6 +84,8 @@ class OrderRequestOut(BaseModel):
     request_number: str
     branch_id: uuid.UUID
     branch_name: str | None = None
+    destination_branch_id: uuid.UUID | None = None
+    destination_branch_name: str | None = None
     requested_by: uuid.UUID | None = None
     requester_name: str | None = None
     purpose: str
