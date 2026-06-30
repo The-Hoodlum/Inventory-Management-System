@@ -5,15 +5,16 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button, Card, Spinner, StatCard } from "@/components/ui";
 import { formatDate, formatMoney, formatNumber, formatQty, shortId } from "@/lib/format";
 import { useInventoryReport, useMovers } from "@/lib/reports";
-import { useInventoryAging, useSupplierPerformance } from "@/lib/serverReports";
+import { useInventoryAging, useStockPosition, useSupplierPerformance } from "@/lib/serverReports";
 import { useWarehouses } from "@/lib/refdata";
 
-type Tab = "valuation" | "low" | "out" | "movers" | "suppliers" | "aging";
+type Tab = "valuation" | "low" | "out" | "position" | "movers" | "suppliers" | "aging";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "valuation", label: "Valuation" },
   { id: "low", label: "Low stock" },
   { id: "out", label: "Out of stock" },
+  { id: "position", label: "Stock position" },
   { id: "movers", label: "Fast / slow movers" },
   { id: "suppliers", label: "Supplier performance" },
   { id: "aging", label: "Aging" },
@@ -43,6 +44,7 @@ export default function ReportsPage() {
 
   const movers = useMovers(tab === "movers" && canMovers);
   const aging = useInventoryAging(warehouseId, tab === "aging");
+  const position = useStockPosition("", warehouseId, tab === "position");
   const supplierPerf = useSupplierPerformance(365, tab === "suppliers");
 
   const rows = useMemo(
@@ -127,7 +129,7 @@ export default function ReportsPage() {
         ))}
       </div>
 
-      {(inventoryTab || tab === "aging") && warehouses.length > 0 && (
+      {(inventoryTab || tab === "aging" || tab === "position") && warehouses.length > 0 && (
         <div className="mb-4 flex items-center gap-3">
           <label className="text-sm text-slate-500" htmlFor="rwh">
             Warehouse
@@ -337,6 +339,61 @@ export default function ReportsPage() {
               </Card>
             )}
           </>
+        ))}
+
+      {/* Stock position: on-hand / reserved / available / in-transit by branch + location */}
+      {tab === "position" &&
+        (position.isLoading ? (
+          <div className="flex h-48 items-center justify-center">
+            <Spinner label="Loading stock position…" />
+          </div>
+        ) : position.isError ? (
+          <Card className="p-6 text-sm text-red-700">
+            Couldn’t load stock position. {position.error?.message ?? ""}
+          </Card>
+        ) : !position.data || position.data.rows.length === 0 ? (
+          <Card className="p-10 text-center text-sm text-slate-400">No stock to report on.</Card>
+        ) : (
+          <Card className="overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50">
+                  <tr className="border-b border-slate-200">
+                    <th className={TH}>Branch</th>
+                    <th className={TH}>Location</th>
+                    <th className={TH}>SKU</th>
+                    <th className={TH}>Product</th>
+                    <th className={THR}>On hand</th>
+                    <th className={THR}>Reserved</th>
+                    <th className={THR}>Available</th>
+                    <th className={THR}>In transit</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {position.data.rows.map((r) => (
+                    <tr key={`${r.location_id}:${r.product_id}`} className="hover:bg-slate-50">
+                      <td className={`${TD} text-slate-600`}>{r.branch_name ?? "—"}</td>
+                      <td className={`${TD} text-slate-600`}>{r.location_name ?? "—"}</td>
+                      <td className="px-4 py-3 font-mono text-[13px] text-slate-700">{r.sku}</td>
+                      <td className={TD}>
+                        <div className="max-w-[16rem] truncate" title={r.name ?? ""}>{r.name}</div>
+                      </td>
+                      <td className={`${TDR} text-slate-700`}>{formatQty(r.on_hand)}</td>
+                      <td className={`${TDR} text-amber-700`}>{formatQty(r.reserved)}</td>
+                      <td className={`${TDR} font-semibold text-slate-900`}>{formatQty(r.available)}</td>
+                      <td className={`${TDR} ${Number(r.in_transit) > 0 ? "text-indigo-700" : "text-slate-400"}`}>
+                        {Number(r.in_transit) > 0 ? formatQty(r.in_transit) : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="px-4 py-3 text-xs text-slate-400">
+              Available = on-hand − reserved − damaged. In-transit = issued-but-not-yet-received transfers
+              inbound to the location.
+            </p>
+          </Card>
         ))}
 
       {/* Movers */}

@@ -22,9 +22,12 @@ from app.order_requests.schemas import (
     AuditEntryOut,
     CancelRequest,
     CompleteRequest,
+    IssueRequest,
     OrderRequestCreate,
     OrderRequestOut,
+    ReceiveRequest,
     RejectRequest,
+    TransferLedgerEntryOut,
 )
 from app.order_requests.service import OrderRequestService
 
@@ -90,6 +93,28 @@ async def request_audit(
     return await svc.audit_trail(request_id=request_id, viewer_id=user.id, is_admin=_is_admin(user))
 
 
+@router.get("/{request_id}/ledger", response_model=list[TransferLedgerEntryOut])
+async def request_ledger(
+    request_id: uuid.UUID,
+    user: CurrentUser = Depends(require_permission(P.ORDER_REQUEST_READ)),
+    svc: OrderRequestService = Depends(get_order_request_service),
+) -> list[TransferLedgerEntryOut]:
+    # The immutable per-line movement log (reserved/released/consumed/issued/received).
+    return await svc.ledger(request_id=request_id, viewer_id=user.id, is_admin=_is_admin(user))
+
+
+@router.post("/{request_id}/submit", response_model=OrderRequestOut)
+async def submit_request(
+    request_id: uuid.UUID,
+    user: CurrentUser = Depends(require_permission(P.ORDER_REQUEST_CREATE)),
+    svc: OrderRequestService = Depends(get_order_request_service),
+) -> OrderRequestOut:
+    # A requester (or admin) moves their own draft to pending (submitted for approval).
+    return await svc.submit(
+        tenant_id=user.tenant_id, actor_id=user.id, request_id=request_id, is_admin=_is_admin(user)
+    )
+
+
 @router.post("/{request_id}/approve", response_model=OrderRequestOut)
 async def approve_request(
     request_id: uuid.UUID,
@@ -115,8 +140,26 @@ async def issue_request(
     request_id: uuid.UUID,
     user: CurrentUser = Depends(require_permission(P.ORDER_REQUEST_ISSUE)),
     svc: OrderRequestService = Depends(get_order_request_service),
+    payload: IssueRequest | None = None,
 ) -> OrderRequestOut:
-    return await svc.issue(tenant_id=user.tenant_id, actor_id=user.id, request_id=request_id)
+    # Optional per-line quantities support a partial issue; omitting the body issues
+    # the full approved (outstanding) quantity for every line.
+    return await svc.issue(
+        tenant_id=user.tenant_id, actor_id=user.id, request_id=request_id, payload=payload
+    )
+
+
+@router.post("/{request_id}/receive", response_model=OrderRequestOut)
+async def receive_request(
+    request_id: uuid.UUID,
+    payload: ReceiveRequest,
+    user: CurrentUser = Depends(require_permission(P.ORDER_REQUEST_RECEIVE)),
+    svc: OrderRequestService = Depends(get_order_request_service),
+) -> OrderRequestOut:
+    # Capture per-line received/missing/damaged/extra; each line must reconcile.
+    return await svc.receive(
+        tenant_id=user.tenant_id, actor_id=user.id, request_id=request_id, payload=payload
+    )
 
 
 @router.post("/{request_id}/cancel", response_model=OrderRequestOut)

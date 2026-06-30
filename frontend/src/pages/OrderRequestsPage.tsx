@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { useAuth } from "@/auth/AuthContext";
 import { NewOrderRequestModal } from "@/components/NewOrderRequestModal";
+import { NewTransferModal } from "@/components/NewTransferModal";
 import { OrderRequestDetailModal } from "@/components/OrderRequestDetailModal";
 import { PageHeader } from "@/components/PageHeader";
 import { Button, Card, Spinner, StatCard, StatusBadge } from "@/components/ui";
@@ -13,18 +14,24 @@ import { orderRequestsApi, PURPOSES } from "@/lib/orderRequests";
 const INPUT =
   "rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500";
 
-const STATUSES = ["pending", "approved", "partially_approved", "rejected", "issued", "completed", "cancelled"];
+const STATUSES = [
+  "draft", "pending", "approved", "partially_approved", "rejected",
+  "partially_issued", "issued", "in_transit", "partially_received", "received",
+  "completed", "cancelled",
+];
 
 export default function OrderRequestsPage() {
   const { hasPermission } = useAuth();
   const canCreate = hasPermission("order_request.create");
   const canApprove = hasPermission("order_request.approve");
   const canIssue = hasPermission("order_request.issue");
+  const canReceive = hasPermission("order_request.receive");
   const canComplete = hasPermission("order_request.complete");
 
   const [statusFilter, setStatusFilter] = useState("");
   const [purposeFilter, setPurposeFilter] = useState("");
   const [showNew, setShowNew] = useState(false);
+  const [showTransfer, setShowTransfer] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
 
   const dash = useQuery({ queryKey: ["order-requests", "dashboard"], queryFn: orderRequestsApi.dashboard });
@@ -42,9 +49,14 @@ export default function OrderRequestsPage() {
         description="Branch requisitions: request stock from the depot, then track approval and issue."
         actions={
           canCreate ? (
-            <Button onClick={() => setShowNew(true)}>
-              <Plus className="h-4 w-4" /> New request
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => setShowNew(true)}>
+                <Plus className="h-4 w-4" /> New request
+              </Button>
+              <Button onClick={() => setShowTransfer(true)}>
+                <Plus className="h-4 w-4" /> New transfer
+              </Button>
+            </div>
           ) : undefined
         }
       />
@@ -153,11 +165,13 @@ export default function OrderRequestsPage() {
       )}
 
       {showNew && <NewOrderRequestModal onClose={() => setShowNew(false)} />}
+      {showTransfer && <NewTransferModal onClose={() => setShowTransfer(false)} />}
       {detailId && (
         <OrderRequestDetailModal
           requestId={detailId}
           canApprove={canApprove}
           canIssue={canIssue}
+          canReceive={canReceive}
           canComplete={canComplete}
           onClose={() => setDetailId(null)}
         />

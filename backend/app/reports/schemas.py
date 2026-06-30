@@ -55,3 +55,23 @@ class SupplierPerformanceReport(BaseModel):
     as_of: dt.datetime
     window_days: int | None
     suppliers: list[SupplierPerformanceRow]
+
+
+# ----------------------- stock position (by branch/location) ---------------- #
+class StockPositionRow(BaseModel):
+    branch_id: uuid.UUID | None
+    branch_name: str | None
+    location_id: uuid.UUID
+    location_name: str | None
+    product_id: uuid.UUID
+    sku: str | None
+    name: str | None
+    on_hand: Decimal
+    reserved: Decimal
+    available: Decimal       # on_hand - reserved - damaged
+    in_transit: Decimal      # issued-but-not-yet-received transfers inbound to this location
+
+
+class StockPositionReport(BaseModel):
+    as_of: dt.datetime
+    rows: list[StockPositionRow]

@@ -3,23 +3,40 @@ import { api } from "@/lib/api";
 import type { InventoryRow, Page } from "@/types/api";
 
 export type RequestStatus =
+  | "draft"
   | "pending"
   | "approved"
   | "partially_approved"
   | "rejected"
+  | "partially_issued"
   | "issued"
+  | "in_transit"
+  | "partially_received"
+  | "received"
   | "cancelled"
   | "completed";
 
+// Transfer types (the request "purpose"). Industry-agnostic; the 8 spec types plus
+// office_use for back-compat.
 export const PURPOSES: { value: string; label: string }[] = [
-  { value: "for_sale", label: "Sale Fulfilment" },
   { value: "shelf_replenishment", label: "Shelf Replenishment" },
+  { value: "internal_transfer", label: "Internal Transfer" },
   { value: "branch_transfer", label: "Branch Transfer" },
+  { value: "for_sale", label: "Sale Fulfilment" },
   { value: "workshop_use", label: "Workshop Consumption" },
+  { value: "damaged_replacement", label: "Damaged Replacement" },
   { value: "stock_adjustment", label: "Stock Adjustment" },
   { value: "office_use", label: "Office Use" },
   { value: "other", label: "Other" },
 ];
+
+// Transfer types that move stock to a destination location (vs. consume at source).
+export const TRANSFER_TYPES = new Set([
+  "shelf_replenishment",
+  "internal_transfer",
+  "branch_transfer",
+  "damaged_replacement",
+]);
 
 export interface OrderRequestLine {
   id: string;
@@ -33,31 +50,62 @@ export interface OrderRequestLine {
   received_qty: number | null;
   missing_qty: number | null;
   damaged_qty: number | null;
+  extra_qty: number | null;
+  variance: number;
+  balanced: boolean;
   remarks: string | null;
 }
 
 export interface OrderRequest {
   id: string;
   request_number: string;
+  transfer_type: string;
+  purpose: string;
+  status: RequestStatus;
+  reason: string | null;
   branch_id: string;
   branch_name: string | null;
   destination_branch_id: string | null;
   destination_branch_name: string | null;
+  source_location_id: string | null;
+  source_location_name: string | null;
+  source_branch_id: string | null;
+  source_branch_name: string | null;
+  dest_location_id: string | null;
+  dest_location_name: string | null;
+  dest_branch_id: string | null;
+  dest_branch_name: string | null;
   requested_by: string | null;
   requester_name: string | null;
-  purpose: string;
-  status: RequestStatus;
   requested_date: string;
   approved_by: string | null;
   approved_date: string | null;
   issued_by: string | null;
   issued_date: string | null;
+  received_by: string | null;
+  receiver_name: string | null;
+  received_date: string | null;
   completed_by: string | null;
   completer_name: string | null;
   completed_date: string | null;
   completion_remarks: string | null;
   comments: string | null;
   lines: OrderRequestLine[];
+}
+
+/** Receipt variance for a line = (issued + extra) - (received + missing + damaged).
+ * Zero means the line reconciles. */
+export function lineVariance(l: {
+  issued_qty: number;
+  extra_qty?: number | null;
+  received_qty?: number | null;
+  missing_qty?: number | null;
+  damaged_qty?: number | null;
+}): number {
+  return (
+    (l.issued_qty + (l.extra_qty ?? 0)) -
+    ((l.received_qty ?? 0) + (l.missing_qty ?? 0) + (l.damaged_qty ?? 0))
+  );
 }
 
 export interface AuditEntry {
@@ -74,6 +122,8 @@ export interface AdminDashboard {
   approved: number;
   rejected: number;
   issued: number;
+  in_transit: number;
+  received: number;
   completed: number;
   cancelled: number;
   issued_today: number;
@@ -109,10 +159,11 @@ export interface LineCreateInput {
 }
 
 export interface CreateInput {
-  branch_id: string;
-  destination_branch_id?: string | null; // required for branch_transfer
-  purpose: string;
-  comments?: string | null;
+  branch_id: string; // source location
+  destination_branch_id?: string | null; // destination location (required for transfers)
+  purpose: string; // transfer type
+  comments?: string | null; // reason (required for transfers)
+  submit?: boolean; // false => save as draft
   lines: LineCreateInput[];
 }
 
@@ -121,11 +172,40 @@ export interface LineApprovalInput {
   approved_qty: number;
 }
 
+export interface LineIssueInput {
+  line_id: string;
+  issue_qty: number;
+}
+
 export interface LineReceiptInput {
   line_id: string;
   received_qty?: number | null;
   missing_qty?: number | null;
   damaged_qty?: number | null;
+  extra_qty?: number | null;
+}
+
+export interface LedgerEntry {
+  id: string;
+  event: string;
+  request_number: string;
+  product_id: string;
+  sku: string | null;
+  name: string | null;
+  qty_requested: number | null;
+  qty_approved: number | null;
+  qty_issued: number | null;
+  qty_received: number | null;
+  qty_missing: number | null;
+  qty_damaged: number | null;
+  qty_extra: number | null;
+  source_branch_name: string | null;
+  source_location_name: string | null;
+  dest_branch_name: string | null;
+  dest_location_name: string | null;
+  transfer_type: string | null;
+  reason: string | null;
+  created_at: string;
 }
 
 function qs(params: Record<string, string | number | undefined>): string {
@@ -142,13 +222,18 @@ export const orderRequestsApi = {
     api.get<OrderRequest[]>(`/order-requests${qs(params as Record<string, string | number | undefined>)}`),
   get: (id: string) => api.get<OrderRequest>(`/order-requests/${id}`),
   audit: (id: string) => api.get<AuditEntry[]>(`/order-requests/${id}/audit`),
+  ledger: (id: string) => api.get<LedgerEntry[]>(`/order-requests/${id}/ledger`),
   dashboard: () => api.get<Dashboard>("/order-requests/dashboard"),
   create: (body: CreateInput) => api.post<OrderRequest>("/order-requests", body),
+  submit: (id: string) => api.post<OrderRequest>(`/order-requests/${id}/submit`),
   approve: (id: string, lines: LineApprovalInput[], comments?: string) =>
     api.post<OrderRequest>(`/order-requests/${id}/approve`, { lines, comments: comments ?? null }),
   reject: (id: string, reason: string) =>
     api.post<OrderRequest>(`/order-requests/${id}/reject`, { reason }),
-  issue: (id: string) => api.post<OrderRequest>(`/order-requests/${id}/issue`),
+  issue: (id: string, lines: LineIssueInput[] = []) =>
+    api.post<OrderRequest>(`/order-requests/${id}/issue`, { lines }),
+  receive: (id: string, remarks: string, lines: LineReceiptInput[]) =>
+    api.post<OrderRequest>(`/order-requests/${id}/receive`, { remarks, lines }),
   cancel: (id: string, reason?: string) =>
     api.post<OrderRequest>(`/order-requests/${id}/cancel`, { reason: reason ?? null }),
   complete: (id: string, remarks: string, lines: LineReceiptInput[] = []) =>

@@ -25,8 +25,19 @@ from app.models.identity import (
 )
 from app.models.imports import ImportError, ImportFile, ImportJob, ImportMapping
 from app.models.intelligence import IntelligenceSignal, SupplierScore
-from app.models.inventory import Inventory, StockMovement, Warehouse
-from app.models.order_request import RequestAudit, RequestHeader, RequestLine
+from app.models.inventory import (
+    Branch,
+    Inventory,
+    InventoryReservation,
+    StockMovement,
+    Warehouse,
+)
+from app.models.order_request import (
+    RequestAudit,
+    RequestHeader,
+    RequestLine,
+    StockTransferLedger,
+)
 from app.models.procurement import (
     DemandForecast,
     PurchaseOrder,
@@ -39,10 +50,10 @@ from app.models.procurement import (
 __all__ = [
     "Tenant", "User", "Role", "Permission", "RolePermission", "UserRole",
     "AuditLog", "RefreshSession", "Category", "Brand", "Supplier", "Product", "SupplierProduct",
-    "Warehouse", "Inventory", "StockMovement",
+    "Branch", "Warehouse", "Inventory", "InventoryReservation", "StockMovement",
     "SalesDaily", "PurchaseOrder", "PurchaseOrderLine", "ReorderRecommendation",
     "PurchaseOrderEvent", "DemandForecast", "IntelligenceSignal", "SupplierScore",
     "ImportJob", "ImportFile", "ImportError", "ImportMapping",
     "AssistantConversation", "AssistantMessage", "UserWarehouseAccess", "WhatsAppIdentity",
-    "RequestHeader", "RequestLine", "RequestAudit",
+    "RequestHeader", "RequestLine", "RequestAudit", "StockTransferLedger",
 ]

@@ -13,14 +13,19 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
+    Branch,
+    Inventory,
     Product,
     PurchaseOrder,
     PurchaseOrderEvent,
     PurchaseOrderLine,
+    RequestHeader,
+    RequestLine,
     StockMovement,
     Supplier,
     Warehouse,
 )
+from app.order_requests.domain import status as S
 
 
 class ReportsRepository:
@@ -61,6 +66,74 @@ class ReportsRepository:
         )
         rows = (await self.session.execute(stmt)).all()
         return [(r[0], r[1], Decimal(r[2]), r[3]) for r in rows]
+
+    # --------------------------- stock position --------------------------- #
+    async def stock_position(
+        self, *, branch_id: uuid.UUID | None, warehouse_id: uuid.UUID | None
+    ) -> list[dict]:
+        """Per (location, product): on_hand / reserved / available, joined to the branch.
+        Optionally filtered to one branch and/or location."""
+        stmt = (
+            select(
+                Warehouse.branch_id, Branch.name, Inventory.warehouse_id, Warehouse.name,
+                Inventory.product_id, Product.sku, Product.name,
+                Inventory.qty_on_hand, Inventory.qty_reserved, Inventory.qty_available,
+            )
+            .join(Warehouse, Warehouse.id == Inventory.warehouse_id)
+            .outerjoin(Branch, Branch.id == Warehouse.branch_id)
+            .join(Product, Product.id == Inventory.product_id)
+        )
+        if warehouse_id is not None:
+            stmt = stmt.where(Inventory.warehouse_id == warehouse_id)
+        if branch_id is not None:
+            stmt = stmt.where(Warehouse.branch_id == branch_id)
+        rows = (await self.session.execute(stmt)).all()
+        return [
+            {
+                "branch_id": r[0], "branch_name": r[1], "location_id": r[2], "location_name": r[3],
+                "product_id": r[4], "sku": r[5], "name": r[6],
+                "on_hand": Decimal(r[7]), "reserved": Decimal(r[8]), "available": Decimal(r[9]),
+            }
+            for r in rows
+        ]
+
+    async def in_transit_by_location(
+        self, *, branch_id: uuid.UUID | None, warehouse_id: uuid.UUID | None
+    ) -> dict[tuple[uuid.UUID, uuid.UUID], Decimal]:
+        """In-transit quantity inbound to each (destination location, product): stock that
+        has been issued from a source but not yet received. Keyed (location_id, product_id)."""
+        accounted = (
+            func.coalesce(RequestLine.received_qty, 0)
+            + func.coalesce(RequestLine.missing_qty, 0)
+            + func.coalesce(RequestLine.damaged_qty, 0)
+        )
+        in_transit = func.sum(RequestLine.issued_qty - accounted)
+        stmt = (
+            select(RequestHeader.destination_branch_id, RequestLine.product_id, in_transit)
+            .join(RequestLine, RequestLine.request_id == RequestHeader.id)
+            .where(
+                RequestHeader.destination_branch_id.is_not(None),
+                RequestHeader.status.in_(tuple(S.IN_TRANSIT_STATES)),
+            )
+            .group_by(RequestHeader.destination_branch_id, RequestLine.product_id)
+        )
+        if warehouse_id is not None:
+            stmt = stmt.where(RequestHeader.destination_branch_id == warehouse_id)
+        rows = (await self.session.execute(stmt)).all()
+        out: dict[tuple[uuid.UUID, uuid.UUID], Decimal] = {}
+        for loc_id, prod_id, qty in rows:
+            q = Decimal(qty or 0)
+            if q != 0:
+                out[(loc_id, prod_id)] = q
+        return out
+
+    async def locations_lookup(self) -> dict[uuid.UUID, tuple[uuid.UUID | None, str, str | None]]:
+        """location_id -> (branch_id, location_name, branch_name)."""
+        rows = (await self.session.execute(
+            select(Warehouse.id, Warehouse.branch_id, Warehouse.name, Branch.name)
+            .outerjoin(Branch, Branch.id == Warehouse.branch_id)
+        )).all()
+        return {r[0]: (r[1], r[2], r[3]) for r in rows}
 
     # ------------------------- supplier performance ----------------------- #
     async def suppliers_basic(self) -> list[tuple[uuid.UUID, str, int]]:

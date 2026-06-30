@@ -255,12 +255,23 @@ export interface Supplier {
   updated_at: string;
 }
 
+export interface Branch {
+  id: string;
+  tenant_id: string;
+  code: string;
+  name: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Warehouse {
   id: string;
   tenant_id: string;
   code: string;
   name: string;
   address: string | null;
+  branch_id: string | null;
   is_active: boolean;
   created_at: string;
 }
@@ -335,6 +346,25 @@ export interface SupplierPerformanceReport {
   as_of: string;
   window_days: number | null;
   suppliers: SupplierPerformanceRow[];
+}
+
+export interface StockPositionRow {
+  branch_id: string | null;
+  branch_name: string | null;
+  location_id: string;
+  location_name: string | null;
+  product_id: string;
+  sku: string | null;
+  name: string | null;
+  on_hand: string;
+  reserved: string;
+  available: string;
+  in_transit: string;
+}
+
+export interface StockPositionReport {
+  as_of: string;
+  rows: StockPositionRow[];
 }
 
 // ---- User administration (backend /users) ----

@@ -4,7 +4,16 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.advisor.api import router as advisor_router
-from app.api.v1.endpoints import auth, inventory, products, suppliers, tenant, users, warehouses
+from app.api.v1.endpoints import (
+    auth,
+    branches,
+    inventory,
+    products,
+    suppliers,
+    tenant,
+    users,
+    warehouses,
+)
 from app.assistant.api import router as assistant_router
 from app.container.api import router as container_router
 from app.dashboard.api import router as dashboard_router
@@ -22,6 +31,7 @@ api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(products.router, prefix="/products", tags=["products"])
 api_router.include_router(suppliers.router, prefix="/suppliers", tags=["suppliers"])
+api_router.include_router(branches.router, prefix="/branches", tags=["branches"])
 api_router.include_router(warehouses.router, prefix="/warehouses", tags=["warehouses"])
 api_router.include_router(inventory.router, prefix="/inventory", tags=["inventory"])
 api_router.include_router(reorder_router, prefix="/reorder", tags=["reorder"])

@@ -3,7 +3,24 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { api } from "@/lib/api";
-import type { InventoryAgingReport, SupplierPerformanceReport } from "@/types/api";
+import type {
+  InventoryAgingReport,
+  StockPositionReport,
+  SupplierPerformanceReport,
+} from "@/types/api";
+
+export function useStockPosition(branchId: string, warehouseId: string, enabled: boolean) {
+  const params = new URLSearchParams();
+  if (branchId) params.set("branch_id", branchId);
+  if (warehouseId) params.set("warehouse_id", warehouseId);
+  const qs = params.toString();
+  return useQuery({
+    queryKey: ["report", "stock-position", branchId, warehouseId],
+    enabled,
+    staleTime: 30_000,
+    queryFn: () => api.get<StockPositionReport>(`/reports/stock-position${qs ? `?${qs}` : ""}`),
+  });
+}
 
 export function useInventoryAging(warehouseId: string, enabled: boolean) {
   return useQuery({

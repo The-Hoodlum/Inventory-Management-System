@@ -38,6 +38,10 @@ class _Line:
         self.requested_qty = Decimal(str(requested_qty))
         self.approved_qty = Decimal("0")
         self.issued_qty = Decimal("0")
+        self.received_qty = None
+        self.missing_qty = None
+        self.damaged_qty = None
+        self.extra_qty = None
         self.remarks = None
 
 
@@ -58,6 +62,10 @@ class FakeRepo:
         self.audits: list = []
         self.issued: list = []
         self.transfers: list = []
+        self.reserved: list = []
+        self.released: list = []
+        self.received_credits: list = []
+        self.ledger: list = []
         self.calls: dict = {}
         self._on_hand = on_hand or {}
         self._branch_ids = branch_ids or set()  # empty = unrestricted
@@ -69,13 +77,14 @@ class FakeRepo:
         return self._branch_ids
 
     async def create(self, *, tenant_id, request_number, branch_id, requested_by, purpose, comments,
-                     lines, destination_branch_id=None):
+                     lines, destination_branch_id=None, status="pending"):
         h = _Header(
             id=uuid.uuid4(), tenant_id=tenant_id, request_number=request_number, branch_id=branch_id,
             destination_branch_id=destination_branch_id,
-            requested_by=requested_by, purpose=purpose, status="pending", comments=comments,
+            requested_by=requested_by, purpose=purpose, status=status, comments=comments,
             requested_date=dt.datetime.now(dt.UTC), approved_by=None, approved_date=None,
-            issued_by=None, issued_date=None,
+            issued_by=None, issued_date=None, received_by=None, received_date=None,
+            completed_by=None, completed_date=None, completion_remarks=None,
             lines=[_Line(line["product_id"], line["requested_qty"]) for line in lines],
         )
         self.headers[h.id] = h
@@ -93,21 +102,35 @@ class FakeRepo:
     async def audit_trail(self, request_id):
         return []
 
-    async def issue_line(self, *, tenant_id, line, branch_id, qty, user_id, request_id):
+    async def reserve_line(self, *, tenant_id, line, source_id, qty, user_id):
+        # Mirrors the real reserve: insufficient AVAILABLE stock fails at approval.
         avail = self._on_hand.get(line.product_id, Decimal("9999"))
         if avail < qty:
-            return f"Insufficient stock for product {line.product_id}"
-        line.issued_qty = qty
+            return f"Insufficient available stock for product {line.product_id}"
+        self.reserved.append((line.product_id, qty, source_id))
+        return None
+
+    async def release_reservations(self, *, tenant_id, lines, user_id):
+        self.released.extend((ln.product_id) for ln in lines)
+
+    async def issue_line(self, *, tenant_id, line, branch_id, qty, user_id, request_id):
+        line.issued_qty = (line.issued_qty or Decimal("0")) + qty
         self.issued.append((line.product_id, qty))
         return None
 
     async def transfer_line(self, *, tenant_id, line, source_id, dest_id, qty, user_id, request_id):
-        avail = self._on_hand.get(line.product_id, Decimal("9999"))
-        if avail < qty:
-            return f"Insufficient stock for product {line.product_id}"
-        line.issued_qty = qty
+        line.issued_qty = (line.issued_qty or Decimal("0")) + qty
         self.transfers.append((line.product_id, qty, source_id, dest_id))
         return None
+
+    async def receive_line(self, *, tenant_id, line, dest_id, received, damaged, user_id, request_id):
+        self.received_credits.append((line.product_id, dest_id, received, damaged))
+
+    async def add_transfer_ledger(self, **fields):
+        self.ledger.append(fields)
+
+    async def transfer_ledger(self, request_id):
+        return [f for f in self.ledger if f.get("request_id") == request_id]
 
     async def list_requests(self, **filters):
         rows = list(self.headers.values())
@@ -122,6 +145,11 @@ class FakeRepo:
     async def warehouse_names(self, ids):
         self.calls["warehouse_names"] = self.calls.get("warehouse_names", 0) + 1
         return {i: "Lusaka" for i in ids}
+
+    async def location_index(self, ids):
+        self.calls["location_index"] = self.calls.get("location_index", 0) + 1
+        # location_id -> (location_name, branch_id, branch_name)
+        return {i: ("Main Warehouse", BRANCH, "Lusaka") for i in ids}
 
     async def user_names(self, ids):
         self.calls["user_names"] = self.calls.get("user_names", 0) + 1
@@ -178,7 +206,7 @@ async def test_history_batches_enrichment_no_n_plus_1():
     assert len(out) == 3
     # enrichment fetched ONCE for the whole page, not once per request
     assert repo.calls["product_index"] == 1
-    assert repo.calls["warehouse_names"] == 1
+    assert repo.calls["location_index"] == 1
     assert repo.calls["user_names"] == 1
 
 
@@ -277,18 +305,18 @@ async def test_issue_requires_approval_first():
         await svc.issue(tenant_id=TENANT, actor_id=ADMIN, request_id=out.id)  # still pending
 
 
-async def test_issue_insufficient_stock_errors():
-    repo = FakeRepo(on_hand={P1: Decimal("3")})  # only 3 of P1 on hand
+async def test_approve_insufficient_available_stock_errors():
+    # Stock is now HELD at approval, so an over-approval fails when reserving (not at issue).
+    repo = FakeRepo(on_hand={P1: Decimal("3")})  # only 3 of P1 available
     svc = OrderRequestService(repo, FakeAudit())
     out = await svc.create(tenant_id=TENANT, user_id=CASHIER, payload=_create_payload())
     line_ids = [ln.id for ln in out.lines]
-    await svc.approve(
-        tenant_id=TENANT, actor_id=ADMIN, request_id=out.id,
-        payload=ApproveRequest(lines=[LineApproval(line_id=line_ids[0], approved_qty=10),
-                                      LineApproval(line_id=line_ids[1], approved_qty=5)]),
-    )
     with pytest.raises(BusinessRuleError):
-        await svc.issue(tenant_id=TENANT, actor_id=ADMIN, request_id=out.id)
+        await svc.approve(
+            tenant_id=TENANT, actor_id=ADMIN, request_id=out.id,
+            payload=ApproveRequest(lines=[LineApproval(line_id=line_ids[0], approved_qty=10),
+                                          LineApproval(line_id=line_ids[1], approved_qty=5)]),
+        )
 
 
 async def test_branch_user_cannot_view_others_requests():
@@ -355,11 +383,14 @@ async def test_complete_records_receipt_and_discrepancy():
     issued = await _approve_and_issue(svc, out)
     assert issued.status == S.ISSUED
     line_ids = [ln.id for ln in out.lines]
+    # Completion now requires EVERY issued line to reconcile (received+missing+damaged
+    # = issued+extra). Line 0: 9 received + 1 missing = 10 issued; line 1: 5 received.
     completed = await svc.complete(
         tenant_id=TENANT, actor_id=CASHIER, request_id=out.id,
         payload=CompleteRequest(
             remarks="Received with one short",
-            lines=[LineReceipt(line_id=line_ids[0], received_qty=9, missing_qty=1, damaged_qty=0)],
+            lines=[LineReceipt(line_id=line_ids[0], received_qty=9, missing_qty=1, damaged_qty=0),
+                   LineReceipt(line_id=line_ids[1], received_qty=5)],
         ),
     )
     assert completed.status == S.COMPLETED
@@ -367,6 +398,23 @@ async def test_complete_records_receipt_and_discrepancy():
     first = next(ln for ln in completed.lines if ln.id == line_ids[0])
     assert first.received_qty == 9 and first.missing_qty == 1
     assert any(a["action"] == "completed" for a in repo.audits)
+
+
+async def test_complete_blocked_when_unreconciled():
+    # A line that was issued but not reconciled blocks completion.
+    svc, _ = _svc()
+    out = await _make_pending(svc)
+    issued = await _approve_and_issue(svc, out)
+    assert issued.status == S.ISSUED
+    line_ids = [ln.id for ln in out.lines]
+    with pytest.raises(BusinessRuleError):
+        await svc.complete(
+            tenant_id=TENANT, actor_id=CASHIER, request_id=out.id,
+            payload=CompleteRequest(
+                remarks="only one line",
+                lines=[LineReceipt(line_id=line_ids[0], received_qty=10)],  # line 1 untouched
+            ),
+        )
 
 
 async def test_branch_transfer_requires_destination():
@@ -378,21 +426,51 @@ async def test_branch_transfer_requires_destination():
         ))
 
 
-async def test_branch_transfer_issue_credits_destination():
+async def test_branch_transfer_issue_goes_in_transit():
     repo = FakeRepo()
     svc = OrderRequestService(repo, FakeAudit())
     dest = uuid.uuid4()
     out = await svc.create(tenant_id=TENANT, user_id=CASHIER, payload=OrderRequestCreate(
-        branch_id=BRANCH, destination_branch_id=dest, purpose="branch_transfer",
+        branch_id=BRANCH, destination_branch_id=dest, purpose="branch_transfer", comments="move it",
         lines=[OrderRequestLineCreate(product_id=P1, requested_qty=4)],
     ))
     assert out.destination_branch_id == dest
     line_id = out.lines[0].id
     await svc.approve(tenant_id=TENANT, actor_id=ADMIN, request_id=out.id,
                       payload=ApproveRequest(lines=[LineApproval(line_id=line_id, approved_qty=4)]))
+    # Approval reserved the stock at the source.
+    assert len(repo.reserved) == 1
     issued = await svc.issue(tenant_id=TENANT, actor_id=ADMIN, request_id=out.id)
-    assert issued.status == S.ISSUED
-    # Routed through transfer_line (source -> destination), not a plain issue.
+    # A transfer goes ISSUED -> IN_TRANSIT (destination credited only at receipt).
+    assert issued.status == S.IN_TRANSIT
     assert len(repo.transfers) == 1 and repo.issued == []
     pid, qty, src, dst = repo.transfers[0]
     assert pid == P1 and src == BRANCH and dst == dest and float(qty) == 4
+    # Ledger captured reserved + consumed + issued events.
+    events = {f["event"] for f in repo.ledger}
+    assert {"reserved", "consumed", "issued"}.issubset(events)
+
+
+async def test_branch_transfer_receive_credits_destination():
+    repo = FakeRepo()
+    svc = OrderRequestService(repo, FakeAudit())
+    dest = uuid.uuid4()
+    out = await svc.create(tenant_id=TENANT, user_id=CASHIER, payload=OrderRequestCreate(
+        branch_id=BRANCH, destination_branch_id=dest, purpose="branch_transfer", comments="move it",
+        lines=[OrderRequestLineCreate(product_id=P1, requested_qty=4)],
+    ))
+    line_id = out.lines[0].id
+    await svc.approve(tenant_id=TENANT, actor_id=ADMIN, request_id=out.id,
+                      payload=ApproveRequest(lines=[LineApproval(line_id=line_id, approved_qty=4)]))
+    await svc.issue(tenant_id=TENANT, actor_id=ADMIN, request_id=out.id)
+    from app.order_requests.schemas import ReceiveRequest
+    received = await svc.receive(
+        tenant_id=TENANT, actor_id=ADMIN, request_id=out.id,
+        payload=ReceiveRequest(remarks="got 3, 1 missing",
+                               lines=[LineReceipt(line_id=line_id, received_qty=3, missing_qty=1)]),
+    )
+    assert received.status == S.RECEIVED
+    # Destination credited the 3 good units only (1 missing in transit).
+    assert len(repo.received_credits) == 1
+    pid, dst, recv, dmg = repo.received_credits[0]
+    assert pid == P1 and dst == dest and float(recv) == 3 and float(dmg) == 0
