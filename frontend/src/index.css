@@ -2,8 +2,35 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Design-token values. Channels are space-separated RGB so Tailwind's
+ * `rgb(var(--x) / <alpha-value>)` can apply opacity. Light is the default;
+ * adding `.dark` on <html> (see ThemeProvider) swaps the whole palette.
+ * Components reference the SEMANTIC classes (bg-surface, text-content, …),
+ * never these variables directly.
+ */
 :root {
+  --canvas: 248 250 252; /* app background  (slate-50)  */
+  --surface: 255 255 255; /* cards / panels             */
+  --elevated: 255 255 255; /* popovers / menus          */
+  --content: 15 23 42; /* primary text     (slate-900)  */
+  --content-muted: 71 85 105; /* secondary    (slate-600) */
+  --content-subtle: 148 163 184; /* tertiary  (slate-400) */
+  --line: 226 232 240; /* hairline border  (slate-200)  */
+  --line-strong: 203 213 225; /* divider     (slate-300) */
   color-scheme: light;
+}
+
+.dark {
+  --canvas: 8 12 24; /* near-black navy              */
+  --surface: 17 24 39; /* slate-900-ish card         */
+  --elevated: 30 41 59; /* slate-800 popover         */
+  --content: 226 232 240; /* slate-200               */
+  --content-muted: 148 163 184; /* slate-400         */
+  --content-subtle: 100 116 139; /* slate-500        */
+  --line: 39 51 70; /* subtle dark divider           */
+  --line-strong: 51 65 85; /* slate-700               */
+  color-scheme: dark;
 }
 
 html,
@@ -13,7 +40,7 @@ body,
 }
 
 body {
-  @apply bg-slate-100 text-slate-900 antialiased;
+  @apply bg-canvas text-content antialiased;
   font-feature-settings: "cv02", "cv03", "cv04", "tnum";
 }
 

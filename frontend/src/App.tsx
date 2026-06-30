@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { ProtectedRoute } from "@/auth/ProtectedRoute";
 import { AppShell } from "@/components/AppShell";
 import AdvisorPage from "@/pages/AdvisorPage";
+import AppLauncherPage from "@/pages/AppLauncherPage";
 import ContainerPage from "@/pages/ContainerPage";
 import CustomersPage from "@/pages/CustomersPage";
 import DashboardPage from "@/pages/DashboardPage";
@@ -40,7 +41,8 @@ export default function App() {
           </ProtectedRoute>
         }
       >
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/" element={<Navigate to="/apps" replace />} />
+        <Route path="/apps" element={<AppLauncherPage />} />
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />
         <Route path="/purchase-orders/new" element={<NewPurchaseOrderPage />} />
