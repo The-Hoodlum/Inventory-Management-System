@@ -11,10 +11,18 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import PlainTextResponse
+from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.deps import CurrentUser, get_assistant_service, get_db, require_permission
+from app.api.v1.deps import (
+    CurrentUser,
+    get_assistant_service,
+    get_current_user,
+    get_db,
+    require_permission,
+)
+from app.assistant.repository import AssistantRepository
 from app.assistant.schemas import AskRequest, AskResponse, WhatsAppInbound, WhatsAppReply
 from app.assistant.service import AssistantService
 from app.assistant.whatsapp import build_whatsapp_adapter, normalize_inbound
@@ -35,6 +43,65 @@ async def ask(
     return await svc.ask(
         tenant_id=user.tenant_id, user_id=user.id, question=payload.question, channel="api"
     )
+
+
+class NotificationOut(BaseModel):
+    kind: str
+    severity: str  # 'info' | 'warning' | 'critical'
+    title: str
+    detail: str | None = None
+    count: int
+    href: str  # frontend route the bell links to
+
+
+class NotificationsOut(BaseModel):
+    total: int
+    items: list[NotificationOut]
+
+
+@router.get("/notifications", response_model=NotificationsOut)
+async def notifications(
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> NotificationsOut:
+    """Operational alerts for the shell's notifications bell — derived from EXISTING
+    data (low stock, pending approvals) via the RLS-scoped assistant repository. Each
+    source is gated by the relevant read permission, so users only see what they can act
+    on. This reuses the same signals the WhatsApp alert scheduler broadcasts."""
+    repo = AssistantRepository(db)
+    warehouse_ids = await repo.all_warehouse_ids()
+    perms = user.permissions
+    items: list[NotificationOut] = []
+
+    if perms & {P.INVENTORY_READ, P.REORDER_READ}:
+        low = await repo.low_stock(warehouse_ids)
+        if low["count"]:
+            preview = ", ".join(f"{i['name']} ({i['branch']})" for i in low["items"][:3])
+            items.append(NotificationOut(
+                kind="low_stock", severity="warning",
+                title=f"{low['count']} item(s) at or below reorder point",
+                detail=preview or None, count=low["count"], href="/reorder",
+            ))
+
+    if perms & {P.PO_READ, P.PO_APPROVE}:
+        pending_po = await repo.pending_purchase_requests(warehouse_ids)
+        if pending_po["count"]:
+            items.append(NotificationOut(
+                kind="pending_purchase_request", severity="info",
+                title=f"{pending_po['count']} purchase request(s) awaiting approval",
+                count=pending_po["count"], href="/purchase-orders",
+            ))
+
+    if perms & {P.ORDER_REQUEST_READ, P.ORDER_REQUEST_APPROVE}:
+        pending_or = await repo.pending_order_requests(warehouse_ids)
+        if pending_or["count"]:
+            items.append(NotificationOut(
+                kind="pending_order_request", severity="info",
+                title=f"{pending_or['count']} order request(s) awaiting approval",
+                count=pending_or["count"], href="/order-requests",
+            ))
+
+    return NotificationsOut(total=sum(i.count for i in items), items=items)
 
 
 @router.post("/whatsapp/mock", response_model=WhatsAppReply)

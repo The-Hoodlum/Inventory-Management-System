@@ -28,6 +28,7 @@ from app.procurement.api import router as procurement_router
 from app.reorder.api import purchase_order_router, reorder_router
 from app.reports.api import router as reports_router
 from app.sales.api import router as sales_router
+from app.search.api import router as search_router
 
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
@@ -56,3 +57,4 @@ api_router.include_router(users.router, prefix="/users", tags=["users"])
 api_router.include_router(tenant.router, prefix="/tenant", tags=["tenant"])
 api_router.include_router(order_requests_router, prefix="/order-requests", tags=["order-requests"])
 api_router.include_router(sales_router, prefix="/sales", tags=["sales"])
+api_router.include_router(search_router, prefix="/search", tags=["search"])
