@@ -245,6 +245,51 @@ erDiagram
 - **System roles are global** (`roles.tenant_id IS NULL`); custom roles are tenant-scoped. `user_roles` and `role_permissions` are association tables.
 - **`po_counters`** backs the `next_po_number(tenant)` function for gap-tolerant, per-tenant, per-year PO numbering.
 
+## Motorcycle lifecycle (serialized-unit registry)
+
+```mermaid
+erDiagram
+    MOTORCYCLE_UNITS ||--o{ MOTORCYCLE_UNIT_EVENTS : "lifecycle ledger"
+    MOTORCYCLE_UNITS {
+        uuid id PK
+        uuid tenant_id FK
+        text chassis_number UK "unique per tenant"
+        text engine_number
+        text model
+        text colour
+        uuid supplier_id FK
+        uuid branch_id FK
+        uuid warehouse_id FK
+        text status "received..warranty_active|cancelled"
+        bool reserved
+        uuid reserved_sales_order_id FK "links existing sales order"
+        bool sold
+        uuid invoice_id FK "links existing invoice"
+        uuid customer_id FK
+        numeric selling_price
+        numeric price_charged
+        text registration_number
+        int  version "optimistic lock"
+    }
+    MOTORCYCLE_UNIT_EVENTS {
+        uuid id PK
+        uuid tenant_id FK
+        uuid unit_id FK
+        text event_type "created|status_change|reserved|sold|transfer"
+        text from_status
+        text to_status
+        uuid from_branch_id FK
+        uuid to_branch_id FK
+        text reference_type "sales_order|invoice"
+        uuid reference_id
+        uuid user_id FK
+    }
+```
+
+- **Serialized asset, not fungible inventory.** Each physical unit is one permanent row keyed by `chassis_number` (unique per tenant); it is NOT tracked in `inventory`/`stock_movements`. Its own append-only `motorcycle_unit_events` table is the per-unit lifecycle ledger (every status change / reserve / sell / transfer, with `user_id`).
+- **Reuses the existing sales documents** — `reserved_sales_order_id` and `invoice_id` link a unit to the sales order / invoice that reserved/sold it; no parallel sales path. A branch move is a serialized `transfer` event (from/to branch), not a fungible stock transfer.
+- **Lifecycle is a state machine** (`app/motorcycles/domain/lifecycle.py`): legal transitions only, every accepted move audited.
+
 ## Cardinality legend
 
 `||--o{` = one-to-many · `}o--o{` = many-to-many (modeled via a join table) · `PK` = primary key · `FK` = foreign key · `UK` = unique key.

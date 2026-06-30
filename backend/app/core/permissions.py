@@ -60,3 +60,6 @@ class P:
     SALES_MANAGE = "sales.manage"      # approve discounts, cancel, override
     SALES_RETURN = "sales.return"      # process customer returns + credit notes
     POS_USE = "pos.use"                # operate the POS fast-sale checkout
+    # Motorcycle lifecycle (serialized-unit registry)
+    MOTORCYCLE_READ = "motorcycle.read"      # view the serialized-unit registry
+    MOTORCYCLE_MANAGE = "motorcycle.manage"  # create/edit/transition/reserve/sell/transfer

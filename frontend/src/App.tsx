@@ -13,6 +13,8 @@ import ImportInventoryPage from "@/pages/ImportInventoryPage";
 import IntelligencePage from "@/pages/IntelligencePage";
 import InventoryPage from "@/pages/InventoryPage";
 import LoginPage from "@/pages/LoginPage";
+import MotorcycleDetailPage from "@/pages/MotorcycleDetailPage";
+import MotorcyclesPage from "@/pages/MotorcyclesPage";
 import MovementsPage from "@/pages/MovementsPage";
 import NewPurchaseOrderPage from "@/pages/NewPurchaseOrderPage";
 import NotFoundPage from "@/pages/NotFoundPage";
@@ -56,6 +58,8 @@ export default function App() {
         <Route path="/order-requests" element={<OrderRequestsPage />} />
         <Route path="/sales" element={<SalesPage />} />
         <Route path="/customers" element={<CustomersPage />} />
+        <Route path="/motorcycles" element={<MotorcyclesPage />} />
+        <Route path="/motorcycles/:id" element={<MotorcycleDetailPage />} />
         <Route path="/pos" element={<PosPage />} />
         <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/import/inventory" element={<ImportInventoryPage />} />

@@ -13,6 +13,7 @@ from app.core.permissions import P
 from app.models import (
     Customer,
     Invoice,
+    MotorcycleUnit,
     Product,
     Quotation,
     SalesOrder,
@@ -158,11 +159,46 @@ class SalesOrderSearch:
         ]
 
 
+class MotorcycleSearch:
+    entity = "motorcycle"
+    label = "Motorcycles"
+    permission = P.MOTORCYCLE_READ
+
+    async def search(self, session: AsyncSession, query: str, limit: int) -> list[SearchHit]:
+        like = _like(query)
+        rows = (
+            await session.execute(
+                select(
+                    MotorcycleUnit.id, MotorcycleUnit.chassis_number, MotorcycleUnit.model,
+                    MotorcycleUnit.status, MotorcycleUnit.registration_number,
+                )
+                .where(or_(
+                    MotorcycleUnit.chassis_number.ilike(like),
+                    MotorcycleUnit.engine_number.ilike(like),
+                    MotorcycleUnit.registration_number.ilike(like),
+                    MotorcycleUnit.customer_id.in_(
+                        select(Customer.id).where(Customer.name.ilike(like))
+                    ),
+                ))
+                .order_by(MotorcycleUnit.created_at.desc())
+                .limit(limit)
+            )
+        ).all()
+        return [
+            SearchHit(
+                entity=self.entity, id=str(r.id), title=r.chassis_number,
+                subtitle=" · ".join(x for x in (r.model, r.registration_number) if x) or "Motorcycle",
+                badge=r.status, href=f"/motorcycles/{r.id}",
+            )
+            for r in rows
+        ]
+
+
 def register_default_providers() -> None:
     """Register the providers for the entities that exist today. Called once at import."""
     for provider in (
         ProductSearch(), CustomerSearch(), SupplierSearch(),
-        InvoiceSearch(), QuotationSearch(), SalesOrderSearch(),
+        InvoiceSearch(), QuotationSearch(), SalesOrderSearch(), MotorcycleSearch(),
     ):
         register(provider)
 

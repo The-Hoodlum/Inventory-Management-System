@@ -46,6 +46,8 @@ from app.intelligence.providers.registry import build_free_providers
 from app.intelligence.repository import IntelligenceRepository
 from app.intelligence.service import IntelligenceService
 from app.intelligence.sources.factory import build_external_source
+from app.motorcycles.repository import MotorcycleRepository
+from app.motorcycles.service import MotorcycleService
 from app.order_requests.repository import OrderRequestRepository
 from app.order_requests.service import OrderRequestService
 from app.procurement.email import EmailService
@@ -206,6 +208,10 @@ def get_branch_service(db: AsyncSession = Depends(get_db)) -> BranchService:
 
 def get_customer_service(db: AsyncSession = Depends(get_db)) -> CustomerService:
     return CustomerService(CustomerRepository(db), AuditRepository(db))
+
+
+def get_motorcycle_service(db: AsyncSession = Depends(get_db)) -> MotorcycleService:
+    return MotorcycleService(MotorcycleRepository(db), AuditRepository(db))
 
 
 def get_inventory_service(db: AsyncSession = Depends(get_db)) -> InventoryService:
