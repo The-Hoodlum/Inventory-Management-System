@@ -31,6 +31,8 @@ class Warehouse(Base):
     code: Mapped[str] = mapped_column(Text, nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    branch: Mapped[str | None] = mapped_column(Text, nullable=True)
+    warehouse_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     created_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
 

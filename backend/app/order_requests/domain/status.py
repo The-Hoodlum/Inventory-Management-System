@@ -3,9 +3,12 @@
 Status lifecycle:
     pending --> approved | partially_approved | rejected | cancelled
     approved / partially_approved --> issued | cancelled
-    rejected / issued / cancelled are terminal.
+    issued --> completed
+    rejected / cancelled / completed are terminal.
 
 Inventory is deducted only on the approved -> issued transition (handled in the service).
+Completion is an explicit receipt confirmation by the receiving user (no inventory effect);
+'issued' means the stock physically left the depot, 'completed' means receipt was confirmed.
 """
 from __future__ import annotations
 
@@ -16,8 +19,9 @@ PARTIALLY_APPROVED = "partially_approved"
 REJECTED = "rejected"
 ISSUED = "issued"
 CANCELLED = "cancelled"
+COMPLETED = "completed"
 
-STATUSES = frozenset({PENDING, APPROVED, PARTIALLY_APPROVED, REJECTED, ISSUED, CANCELLED})
+STATUSES = frozenset({PENDING, APPROVED, PARTIALLY_APPROVED, REJECTED, ISSUED, CANCELLED, COMPLETED})
 APPROVED_STATES = frozenset({APPROVED, PARTIALLY_APPROVED})
 
 # --- purposes ---
@@ -28,8 +32,9 @@ _ALLOWED: dict[str, set[str]] = {
     APPROVED: {ISSUED, CANCELLED},
     PARTIALLY_APPROVED: {ISSUED, CANCELLED},
     REJECTED: set(),
-    ISSUED: set(),
+    ISSUED: {COMPLETED},
     CANCELLED: set(),
+    COMPLETED: set(),
 }
 
 

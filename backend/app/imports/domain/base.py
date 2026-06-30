@@ -25,6 +25,8 @@ class ImportRowContext(Protocol):
     async def get_or_create_brand(self, name: str | None) -> Any: ...
     async def upsert_product(self, sku: str, fields: dict[str, Any], **links: Any) -> Any: ...
     async def set_initial_stock(self, product: Any, warehouse: Any, qty: Any, unit_cost: Any) -> None: ...
+    async def upsert_supplier(self, *, key: str, attrs: dict[str, Any]) -> Any: ...
+    async def upsert_warehouse(self, *, key: str, code: str, attrs: dict[str, Any]) -> Any: ...
 
 
 class ResourceImporter(abc.ABC):
@@ -33,6 +35,9 @@ class ResourceImporter(abc.ABC):
 
     key: str
     label: str
+    # Field whose value identifies a row for de-duplication + error reporting.
+    # Inventory keys on "sku"; other targets (supplier/warehouse) override this.
+    key_field: str = "sku"
 
     @property
     @abc.abstractmethod

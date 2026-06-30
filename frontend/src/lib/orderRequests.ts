@@ -8,7 +8,8 @@ export type RequestStatus =
   | "partially_approved"
   | "rejected"
   | "issued"
-  | "cancelled";
+  | "cancelled"
+  | "completed";
 
 export const PURPOSES: { value: string; label: string }[] = [
   { value: "for_sale", label: "For Sale" },
@@ -27,6 +28,9 @@ export interface OrderRequestLine {
   approved_qty: number;
   issued_qty: number;
   outstanding_qty: number;
+  received_qty: number | null;
+  missing_qty: number | null;
+  damaged_qty: number | null;
   remarks: string | null;
 }
 
@@ -44,6 +48,10 @@ export interface OrderRequest {
   approved_date: string | null;
   issued_by: string | null;
   issued_date: string | null;
+  completed_by: string | null;
+  completer_name: string | null;
+  completed_date: string | null;
+  completion_remarks: string | null;
   comments: string | null;
   lines: OrderRequestLine[];
 }
@@ -62,6 +70,8 @@ export interface AdminDashboard {
   approved: number;
   rejected: number;
   issued: number;
+  completed: number;
+  cancelled: number;
   issued_today: number;
   requests_by_branch: { branch: string; count: number }[];
   most_requested_items: { sku: string; name: string; total_requested: number }[];
@@ -72,6 +82,7 @@ export interface BranchDashboard {
   my_pending: number;
   my_approved: number;
   my_rejected: number;
+  my_completed: number;
   my_recent_issued: string[];
 }
 
@@ -105,6 +116,13 @@ export interface LineApprovalInput {
   approved_qty: number;
 }
 
+export interface LineReceiptInput {
+  line_id: string;
+  received_qty?: number | null;
+  missing_qty?: number | null;
+  damaged_qty?: number | null;
+}
+
 function qs(params: Record<string, string | number | undefined>): string {
   const sp = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
@@ -126,6 +144,10 @@ export const orderRequestsApi = {
   reject: (id: string, reason: string) =>
     api.post<OrderRequest>(`/order-requests/${id}/reject`, { reason }),
   issue: (id: string) => api.post<OrderRequest>(`/order-requests/${id}/issue`),
+  cancel: (id: string, reason?: string) =>
+    api.post<OrderRequest>(`/order-requests/${id}/cancel`, { reason: reason ?? null }),
+  complete: (id: string, remarks: string, lines: LineReceiptInput[] = []) =>
+    api.post<OrderRequest>(`/order-requests/${id}/complete`, { remarks, lines }),
 };
 
 /** Available-qty by product for a branch — powers the "search inventory" picker.

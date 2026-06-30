@@ -49,6 +49,8 @@ services:
       - ./database/sql/tenant_settings.sql:/docker-entrypoint-initdb.d/18_tenant_settings.sql:ro
       - ./database/sql/tenant_branding.sql:/docker-entrypoint-initdb.d/19_tenant_branding.sql:ro
       - ./database/sql/order_requests.sql:/docker-entrypoint-initdb.d/20_order_requests.sql:ro
+      - ./database/sql/order_request_completion.sql:/docker-entrypoint-initdb.d/21_order_request_completion.sql:ro
+      - ./database/sql/import_targets_supplier_warehouse.sql:/docker-entrypoint-initdb.d/22_import_targets_supplier_warehouse.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-inventory}"]
       interval: 5s

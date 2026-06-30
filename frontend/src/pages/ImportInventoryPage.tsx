@@ -18,8 +18,14 @@ import {
 const INPUT =
   "rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500";
 
-const KEY = "inventory";
 type Step = "upload" | "map" | "done";
+
+// Where "view imported records" should land, per target.
+const VIEW: Record<string, { path: string; label: string }> = {
+  inventory: { path: "/products", label: "View products" },
+  suppliers: { path: "/suppliers", label: "View suppliers" },
+  warehouses: { path: "/warehouses", label: "View warehouses" },
+};
 
 function errMessage(e: unknown): string {
   return e instanceof Error ? e.message : "Something went wrong";
@@ -27,6 +33,7 @@ function errMessage(e: unknown): string {
 
 export default function ImportInventoryPage() {
   const navigate = useNavigate();
+  const [targetKey, setTargetKey] = useState("inventory");
   const [step, setStep] = useState<Step>("upload");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,21 +44,36 @@ export default function ImportInventoryPage() {
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [result, setResult] = useState<ImportJob | null>(null);
 
+  const { data: targets } = useQuery({ queryKey: ["import-targets"], queryFn: importsApi.targets });
   const { data: target } = useQuery({
-    queryKey: ["import-target", KEY],
-    queryFn: () => importsApi.getTarget(KEY),
+    queryKey: ["import-target", targetKey],
+    queryFn: () => importsApi.getTarget(targetKey),
   });
+
+  function reset() {
+    setStep("upload");
+    setUpload(null);
+    setMapping({});
+    setPreview(null);
+    setResult(null);
+    setError(null);
+  }
+
+  function onTargetChange(key: string) {
+    setTargetKey(key);
+    reset();
+  }
 
   async function onFile(file: File | undefined) {
     if (!file) return;
     setBusy(true);
     setError(null);
     try {
-      const res = await importsApi.upload(KEY, file);
+      const res = await importsApi.upload(targetKey, file);
       setUpload(res);
       setMapping(res.detected_mapping);
       setStep("map");
-      const pv = await importsApi.preview(KEY, res.job_id, res.detected_mapping, options);
+      const pv = await importsApi.preview(targetKey, res.job_id, res.detected_mapping, options);
       setPreview(pv);
     } catch (e) {
       setError(errMessage(e));
@@ -65,7 +87,7 @@ export default function ImportInventoryPage() {
     setBusy(true);
     setError(null);
     try {
-      setPreview(await importsApi.preview(KEY, upload.job_id, nextMapping, nextOptions));
+      setPreview(await importsApi.preview(targetKey, upload.job_id, nextMapping, nextOptions));
     } catch (e) {
       setError(errMessage(e));
     } finally {
@@ -78,7 +100,7 @@ export default function ImportInventoryPage() {
     setBusy(true);
     setError(null);
     try {
-      setResult(await importsApi.confirm(KEY, upload.job_id, mapping, options));
+      setResult(await importsApi.confirm(targetKey, upload.job_id, mapping, options));
       setStep("done");
     } catch (e) {
       setError(errMessage(e));
@@ -87,24 +109,27 @@ export default function ImportInventoryPage() {
     }
   }
 
-  function reset() {
-    setStep("upload");
-    setUpload(null);
-    setMapping({});
-    setPreview(null);
-    setResult(null);
-    setError(null);
-  }
+  const view = VIEW[targetKey] ?? { path: "/products", label: "Done" };
 
   return (
     <div>
       <PageHeader
-        title="Import Inventory"
-        description="Upload an Excel or CSV stock sheet to load your catalog and opening stock."
+        title="Import Data"
+        description="Upload an Excel or CSV file to load records into the system. Pick what you're importing, then map columns and confirm."
         actions={
-          <Button variant="secondary" onClick={() => navigate("/products")}>
-            Back to Products
-          </Button>
+          <label className="flex items-center gap-2 text-sm">
+            <span className="text-slate-500">Import:</span>
+            <select
+              className={`${INPUT} w-44`}
+              value={targetKey}
+              onChange={(e) => onTargetChange(e.target.value)}
+              disabled={step !== "upload"}
+            >
+              {(targets ?? []).map((t) => (
+                <option key={t.key} value={t.key}>{t.label}</option>
+              ))}
+            </select>
+          </label>
         }
       />
 
@@ -117,7 +142,7 @@ export default function ImportInventoryPage() {
       )}
 
       {step === "upload" && (
-        <UploadStep busy={busy} onFile={onFile} />
+        <UploadStep targetKey={targetKey} busy={busy} onFile={onFile} />
       )}
 
       {step === "map" && upload && target && (
@@ -128,6 +153,7 @@ export default function ImportInventoryPage() {
           options={options}
           preview={preview}
           busy={busy}
+          showInventoryOptions={targetKey === "inventory"}
           onMappingChange={(name, idx) => {
             const next = { ...mapping, [name]: idx };
             setMapping(next);
@@ -142,7 +168,12 @@ export default function ImportInventoryPage() {
       )}
 
       {step === "done" && result && (
-        <DoneStep result={result} onReset={reset} onProducts={() => navigate("/products")} />
+        <DoneStep
+          result={result}
+          viewLabel={view.label}
+          onReset={reset}
+          onView={() => navigate(view.path)}
+        />
       )}
     </div>
   );
@@ -181,9 +212,11 @@ function Stepper({ step }: { step: Step }) {
 }
 
 function UploadStep({
+  targetKey,
   busy,
   onFile,
 }: {
+  targetKey: string;
   busy: boolean;
   onFile: (f: File | undefined) => void;
 }) {
@@ -196,7 +229,7 @@ function UploadStep({
             Click to choose a .xlsx, .xls or .csv file
           </span>
           <span className="text-xs text-slate-400">
-            The first row must be column headers (SKU, name, quantity, ...)
+            The first row must be column headers; download a template below for the exact columns.
           </span>
           <input
             type="file"
@@ -226,7 +259,7 @@ function UploadStep({
               key={lvl}
               variant="secondary"
               className="w-full justify-start capitalize"
-              onClick={() => void importsApi.downloadTemplate(KEY, lvl)}
+              onClick={() => void importsApi.downloadTemplate(targetKey, lvl)}
             >
               <Download className="h-4 w-4" /> {lvl} template
             </Button>
@@ -244,6 +277,7 @@ function MapStep({
   options,
   preview,
   busy,
+  showInventoryOptions,
   onMappingChange,
   onOptionsChange,
   onImport,
@@ -254,6 +288,7 @@ function MapStep({
   options: ImportOptions;
   preview: PreviewResponse | null;
   busy: boolean;
+  showInventoryOptions: boolean;
   onMappingChange: (name: string, idx: number | null) => void;
   onOptionsChange: (o: ImportOptions) => void;
   onImport: () => void;
@@ -293,43 +328,47 @@ function MapStep({
           ))}
         </div>
 
-        <div className="mt-5 mb-2 text-sm font-semibold text-slate-700">Options</div>
-        <div className="grid gap-3 sm:grid-cols-3 text-sm">
-          <label className="flex flex-col gap-1">
-            <span className="text-slate-500">Unknown warehouse</span>
-            <select
-              className={INPUT}
-              value={options.warehouse_mode}
-              onChange={(e) =>
-                onOptionsChange({ ...options, warehouse_mode: e.target.value as ImportOptions["warehouse_mode"] })
-              }
-            >
-              <option value="create">Create it</option>
-              <option value="skip">Skip the row</option>
-            </select>
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-slate-500">Default warehouse</span>
-            <input
-              className={INPUT}
-              value={options.default_warehouse}
-              onChange={(e) => onOptionsChange({ ...options, default_warehouse: e.target.value })}
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-slate-500">Unknown supplier</span>
-            <select
-              className={INPUT}
-              value={options.supplier_mode}
-              onChange={(e) =>
-                onOptionsChange({ ...options, supplier_mode: e.target.value as ImportOptions["supplier_mode"] })
-              }
-            >
-              <option value="create">Create it</option>
-              <option value="link_only">Leave blank</option>
-            </select>
-          </label>
-        </div>
+        {showInventoryOptions && (
+          <>
+            <div className="mt-5 mb-2 text-sm font-semibold text-slate-700">Options</div>
+            <div className="grid gap-3 sm:grid-cols-3 text-sm">
+              <label className="flex flex-col gap-1">
+                <span className="text-slate-500">Unknown warehouse</span>
+                <select
+                  className={INPUT}
+                  value={options.warehouse_mode}
+                  onChange={(e) =>
+                    onOptionsChange({ ...options, warehouse_mode: e.target.value as ImportOptions["warehouse_mode"] })
+                  }
+                >
+                  <option value="create">Create it</option>
+                  <option value="skip">Skip the row</option>
+                </select>
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-slate-500">Default warehouse</span>
+                <input
+                  className={INPUT}
+                  value={options.default_warehouse}
+                  onChange={(e) => onOptionsChange({ ...options, default_warehouse: e.target.value })}
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-slate-500">Unknown supplier</span>
+                <select
+                  className={INPUT}
+                  value={options.supplier_mode}
+                  onChange={(e) =>
+                    onOptionsChange({ ...options, supplier_mode: e.target.value as ImportOptions["supplier_mode"] })
+                  }
+                >
+                  <option value="create">Create it</option>
+                  <option value="link_only">Leave blank</option>
+                </select>
+              </label>
+            </div>
+          </>
+        )}
 
         {/* Sample data */}
         <div className="mt-5 mb-2 text-sm font-semibold text-slate-700">Preview (first rows)</div>
@@ -404,12 +443,14 @@ function etaText(job: ImportJob): string {
 
 function DoneStep({
   result,
+  viewLabel,
   onReset,
-  onProducts,
+  onView,
 }: {
   result: ImportJob;
+  viewLabel: string;
   onReset: () => void;
-  onProducts: () => void;
+  onView: () => void;
 }) {
   const [cancelling, setCancelling] = useState(false);
   const { data } = useQuery({
@@ -472,7 +513,7 @@ function DoneStep({
       <div className="mt-5 flex gap-3">
         {terminal ? (
           <>
-            <Button onClick={onProducts}>View products</Button>
+            <Button onClick={onView}>{viewLabel}</Button>
             <Button variant="secondary" onClick={onReset}>
               Import another file
             </Button>

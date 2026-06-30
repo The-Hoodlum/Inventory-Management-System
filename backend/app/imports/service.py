@@ -169,6 +169,20 @@ class ImportContext:
             user_id=self.user_id,
         )
 
+    async def upsert_supplier(self, *, key: str, attrs: dict[str, Any]) -> Any:
+        """Create or update a Supplier by name (the supplier import's key field)."""
+        existing = await self.repo.find_supplier(key)
+        if existing is not None:
+            return await self.repo.update_supplier(existing, attrs=attrs)
+        return await self.repo.create_supplier_full(self.tenant_id, name=key, attrs=attrs)
+
+    async def upsert_warehouse(self, *, key: str, code: str, attrs: dict[str, Any]) -> Any:
+        """Create or update a Warehouse by name; ``code`` is required (NOT NULL column)."""
+        existing = await self.repo.find_warehouse(key)
+        if existing is not None:
+            return await self.repo.update_warehouse(existing, attrs={**attrs, "code": code})
+        return await self.repo.create_warehouse_full(self.tenant_id, name=key, code=code, attrs=attrs)
+
 
 class ImportService:
     def __init__(self, repo: ImportRepository, audit: AuditRepository) -> None:
@@ -273,7 +287,7 @@ class ImportService:
             if errors:
                 invalid += 1
                 if len(sample_errors) < MAX_PREVIEW_ROWS:
-                    sample_errors.append(RowErrorOut(row_number=i, sku=clean.get("sku"), errors=errors))
+                    sample_errors.append(RowErrorOut(row_number=i, sku=clean.get(imp.key_field), errors=errors))
             else:
                 valid += 1
         return PreviewResponse(
@@ -355,18 +369,20 @@ class ImportService:
         background runner. Must be called inside an active transaction."""
         raw = ImportService._row_to_fields(cells, mapping, importer)
         clean, verrs = validate_mapped(importer.fields, raw)
-        sku = clean.get("sku")
+        # Row identity for dedup + error labelling: the target's key field
+        # ("sku" for inventory, "name" for supplier/warehouse, ...).
+        key = clean.get(importer.key_field)
         if verrs:
             for e in verrs:
-                await repo.add_error(tenant_id=tenant_id, job_id=job_id, row_number=row_number, sku=sku, message=e)
+                await repo.add_error(tenant_id=tenant_id, job_id=job_id, row_number=row_number, sku=key, message=e)
             return ROW_ERROR
-        if sku in seen_skus:
+        if key in seen_skus:
             await repo.add_error(
-                tenant_id=tenant_id, job_id=job_id, row_number=row_number, sku=sku,
-                message="Duplicate SKU within file",
+                tenant_id=tenant_id, job_id=job_id, row_number=row_number, sku=key,
+                message=f"Duplicate {importer.key_field} within file",
             )
             return ROW_ERROR
-        seen_skus.add(sku)
+        seen_skus.add(key)
 
         try:
             async with session.begin_nested():
@@ -375,7 +391,7 @@ class ImportService:
         except Exception as exc:  # DB/constraint failure on this row only
             ctx.rollback_row()
             await repo.add_error(
-                tenant_id=tenant_id, job_id=job_id, row_number=row_number, sku=sku,
+                tenant_id=tenant_id, job_id=job_id, row_number=row_number, sku=key,
                 message=f"Could not import row: {exc}",
             )
             return ROW_ERROR
@@ -384,10 +400,10 @@ class ImportService:
             return ROW_IMPORTED
         if result.status == ROW_SKIPPED:
             for e in result.errors:
-                await repo.add_error(tenant_id=tenant_id, job_id=job_id, row_number=row_number, sku=sku, message=f"Skipped: {e}")
+                await repo.add_error(tenant_id=tenant_id, job_id=job_id, row_number=row_number, sku=key, message=f"Skipped: {e}")
             return ROW_SKIPPED
         for e in result.errors:
-            await repo.add_error(tenant_id=tenant_id, job_id=job_id, row_number=row_number, sku=sku, message=e)
+            await repo.add_error(tenant_id=tenant_id, job_id=job_id, row_number=row_number, sku=key, message=e)
         return ROW_ERROR
 
     # ----------------------------- rollback ---------------------------- #

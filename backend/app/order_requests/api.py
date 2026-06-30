@@ -20,6 +20,8 @@ from app.core.permissions import P
 from app.order_requests.schemas import (
     ApproveRequest,
     AuditEntryOut,
+    CancelRequest,
+    CompleteRequest,
     OrderRequestCreate,
     OrderRequestOut,
     RejectRequest,
@@ -115,3 +117,31 @@ async def issue_request(
     svc: OrderRequestService = Depends(get_order_request_service),
 ) -> OrderRequestOut:
     return await svc.issue(tenant_id=user.tenant_id, actor_id=user.id, request_id=request_id)
+
+
+@router.post("/{request_id}/cancel", response_model=OrderRequestOut)
+async def cancel_request(
+    request_id: uuid.UUID,
+    payload: CancelRequest,
+    user: CurrentUser = Depends(require_permission(P.ORDER_REQUEST_READ)),
+    svc: OrderRequestService = Depends(get_order_request_service),
+) -> OrderRequestOut:
+    # A requester can cancel their own request; an admin/approver can cancel any.
+    # Allowed only before issue (pending / approved / partially_approved) — enforced in the service.
+    return await svc.cancel(
+        tenant_id=user.tenant_id, actor_id=user.id, request_id=request_id,
+        is_admin=_is_admin(user), payload=payload,
+    )
+
+
+@router.post("/{request_id}/complete", response_model=OrderRequestOut)
+async def complete_request(
+    request_id: uuid.UUID,
+    payload: CompleteRequest,
+    user: CurrentUser = Depends(require_permission(P.ORDER_REQUEST_COMPLETE)),
+    svc: OrderRequestService = Depends(get_order_request_service),
+) -> OrderRequestOut:
+    # Receiving user confirms receipt and closes an ISSUED request (records discrepancies).
+    return await svc.complete(
+        tenant_id=user.tenant_id, actor_id=user.id, request_id=request_id, payload=payload,
+    )

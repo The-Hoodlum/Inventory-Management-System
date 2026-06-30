@@ -82,7 +82,9 @@ jobs:
             database/sql/assistant_roles.sql \
             database/sql/tenant_settings.sql \
             database/sql/tenant_branding.sql \
-            database/sql/order_requests.sql ; do
+            database/sql/order_requests.sql \
+            database/sql/order_request_completion.sql \
+            database/sql/import_targets_supplier_warehouse.sql ; do
             echo "applying $f"
             psql -v ON_ERROR_STOP=1 -f "$f"
           done

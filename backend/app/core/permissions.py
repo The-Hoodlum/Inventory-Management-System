@@ -46,3 +46,4 @@ class P:
     ORDER_REQUEST_READ = "order_request.read"       # view requests (own branch or, for admin, all)
     ORDER_REQUEST_APPROVE = "order_request.approve"  # approve / partially approve / reject
     ORDER_REQUEST_ISSUE = "order_request.issue"     # issue stock (deducts inventory)
+    ORDER_REQUEST_COMPLETE = "order_request.complete"  # confirm receipt + close (complete)

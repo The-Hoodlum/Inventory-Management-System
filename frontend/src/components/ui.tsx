@@ -59,6 +59,7 @@ const STATUS_TONES: Record<string, string> = {
   pending: "bg-amber-100 text-amber-800",
   partially_approved: "bg-cyan-100 text-cyan-800",
   issued: "bg-emerald-100 text-emerald-700",
+  completed: "bg-teal-100 text-teal-800",
   // catalog / reference statuses
   active: "bg-emerald-100 text-emerald-700",
   inactive: "bg-slate-200 text-slate-600",

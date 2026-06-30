@@ -13,7 +13,10 @@ from app.core.exceptions import BusinessRuleError, NotFoundError
 from app.order_requests.domain import status as S
 from app.order_requests.schemas import (
     ApproveRequest,
+    CancelRequest,
+    CompleteRequest,
     LineApproval,
+    LineReceipt,
     OrderRequestCreate,
     OrderRequestLineCreate,
     RejectRequest,
@@ -286,3 +289,70 @@ async def test_branch_user_cannot_view_others_requests():
     # admin can view
     seen = await svc.get(request_id=out.id, viewer_id=ADMIN, is_admin=True)
     assert seen.id == out.id
+
+
+async def _approve_and_issue(svc, out):
+    line_ids = [ln.id for ln in out.lines]
+    await svc.approve(
+        tenant_id=TENANT, actor_id=ADMIN, request_id=out.id,
+        payload=ApproveRequest(lines=[LineApproval(line_id=line_ids[0], approved_qty=10),
+                                      LineApproval(line_id=line_ids[1], approved_qty=5)]),
+    )
+    return await svc.issue(tenant_id=TENANT, actor_id=ADMIN, request_id=out.id)
+
+
+async def test_cancel_by_requester_before_issue():
+    svc, repo = _svc()
+    out = await _make_pending(svc)
+    cancelled = await svc.cancel(
+        tenant_id=TENANT, actor_id=CASHIER, request_id=out.id, is_admin=False,
+        payload=CancelRequest(reason="No longer needed"),
+    )
+    assert cancelled.status == S.CANCELLED
+    assert cancelled.comments == "No longer needed"
+    assert any(a["action"] == "cancelled" for a in repo.audits)
+
+
+async def test_cancel_hidden_from_other_branch_users():
+    svc, _ = _svc()
+    out = await _make_pending(svc)  # by CASHIER
+    with pytest.raises(NotFoundError):
+        await svc.cancel(tenant_id=TENANT, actor_id=uuid.uuid4(), request_id=out.id,
+                         is_admin=False, payload=CancelRequest())
+
+
+async def test_cannot_cancel_once_issued():
+    svc, _ = _svc()
+    out = await _make_pending(svc)
+    await _approve_and_issue(svc, out)
+    with pytest.raises(BusinessRuleError):
+        await svc.cancel(tenant_id=TENANT, actor_id=ADMIN, request_id=out.id,
+                         is_admin=True, payload=CancelRequest(reason="too late"))
+
+
+async def test_complete_requires_issue_first():
+    svc, _ = _svc()
+    out = await _make_pending(svc)
+    with pytest.raises(BusinessRuleError):  # still pending
+        await svc.complete(tenant_id=TENANT, actor_id=CASHIER, request_id=out.id,
+                           payload=CompleteRequest(remarks="too early"))
+
+
+async def test_complete_records_receipt_and_discrepancy():
+    svc, repo = _svc()
+    out = await _make_pending(svc)
+    issued = await _approve_and_issue(svc, out)
+    assert issued.status == S.ISSUED
+    line_ids = [ln.id for ln in out.lines]
+    completed = await svc.complete(
+        tenant_id=TENANT, actor_id=CASHIER, request_id=out.id,
+        payload=CompleteRequest(
+            remarks="Received with one short",
+            lines=[LineReceipt(line_id=line_ids[0], received_qty=9, missing_qty=1, damaged_qty=0)],
+        ),
+    )
+    assert completed.status == S.COMPLETED
+    assert completed.completion_remarks == "Received with one short"
+    first = next(ln for ln in completed.lines if ln.id == line_ids[0])
+    assert first.received_qty == 9 and first.missing_qty == 1
+    assert any(a["action"] == "completed" for a in repo.audits)

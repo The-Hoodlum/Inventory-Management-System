@@ -13,13 +13,14 @@ import { orderRequestsApi, PURPOSES } from "@/lib/orderRequests";
 const INPUT =
   "rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500";
 
-const STATUSES = ["pending", "approved", "partially_approved", "rejected", "issued", "cancelled"];
+const STATUSES = ["pending", "approved", "partially_approved", "rejected", "issued", "completed", "cancelled"];
 
 export default function OrderRequestsPage() {
   const { hasPermission } = useAuth();
   const canCreate = hasPermission("order_request.create");
   const canApprove = hasPermission("order_request.approve");
   const canIssue = hasPermission("order_request.issue");
+  const canComplete = hasPermission("order_request.complete");
 
   const [statusFilter, setStatusFilter] = useState("");
   const [purposeFilter, setPurposeFilter] = useState("");
@@ -50,19 +51,21 @@ export default function OrderRequestsPage() {
 
       {/* Dashboard widgets */}
       {dash.data && (
-        <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
+        <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-5">
           {dash.data.scope === "admin" ? (
             <>
               <StatCard label="Pending" value={dash.data.pending} tone="warning" />
               <StatCard label="Approved" value={dash.data.approved} tone="positive" />
-              <StatCard label="Rejected" value={dash.data.rejected} tone="danger" />
               <StatCard label="Issued today" value={dash.data.issued_today} />
+              <StatCard label="Completed" value={dash.data.completed} tone="positive" />
+              <StatCard label="Rejected" value={dash.data.rejected} tone="danger" />
             </>
           ) : (
             <>
               <StatCard label="My pending" value={dash.data.my_pending} tone="warning" />
               <StatCard label="My approved" value={dash.data.my_approved} tone="positive" />
               <StatCard label="My rejected" value={dash.data.my_rejected} tone="danger" />
+              <StatCard label="My completed" value={dash.data.my_completed} tone="positive" />
               <StatCard label="Recently issued" value={dash.data.my_recent_issued.length} />
             </>
           )}
@@ -155,6 +158,7 @@ export default function OrderRequestsPage() {
           requestId={detailId}
           canApprove={canApprove}
           canIssue={canIssue}
+          canComplete={canComplete}
           onClose={() => setDetailId(null)}
         />
       )}
