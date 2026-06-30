@@ -92,7 +92,10 @@ jobs:
             database/sql/branches.sql \
             database/sql/seed_demo_branches.sql \
             database/sql/stock_transfers.sql \
-            database/sql/stock_transfer_ledger.sql ; do
+            database/sql/stock_transfer_ledger.sql \
+            database/sql/customers.sql \
+            database/sql/sales_documents.sql \
+            database/sql/sales_returns.sql ; do
             echo "applying $f"
             psql -v ON_ERROR_STOP=1 -f "$f"
           done

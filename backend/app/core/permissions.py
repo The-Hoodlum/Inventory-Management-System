@@ -48,3 +48,15 @@ class P:
     ORDER_REQUEST_ISSUE = "order_request.issue"     # issue stock (deducts inventory)
     ORDER_REQUEST_RECEIVE = "order_request.receive"  # capture receipt (received/missing/damaged/extra)
     ORDER_REQUEST_COMPLETE = "order_request.complete"  # confirm receipt + close (complete)
+    # Sales & Distribution (quotation -> sales order -> delivery -> invoice -> payment -> receipt; POS)
+    CUSTOMER_READ = "customer.read"
+    CUSTOMER_MANAGE = "customer.manage"
+    SALES_READ = "sales.read"
+    SALES_QUOTE = "sales.quote"        # create/send/convert quotations
+    SALES_ORDER = "sales.order"        # create/confirm sales orders (reserves stock)
+    SALES_DELIVER = "sales.deliver"    # issue delivery notes (deducts inventory)
+    SALES_INVOICE = "sales.invoice"    # create/send invoices
+    SALES_PAYMENT = "sales.payment"    # record payments + issue receipts
+    SALES_MANAGE = "sales.manage"      # approve discounts, cancel, override
+    SALES_RETURN = "sales.return"      # process customer returns + credit notes
+    POS_USE = "pos.use"                # operate the POS fast-sale checkout

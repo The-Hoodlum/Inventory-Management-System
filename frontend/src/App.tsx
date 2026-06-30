@@ -4,6 +4,7 @@ import { ProtectedRoute } from "@/auth/ProtectedRoute";
 import { AppShell } from "@/components/AppShell";
 import AdvisorPage from "@/pages/AdvisorPage";
 import ContainerPage from "@/pages/ContainerPage";
+import CustomersPage from "@/pages/CustomersPage";
 import DashboardPage from "@/pages/DashboardPage";
 import ForecastPage from "@/pages/ForecastPage";
 import ImportHistoryPage from "@/pages/ImportHistoryPage";
@@ -15,11 +16,13 @@ import MovementsPage from "@/pages/MovementsPage";
 import NewPurchaseOrderPage from "@/pages/NewPurchaseOrderPage";
 import NotFoundPage from "@/pages/NotFoundPage";
 import OrderRequestsPage from "@/pages/OrderRequestsPage";
+import PosPage from "@/pages/PosPage";
 import ProductsPage from "@/pages/ProductsPage";
 import PurchaseOrderDetailPage from "@/pages/PurchaseOrderDetailPage";
 import PurchaseOrdersPage from "@/pages/PurchaseOrdersPage";
 import ReorderPage from "@/pages/ReorderPage";
 import ReportsPage from "@/pages/ReportsPage";
+import SalesPage from "@/pages/SalesPage";
 import SettingsPage from "@/pages/SettingsPage";
 import SupplierScoresPage from "@/pages/SupplierScoresPage";
 import SuppliersPage from "@/pages/SuppliersPage";
@@ -49,6 +52,9 @@ export default function App() {
         <Route path="/advisor" element={<AdvisorPage />} />
         <Route path="/supplier-scores" element={<SupplierScoresPage />} />
         <Route path="/order-requests" element={<OrderRequestsPage />} />
+        <Route path="/sales" element={<SalesPage />} />
+        <Route path="/customers" element={<CustomersPage />} />
+        <Route path="/pos" element={<PosPage />} />
         <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/import/inventory" element={<ImportInventoryPage />} />
         <Route path="/imports" element={<ImportHistoryPage />} />

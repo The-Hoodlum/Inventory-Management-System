@@ -18,7 +18,8 @@ FEATURE_FLAGS: dict[str, tuple[str, bool]] = {
     "whatsapp_assistant": ("WhatsApp Assistant", True),
     "multi_warehouse": ("Multi-Warehouse", True),
     "barcode_scanning": ("Barcode Scanning", False),
-    "sales_orders": ("Sales Orders", False),
+    "sales_orders": ("Sales & Distribution", False),
+    "pos": ("Point of Sale", False),
     "manufacturing": ("Manufacturing", False),
     "expiry_tracking": ("Expiry Tracking", False),
 }

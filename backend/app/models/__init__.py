@@ -13,6 +13,7 @@ from app.models.catalog import (
     Supplier,
     SupplierProduct,
 )
+from app.models.customer import Customer, CustomerAddress
 from app.models.identity import (
     AuditLog,
     Permission,
@@ -46,6 +47,23 @@ from app.models.procurement import (
     ReorderRecommendation,
     SalesDaily,
 )
+from app.models.sales import (
+    CreditNote,
+    CreditNoteLine,
+    DeliveryNote,
+    DeliveryNoteLine,
+    Invoice,
+    InvoiceLine,
+    Payment,
+    PaymentAllocation,
+    Quotation,
+    QuotationLine,
+    Receipt,
+    Return,
+    ReturnLine,
+    SalesOrder,
+    SalesOrderLine,
+)
 
 __all__ = [
     "Tenant", "User", "Role", "Permission", "RolePermission", "UserRole",
@@ -56,4 +74,9 @@ __all__ = [
     "ImportJob", "ImportFile", "ImportError", "ImportMapping",
     "AssistantConversation", "AssistantMessage", "UserWarehouseAccess", "WhatsAppIdentity",
     "RequestHeader", "RequestLine", "RequestAudit", "StockTransferLedger",
+    "Customer", "CustomerAddress",
+    "Quotation", "QuotationLine", "SalesOrder", "SalesOrderLine",
+    "DeliveryNote", "DeliveryNoteLine", "Invoice", "InvoiceLine",
+    "Payment", "PaymentAllocation", "Receipt",
+    "Return", "ReturnLine", "CreditNote", "CreditNoteLine",
 ]
