@@ -71,6 +71,15 @@ async def _inv(client, h, product_id, wh_id) -> dict:
     return {k: float(it[k]) for k in ("qty_on_hand", "qty_available", "qty_reserved")}
 
 
+async def _ledger(client, h, product_id, wh_id) -> tuple[float, int]:
+    """(signed sum of all stock movements, total count) for a product+location."""
+    r = await client.get("/api/v1/inventory/movements", headers=h,
+                         params={"product_id": product_id, "warehouse_id": wh_id, "page_size": 200})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    return sum(float(m["quantity"]) for m in body["items"]), body["total"]
+
+
 async def _role_id(client, admin_h, name) -> str:
     r = await client.get("/api/v1/users/roles", headers=admin_h)
     role = next((x for x in r.json() if x["name"] == name), None)
@@ -188,6 +197,59 @@ async def test_pos_checkout_deducts_and_receipts(client):
     assert result["delivery_note"]["status"] == "delivered"
     inv1 = await _inv(client, admin_h, product_id, location_id)
     assert inv1["qty_on_hand"] == inv0["qty_on_hand"] - 2  # immediate deduction
+
+
+# ---- single stock-write path: sales moves stock ONLY through the ledger ---- #
+async def test_sales_uses_single_inventory_ledger_path(client):
+    """A sale and a return change on-hand by EXACTLY the net of the stock-movement
+    ledger they write — proving sales no longer has its own write path and that the
+    reserve/issue/receipt entries reconcile (Δon_hand == Δledger). The delivery 'issue'
+    has the same shape a manual InventoryService.issue() would write."""
+    admin_h = await _headers(client, ADMIN_EMAIL, ADMIN_PASSWORD)
+    await _enable_sales(client, admin_h)
+    customer_id = await _customer(client, admin_h)
+    product_id, location_id = await _find_stocked(client, admin_h, min_qty=10)
+
+    onhand0 = (await _inv(client, admin_h, product_id, location_id))["qty_on_hand"]
+    sum0, total0 = await _ledger(client, admin_h, product_id, location_id)
+    if total0 > 180:  # keep the whole ledger within one page so the sum is exact
+        pytest.skip("too many pre-existing movements to bound the ledger sum on one page")
+
+    # Order 4 -> confirm (reserve) -> deliver (issue, consumes the hold).
+    so_id = (await client.post("/api/v1/sales/orders", headers=admin_h, json={
+        "customer_id": customer_id, "location_id": location_id,
+        "lines": [{"product_id": product_id, "qty": 4, "unit_price": 100}],
+    })).json()["id"]
+    await client.post(f"/api/v1/sales/orders/{so_id}/confirm", headers=admin_h)
+    delivery = (await client.post(f"/api/v1/sales/orders/{so_id}/deliver",
+                                  headers=admin_h, json={})).json()
+    assert delivery["status"] == "delivered"
+
+    onhand1 = (await _inv(client, admin_h, product_id, location_id))["qty_on_hand"]
+    sum1, _ = await _ledger(client, admin_h, product_id, location_id)
+    assert onhand1 == onhand0 - 4
+    # reserve(-4) + unreserve(+4) net 0, issue(-4) => ledger net == on-hand change.
+    assert (sum1 - sum0) == (onhand1 - onhand0) == -4
+
+    # The delivery wrote a single 'issue' movement of -4, just like a manual issue.
+    r = await client.get("/api/v1/inventory/movements", headers=admin_h,
+                         params={"product_id": product_id, "warehouse_id": location_id, "page_size": 10})
+    issues = [m for m in r.json()["items"]
+              if m["movement_type"] == "issue" and float(m["quantity"]) == -4]
+    assert any(m["reference_type"] == "sales_delivery" for m in issues)
+
+    # Invoice, then return all 4 -> restock 'receipt' through the same inventory path.
+    invoice = (await client.post("/api/v1/sales/invoices", headers=admin_h,
+                                 json={"delivery_note_id": delivery["id"]})).json()
+    r = await client.post("/api/v1/sales/returns", headers=admin_h, json={
+        "invoice_id": invoice["id"], "location_id": location_id, "reason": "damaged",
+        "lines": [{"product_id": product_id, "qty": 4}]})
+    assert r.status_code == 201, r.text
+
+    onhand2 = (await _inv(client, admin_h, product_id, location_id))["qty_on_hand"]
+    sum2, _ = await _ledger(client, admin_h, product_id, location_id)
+    assert onhand2 == onhand0  # full deliver + return cycle nets to zero
+    assert (sum2 - sum0) == (onhand2 - onhand0) == 0
 
 
 # ------------------------------- permissions ------------------------------- #

@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Inventory, StockMovement
@@ -63,6 +63,34 @@ class InventoryRepository:
         self.session.add(mv)
         await self.session.flush()
         return mv
+
+    async def record_demand(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        product_id: uuid.UUID,
+        warehouse_id: uuid.UUID,
+        qty: Decimal,
+        source: str,
+    ) -> None:
+        """Feed today's outbound demand into ``sales_daily`` (additive upsert).
+
+        Used by demand-driven issues (sales delivery / POS) so the forecast and
+        reorder engines see consumption. Idempotent within a day per source: repeat
+        issues accumulate rather than overwrite.
+        """
+        await self.session.execute(
+            text(
+                "INSERT INTO sales_daily "
+                "(tenant_id, product_id, warehouse_id, sale_date, qty_sold, source) "
+                "VALUES (CAST(:t AS uuid), CAST(:p AS uuid), CAST(:w AS uuid), CURRENT_DATE, :q, :s) "
+                "ON CONFLICT (product_id, warehouse_id, sale_date, source) "
+                "DO UPDATE SET qty_sold = sales_daily.qty_sold + EXCLUDED.qty_sold"
+            ),
+            {"t": str(tenant_id), "p": str(product_id), "w": str(warehouse_id),
+             "q": float(qty), "s": source},
+        )
+        await self.session.flush()
 
     # ----------------------------- reads ----------------------------- #
     async def list_inventory(

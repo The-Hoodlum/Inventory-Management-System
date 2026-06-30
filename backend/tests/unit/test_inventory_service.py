@@ -4,7 +4,9 @@ All run against in-memory fakes (see conftest), so no database is required.
 """
 from __future__ import annotations
 
+import uuid
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 
@@ -17,6 +19,7 @@ from app.schemas.inventory import (
     ReceiveStockRequest,
     TransferStockRequest,
 )
+from tests.conftest import FakeLookup
 
 
 async def test_receive_increments_creates_movement_and_audits(
@@ -111,3 +114,93 @@ async def test_transfer_insufficient_stock_raises(inv_service, ids):
     )
     with pytest.raises(BusinessRuleError):
         await inv_service.transfer(tenant_id=ids.tenant, user_id=ids.user, req=req)
+
+
+# -------------------- issue against a reservation (sales / POS) -------------------- #
+class _FakeReservationRepo:
+    """Minimal hold store: returns the seeded reservation and nets it down on consume,
+    mirroring ReservationRepository so the service can be unit-tested without a DB."""
+
+    def __init__(self, reservation=None) -> None:
+        self._res = reservation
+        self.consumed: list[Decimal] = []
+
+    async def active_for(self, reference_id, reference_type=None):
+        return self._res
+
+    async def consume(self, *, tenant_id, inv, reservation, qty, user_id):
+        take = min(qty, reservation.qty)
+        inv.qty_reserved = inv.qty_reserved - take
+        reservation.qty = reservation.qty - take
+        self.consumed.append(take)
+
+
+def _svc_with_reservation(fake_inventory_repo, fake_audit_repo, ids, reservation=None):
+    from app.services.inventory_service import InventoryService
+
+    products = FakeLookup({ids.p1})
+    warehouses = FakeLookup({ids.wh1, ids.wh2})
+    return InventoryService(
+        fake_inventory_repo, products, warehouses, fake_audit_repo,
+        _FakeReservationRepo(reservation),
+    )
+
+
+async def test_issue_against_reservation_consumes_hold_audits_and_records_demand(
+    fake_inventory_repo, fake_audit_repo, ids
+):
+    # A confirmed sales-order line holds 5 of the 20 on hand.
+    fake_inventory_repo.seed(ids.p1, ids.wh1, on_hand=20, reserved=5, tenant_id=ids.tenant)
+    line_id = uuid.uuid4()
+    note_id = uuid.uuid4()
+    reservation = SimpleNamespace(qty=Decimal("5"))
+    svc = _svc_with_reservation(fake_inventory_repo, fake_audit_repo, ids, reservation)
+
+    inv = await svc.issue_against_reservation(
+        tenant_id=ids.tenant, user_id=ids.user, product_id=ids.p1, warehouse_id=ids.wh1,
+        quantity=Decimal("5"), reference_type="sales_delivery", reference_id=note_id,
+        reason="Sales delivery DN-1", reservation_ref=line_id,
+        reservation_ref_type="sales_order_line", demand_source="sale",
+    )
+
+    assert inv.qty_on_hand == Decimal("15")      # on-hand deducted once
+    assert inv.qty_reserved == Decimal("0")      # the line's own hold was consumed
+    mv = fake_inventory_repo.movements[-1]
+    assert mv.movement_type == "issue" and mv.quantity == Decimal("-5")
+    assert mv.reference_type == "sales_delivery"
+    # Same audit story as a manual issue, regardless of which document triggered it.
+    assert any(e["action"] == "stock.issue" for e in fake_audit_repo.entries)
+    # Demand fed exactly once, tagged with the sale source.
+    assert len(fake_inventory_repo.demand) == 1
+    assert fake_inventory_repo.demand[0].source == "sale"
+
+
+async def test_pos_issue_without_reservation_draws_from_free_pool(
+    fake_inventory_repo, fake_audit_repo, ids
+):
+    fake_inventory_repo.seed(ids.p1, ids.wh1, on_hand=10, tenant_id=ids.tenant)
+    svc = _svc_with_reservation(fake_inventory_repo, fake_audit_repo, ids, reservation=None)
+
+    inv = await svc.issue_against_reservation(
+        tenant_id=ids.tenant, user_id=ids.user, product_id=ids.p1, warehouse_id=ids.wh1,
+        quantity=Decimal("4"), reference_type="sales_delivery", reference_id=uuid.uuid4(),
+        reason="POS sale DN-2", reservation_ref=None, demand_source="pos",
+    )
+    assert inv.qty_on_hand == Decimal("6")
+    assert fake_inventory_repo.demand[0].source == "pos"
+
+
+async def test_issue_against_reservation_respects_other_holds(
+    fake_inventory_repo, fake_audit_repo, ids
+):
+    # 10 on hand but 8 are reserved by OTHER demands; only 2 are free. POS holds nothing,
+    # so a request for 5 must fail rather than raid someone else's reservation.
+    fake_inventory_repo.seed(ids.p1, ids.wh1, on_hand=10, reserved=8, tenant_id=ids.tenant)
+    svc = _svc_with_reservation(fake_inventory_repo, fake_audit_repo, ids, reservation=None)
+
+    with pytest.raises(BusinessRuleError):
+        await svc.issue_against_reservation(
+            tenant_id=ids.tenant, user_id=ids.user, product_id=ids.p1, warehouse_id=ids.wh1,
+            quantity=Decimal("5"), reference_type="sales_delivery", reference_id=uuid.uuid4(),
+            reason="POS sale", reservation_ref=None, demand_source="pos",
+        )

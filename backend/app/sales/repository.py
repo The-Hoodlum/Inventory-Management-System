@@ -1,11 +1,11 @@
 """Data access for the Sales & Distribution engine: document numbering, locked
-header reads, inventory integration (reserve on order, deduct on delivery/POS via
-the shared reservation + inventory ledger), lists, and enrichment maps.
+header reads, reservation holds/releases, lists, and enrichment maps.
 
-Inventory is reserved against a sales-order line and consumed at delivery; POS sells
-immediately (no prior reservation) but always respects existing reservations by
-checking AVAILABLE = on_hand - reserved - damaged. Every deduction appends a
-stock_movements row and feeds sales_daily (demand).
+Inventory is RESERVED against a sales-order line here (reserve on confirm, release on
+cancel) by holding available stock without moving on-hand. The actual stock MOVEMENT —
+deduct at delivery/POS, restock on return — is owned by ``InventoryService`` (the single
+source of truth for qty_on_hand, the ledger, the audit trail, and demand); this
+repository never mutates on-hand.
 """
 from __future__ import annotations
 
@@ -27,7 +27,6 @@ from app.models import (
     Quotation,
     Return,
     SalesOrder,
-    StockMovement,
     Warehouse,
 )
 from app.repositories.reservation_repo import ReservationRepository
@@ -37,10 +36,6 @@ SO_LINE_REF = "sales_order_line"
 
 def _f(v) -> float:
     return float(v) if v is not None else 0.0
-
-
-def _d(v) -> Decimal:
-    return Decimal(str(v)) if v is not None else Decimal("0")
 
 
 class SalesRepository:
@@ -113,35 +108,6 @@ class SalesRepository:
         stmt = stmt.order_by(CreditNote.created_at.desc()).limit(limit)
         return list((await self.session.execute(stmt)).scalars().all())
 
-    async def restock_line(
-        self, *, tenant_id: uuid.UUID, product_id: uuid.UUID, location_id: uuid.UUID,
-        qty: Decimal, user_id: uuid.UUID, reference_id: uuid.UUID, reason: str,
-    ) -> None:
-        """Customer return: ADD `qty` back into the chosen location's on-hand and write a
-        'receipt' stock movement (the inventory ledger). Creates the row if needed."""
-        if qty <= 0:
-            return
-        inv = await self.session.scalar(
-            select(Inventory).where(
-                Inventory.product_id == product_id, Inventory.warehouse_id == location_id
-            ).with_for_update()
-        )
-        if inv is None:
-            inv = Inventory(
-                tenant_id=tenant_id, product_id=product_id, warehouse_id=location_id,
-                qty_on_hand=Decimal("0"), qty_reserved=Decimal("0"), qty_damaged=Decimal("0"), version=0,
-            )
-            self.session.add(inv)
-            await self.session.flush()
-        inv.qty_on_hand = inv.qty_on_hand + qty
-        inv.version = (inv.version or 0) + 1
-        self.session.add(StockMovement(
-            tenant_id=tenant_id, product_id=product_id, warehouse_id=location_id,
-            movement_type="receipt", quantity=qty, reference_type="sales_return",
-            reference_id=reference_id, reason=reason, user_id=user_id,
-        ))
-        await self.session.flush()
-
     async def product_prices(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, Decimal]:
         if not ids:
             return {}
@@ -189,56 +155,6 @@ class SalesRepository:
         )
         if inv is not None:
             await self.reservations.release(tenant_id=tenant_id, inv=inv, reservation=res, user_id=user_id)
-
-    async def deduct_line(
-        self, *, tenant_id: uuid.UUID, product_id: uuid.UUID, location_id: uuid.UUID,
-        qty: Decimal, user_id: uuid.UUID, reference_id: uuid.UUID, reason: str,
-        reservation_ref: uuid.UUID | None, demand_source: str = "sale",
-    ) -> str | None:
-        """Deduct `qty` from the location's on-hand: consume the line's reservation (if
-        any), write an 'issue' stock movement, and feed sales_daily. POS passes
-        reservation_ref=None and must respect others' reservations (AVAILABLE check).
-        Returns an error string on insufficient stock, else None."""
-        if qty <= 0:
-            return None
-        inv = await self.session.scalar(
-            select(Inventory).where(
-                Inventory.product_id == product_id, Inventory.warehouse_id == location_id
-            ).with_for_update()
-        )
-        on_hand = inv.qty_on_hand if inv else Decimal("0")
-        res = await self.reservations.active_for(reservation_ref, SO_LINE_REF) if reservation_ref else None
-        own_hold = res.qty if res else Decimal("0")
-        available = (on_hand - inv.qty_reserved - inv.qty_damaged) if inv else Decimal("0")
-        # We can use unreserved availability plus our own hold; never more than on-hand.
-        if inv is None or on_hand < qty or (available + own_hold) < qty:
-            return (
-                f"Insufficient stock for product {product_id} at the selling location "
-                f"(available {_f(available + own_hold):g}, on hand {_f(on_hand):g}, need {_f(qty):g})"
-            )
-        if res is not None:
-            await self.reservations.consume(
-                tenant_id=tenant_id, inv=inv, reservation=res, qty=qty, user_id=user_id
-            )
-        inv.qty_on_hand = on_hand - qty
-        inv.version = (inv.version or 0) + 1
-        self.session.add(StockMovement(
-            tenant_id=tenant_id, product_id=product_id, warehouse_id=location_id,
-            movement_type="issue", quantity=-qty, reference_type="sales_delivery",
-            reference_id=reference_id, reason=reason, user_id=user_id,
-        ))
-        await self.session.execute(
-            text(
-                "INSERT INTO sales_daily (tenant_id, product_id, warehouse_id, sale_date, qty_sold, source) "
-                "VALUES (CAST(:t AS uuid), CAST(:p AS uuid), CAST(:w AS uuid), CURRENT_DATE, :q, :s) "
-                "ON CONFLICT (product_id, warehouse_id, sale_date, source) "
-                "DO UPDATE SET qty_sold = sales_daily.qty_sold + EXCLUDED.qty_sold"
-            ),
-            {"t": str(tenant_id), "p": str(product_id), "w": str(location_id),
-             "q": float(qty), "s": demand_source},
-        )
-        await self.session.flush()
-        return None
 
     # ------------------------------- lists ----------------------------- #
     async def list_quotes(self, *, status: str | None, customer_id: uuid.UUID | None, limit: int) -> list[Quotation]:

@@ -18,6 +18,7 @@ from app.models import Inventory, StockMovement
 from app.repositories.audit_repo import AuditRepository
 from app.repositories.inventory_repo import InventoryRepository
 from app.repositories.product_repo import ProductRepository
+from app.repositories.reservation_repo import ReservationRepository
 from app.repositories.warehouse_repo import WarehouseRepository
 from app.schemas.inventory import (
     AdjustStockRequest,
@@ -38,11 +39,14 @@ class InventoryService:
         products: ProductRepository,
         warehouses: WarehouseRepository,
         audit: AuditRepository,
+        reservations: ReservationRepository | None = None,
     ) -> None:
         self.inventory = inventory
         self.products = products
         self.warehouses = warehouses
         self.audit = audit
+        # Optional: only required for reservation-aware issues (sales delivery / POS).
+        self.reservations = reservations
 
     # ----------------------------- helpers ----------------------------- #
     async def _require_product(self, product_id: uuid.UUID) -> None:
@@ -183,6 +187,101 @@ class InventoryService:
             )
             affected.append(inv)
         return affected
+
+    # ------------------- issue against a reservation ------------------- #
+    async def issue_against_reservation(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        user_id: uuid.UUID,
+        product_id: uuid.UUID,
+        warehouse_id: uuid.UUID,
+        quantity: Decimal,
+        reference_type: str,
+        reference_id: uuid.UUID,
+        reason: str,
+        reservation_ref: uuid.UUID | None = None,
+        reservation_ref_type: str | None = None,
+        demand_source: str | None = None,
+        ip: str | None = None,
+    ) -> Inventory:
+        """Issue stock for a demand line, drawing on the line's OWN reservation first.
+
+        This is the reservation-aware sibling of :meth:`issue`, and the single path a
+        sales delivery or POS sale uses to move stock. It honours OTHER demands' holds
+        (``available = on_hand - reserved - damaged``) while letting this line also use
+        its own held units (``reservation_ref`` / ``reservation_ref_type``). POS passes
+        no reservation and must fit within free availability.
+
+        Like every mutation here it locks the row, decrements ``qty_on_hand`` exactly
+        once, writes one ``issue`` movement to the ledger, records an inventory
+        ``audit_logs`` entry, and — when ``demand_source`` is set — feeds ``sales_daily``
+        so the forecast/reorder engines see the consumption. Raises
+        :class:`BusinessRuleError` (rolling back the caller's transaction) on shortfall.
+        """
+        if quantity <= 0:
+            raise BusinessRuleError("Issue quantity must be positive")
+
+        inv = await self.inventory.get_for_update(product_id, warehouse_id)
+        reservation = None
+        if reservation_ref is not None and self.reservations is not None:
+            reservation = (
+                await self.reservations.active_for(reservation_ref, reservation_ref_type)
+                if reservation_ref_type is not None
+                else await self.reservations.active_for(reservation_ref)
+            )
+        own_hold = reservation.qty if reservation is not None else Decimal("0")
+        on_hand = inv.qty_on_hand if inv is not None else Decimal("0")
+        available = _available(inv) if inv is not None else Decimal("0")
+        # The line may consume its own hold plus the free pool, never more than on-hand.
+        if inv is None or on_hand < quantity or (available + own_hold) < quantity:
+            raise BusinessRuleError(
+                "Insufficient available stock to issue",
+                details={
+                    "product_id": str(product_id),
+                    "warehouse_id": str(warehouse_id),
+                    "available": str(available + own_hold),
+                    "on_hand": str(on_hand),
+                    "requested": str(quantity),
+                },
+            )
+        if reservation is not None:
+            await self.reservations.consume(
+                tenant_id=tenant_id, inv=inv, reservation=reservation,
+                qty=quantity, user_id=user_id,
+            )
+        before = inv.qty_on_hand
+        inv.qty_on_hand = before - quantity
+        inv.version += 1
+        movement = await self.inventory.add_movement(
+            tenant_id=tenant_id,
+            product_id=product_id,
+            warehouse_id=warehouse_id,
+            movement_type="issue",
+            quantity=-quantity,
+            reference_type=reference_type,
+            reference_id=reference_id,
+            reason=reason,
+            user_id=user_id,
+        )
+        extra: dict[str, Any] = {"reason": reason, "reference_type": reference_type, "ip": ip}
+        if demand_source is not None:
+            extra["demand_source"] = demand_source
+        await self._audit_movement(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            action="stock.issue",
+            inv=inv,
+            movement=movement,
+            before_on_hand=before,
+            extra=extra,
+        )
+        if demand_source is not None:
+            await self.inventory.record_demand(
+                tenant_id=tenant_id, product_id=product_id, warehouse_id=warehouse_id,
+                qty=quantity, source=demand_source,
+            )
+        return inv
 
     # ------------------------------ adjust ----------------------------- #
     async def adjust(
