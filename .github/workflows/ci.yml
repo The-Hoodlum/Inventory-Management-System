@@ -103,6 +103,53 @@ jobs:
         working-directory: backend
         run: python -m pytest tests/integration -q
 
+  migrations:
+    name: Alembic upgrade (fresh DB)
+    runs-on: ubuntu-latest
+    # Proves the SECOND supported bootstrap route: a clean `alembic upgrade head`
+    # from an EMPTY database. The integration job above bootstraps via psql (the
+    # schema.sql / docker-init path); this job exercises the Alembic path so the two
+    # can never silently diverge (e.g. a colon-identifier in schema.sql that psql
+    # treats as literal but SQLAlchemy would parse as a bind parameter).
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: inventory
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d inventory"
+          --health-interval 5s --health-timeout 5s --health-retries 15
+    env:
+      # Migrations run through the SYNC driver (psycopg2), as configured in alembic.ini.
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/inventory
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements-dev.txt
+      - name: alembic upgrade head (fresh empty database)
+        working-directory: database
+        run: alembic upgrade head
+      - name: Assert exactly one head
+        working-directory: database
+        run: |
+          set -e
+          alembic heads
+          count=$(alembic heads | grep -c '(head)')
+          if [ "$count" != "1" ]; then
+            echo "Expected exactly one Alembic head, found $count"; exit 1
+          fi
+      - name: Show current revision
+        working-directory: database
+        run: alembic current
+
   frontend:
     name: Frontend typecheck + build
     runs-on: ubuntu-latest

@@ -25,15 +25,31 @@ depends_on: Union[str, Sequence[str], None] = None
 SQL_DIR = Path(__file__).resolve().parents[2] / "sql"
 
 
+def _run_ddl(sql: str) -> None:
+    """Execute raw multi-statement DDL exactly like ``psql -f`` — no bind parsing.
+
+    ``op.execute(<str>)`` wraps the text in SQLAlchemy ``text()``, whose ``:name``
+    parsing treats a colon-identifier inside a comment / dollar-quoted body as a
+    required bind parameter, and ``exec_driver_sql`` still hands the driver a
+    parameter collection (which also makes psycopg2 read ``%`` as a placeholder).
+    A bare single-argument DBAPI ``cursor.execute`` does neither, so schema.sql is
+    free to contain ``:`` and ``%`` in comments/DDL. Runs on Alembic's own
+    connection, inside its migration transaction.
+    """
+    cursor = op.get_bind().connection.cursor()
+    try:
+        cursor.execute(sql)
+    finally:
+        cursor.close()
+
+
 def upgrade() -> None:
     schema_sql = (SQL_DIR / "schema.sql").read_text(encoding="utf-8")
-    # psycopg2 executes multiple ';'-separated statements (and dollar-quoted
-    # function/DO bodies) correctly in a single call.
-    op.execute(schema_sql)
+    _run_ddl(schema_sql)
 
 
 def downgrade() -> None:
-    op.execute(
+    _run_ddl(
         """
         DROP TABLE IF EXISTS reorder_recommendations CASCADE;
         DROP TABLE IF EXISTS purchase_order_lines    CASCADE;

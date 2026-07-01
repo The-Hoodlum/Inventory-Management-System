@@ -465,7 +465,7 @@ $$;
 COMMENT ON COLUMN tenants.fx_rate                 IS 'Tenant default: base-currency units per 1 unit of foreign currency.';
 COMMENT ON COLUMN tenants.vat_rate                IS 'Default VAT/GST as a fraction, e.g. 0.16 = 16%.';
 COMMENT ON COLUMN inventory.qty_available         IS 'Generated: qty_on_hand - qty_reserved - qty_damaged. Never written directly.';
-COMMENT ON COLUMN inventory.version               IS 'Optimistic lock; app updates with WHERE version = :expected.';
+COMMENT ON COLUMN inventory.version               IS 'Optimistic lock; app updates with WHERE version = <expected>.';
 COMMENT ON COLUMN stock_movements.quantity        IS 'Signed: positive = inflow, negative = outflow.';
 COMMENT ON COLUMN products.reorder_point          IS 'NULL = computed by reorder engine; non-NULL = manual override.';
 COMMENT ON COLUMN products.units_per_carton       IS 'Pack size used for full-carton rounding (Inventory Rule #1).';
