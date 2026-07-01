@@ -3,3 +3,8 @@ pytest>=8.1,<9.0
 pytest-asyncio>=0.23,<0.25
 httpx>=0.27,<0.28
 ruff>=0.4,<0.6
+# Migration tooling: Alembic drives the versioned schema; migrations run through a
+# SYNC driver (psycopg2), matching alembic.ini. Used by the "Alembic upgrade" CI job
+# that proves `alembic upgrade head` from an empty DB (the psql bootstrap is separate).
+alembic>=1.13,<2.0
+psycopg2-binary>=2.9,<3.0
