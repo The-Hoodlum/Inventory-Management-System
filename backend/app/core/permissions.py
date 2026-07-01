@@ -60,3 +60,7 @@ class P:
     SALES_MANAGE = "sales.manage"      # approve discounts, cancel, override
     SALES_RETURN = "sales.return"      # process customer returns + credit notes
     POS_USE = "pos.use"                # operate the POS fast-sale checkout
+    # Motorcycle module (serialized-asset catalog + per-unit lifecycle registry)
+    MOTORCYCLE_READ = "motorcycle.read"      # view units + reference catalog
+    MOTORCYCLE_MANAGE = "motorcycle.manage"  # create/update units + drive lifecycle (reserve/sell/transfer)
+    MOTORCYCLE_CONFIG = "motorcycle.config"  # manage reference catalog (models/variants/colours)

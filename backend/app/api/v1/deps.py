@@ -46,6 +46,8 @@ from app.intelligence.providers.registry import build_free_providers
 from app.intelligence.repository import IntelligenceRepository
 from app.intelligence.service import IntelligenceService
 from app.intelligence.sources.factory import build_external_source
+from app.motorcycles.repository import MotorcycleRepository
+from app.motorcycles.service import MotorcycleService
 from app.order_requests.repository import OrderRequestRepository
 from app.order_requests.service import OrderRequestService
 from app.procurement.email import EmailService
@@ -322,6 +324,12 @@ def get_tenant_service(db: AsyncSession = Depends(get_db)) -> TenantSettingsServ
 
 def get_order_request_service(db: AsyncSession = Depends(get_db)) -> OrderRequestService:
     return OrderRequestService(OrderRequestRepository(db), AuditRepository(db))
+
+
+def get_motorcycle_service(db: AsyncSession = Depends(get_db)) -> MotorcycleService:
+    # Serialized-asset registry. Selling links to the existing sales documents; the
+    # unit's own event ledger is its immutable lifecycle history.
+    return MotorcycleService(MotorcycleRepository(db), AuditRepository(db))
 
 
 def get_whatsapp_channel_service(db: AsyncSession = Depends(get_db)) -> WhatsAppChannelService:

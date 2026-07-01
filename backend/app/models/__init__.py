@@ -33,6 +33,13 @@ from app.models.inventory import (
     StockMovement,
     Warehouse,
 )
+from app.models.motorcycle import (
+    MotorcycleColour,
+    MotorcycleModel,
+    MotorcycleUnit,
+    MotorcycleUnitEvent,
+    MotorcycleVariant,
+)
 from app.models.order_request import (
     RequestAudit,
     RequestHeader,
@@ -79,4 +86,6 @@ __all__ = [
     "DeliveryNote", "DeliveryNoteLine", "Invoice", "InvoiceLine",
     "Payment", "PaymentAllocation", "Receipt",
     "Return", "ReturnLine", "CreditNote", "CreditNoteLine",
+    "MotorcycleModel", "MotorcycleVariant", "MotorcycleColour",
+    "MotorcycleUnit", "MotorcycleUnitEvent",
 ]
