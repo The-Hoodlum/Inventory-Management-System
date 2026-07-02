@@ -6,7 +6,9 @@ import { useAuth } from "@/auth/AuthContext";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, Spinner, StatCard } from "@/components/ui";
 import { api } from "@/lib/api";
+import { useBranchContext } from "@/lib/branchContext";
 import { formatDate, formatMoney, formatNumber, formatQty, titleCase } from "@/lib/format";
+import { useMotoMetrics } from "@/lib/motorcycles";
 import { useInventoryReport } from "@/lib/reports";
 import type { DashboardMetrics } from "@/types/api";
 
@@ -40,7 +42,10 @@ export default function DashboardPage() {
 
   const { hasPermission } = useAuth();
   const canInv = hasPermission("inventory.read");
+  const canMoto = hasPermission("motorcycle.read");
   const report = useInventoryReport();
+  const { branchId } = useBranchContext();
+  const moto = useMotoMetrics(branchId, canMoto);
 
   if (isLoading) {
     return (
@@ -121,6 +126,18 @@ export default function DashboardPage() {
             hint="Lines at zero available"
           />
           <StatCard label="Stock lines" value={formatNumber(report.totalLines)} hint="Product · warehouse" />
+        </div>
+      )}
+
+      {canMoto && moto.data && moto.data.total > 0 && (
+        <div className="mt-6">
+          <h2 className="mb-3 text-sm font-semibold text-slate-800">Motorcycles</h2>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <StatCard label="Units" value={formatNumber(moto.data.total)} hint="Serialized units on record" />
+            <StatCard label="In stock" value={formatNumber(moto.data.in_stock)} tone="positive" hint="On hand, not yet sold" />
+            <StatCard label="Reserved" value={formatNumber(moto.data.reserved)} tone="warning" hint="Held for a customer" />
+            <StatCard label="Sold" value={formatNumber(moto.data.sold)} hint="Delivered / registered incl." />
+          </div>
         </div>
       )}
 

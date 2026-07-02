@@ -51,6 +51,10 @@ _ALLOWED: dict[str, set[str]] = {
 
 TERMINAL = frozenset({WARRANTY_ACTIVE, CANCELLED})
 
+# Reporting roll-ups (dashboard KPI): physical stock on hand not yet sold, vs post-sale.
+IN_STOCK = frozenset({RECEIVED, ASSEMBLY_REQUIRED, IN_ASSEMBLY, ASSEMBLED, INSPECTED})
+POST_SALE = frozenset({SOLD, DELIVERED, REGISTERED, WARRANTY_ACTIVE})
+
 # States a serialized hold / sale may originate from (used by the service + UI).
 RESERVABLE_FROM = frozenset({INSPECTED, RESERVED})
 SELLABLE_FROM = frozenset({INSPECTED, RESERVED})

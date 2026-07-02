@@ -190,6 +190,15 @@ class MotorcycleRepository:
         )
         return list(rows), int(total or 0)
 
+    async def status_counts(self, *, branch_id: uuid.UUID | None = None) -> dict[str, int]:
+        """Count units grouped by lifecycle status (tenant-scoped by RLS; optionally
+        narrowed to one branch). Powers the dashboard KPI."""
+        stmt = select(MotorcycleUnit.status, func.count()).group_by(MotorcycleUnit.status)
+        if branch_id is not None:
+            stmt = stmt.where(MotorcycleUnit.branch_id == branch_id)
+        rows = await self.session.execute(stmt)
+        return {status: int(count) for status, count in rows.all()}
+
     # ============================ unit events =========================== #
     async def add_event(self, **kwargs) -> MotorcycleUnitEvent:
         event = MotorcycleUnitEvent(**kwargs)

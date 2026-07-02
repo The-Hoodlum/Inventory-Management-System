@@ -167,6 +167,25 @@ export const motorcyclesApi = {
     api.post<MotoUnit>(`/motorcycles/units/${id}/transfer`, body),
 };
 
+export interface MotoMetrics {
+  total: number;
+  in_stock: number;
+  reserved: number;
+  sold: number;
+  cancelled: number;
+  by_status: Record<string, number>;
+}
+
+export function useMotoMetrics(branchId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: ["moto", "metrics", branchId],
+    queryFn: () =>
+      api.get<MotoMetrics>(`/motorcycles/metrics${branchId ? `?branch_id=${branchId}` : ""}`),
+    enabled,
+    staleTime: 30_000,
+  });
+}
+
 export function useMotoModels() {
   return useQuery({ queryKey: ["moto", "models"], queryFn: () => motorcyclesApi.listModels(), staleTime: 60_000 });
 }
