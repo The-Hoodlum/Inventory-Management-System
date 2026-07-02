@@ -448,6 +448,8 @@ class MotorcycleService:
             registration_number=unit.registration_number,
             registration_papers_received=unit.registration_papers_received,
             warranty_start=unit.warranty_start, warranty_end=unit.warranty_end,
+            assembled_date=unit.assembled_date, date_sold=unit.date_sold,
+            imported_historical=unit.imported_historical,
             version=unit.version, created_at=unit.created_at, updated_at=unit.updated_at,
             allowed_next=L.allowed_next(unit.status), events=events,
         )

@@ -2,7 +2,7 @@
 // DataTable (server-driven: filters by status/branch/model/colour/sold, search by
 // chassis/engine/registration, saved views + CSV export come for free).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bike, Plus, Settings2 } from "lucide-react";
+import { Bike, Plus, Settings2, Upload } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -30,6 +30,7 @@ export default function MotorcyclesPage() {
   const navigate = useNavigate();
   const canManage = hasPermission("motorcycle.manage");
   const canConfig = hasPermission("motorcycle.config");
+  const canImport = hasPermission("data.import") && canManage;
 
   const [table, setTable] = useState<DataTableState>(initialTableState(PAGE_SIZE));
   const [status, setStatus] = useState("");
@@ -82,6 +83,11 @@ export default function MotorcyclesPage() {
             {canConfig && (
               <Button variant="secondary" onClick={() => navigate("/motorcycles/setup")}>
                 <Settings2 className="h-4 w-4" /> Setup
+              </Button>
+            )}
+            {canImport && (
+              <Button variant="secondary" onClick={() => navigate("/motorcycles/import")}>
+                <Upload className="h-4 w-4" /> Import
               </Button>
             )}
             {canManage && (
