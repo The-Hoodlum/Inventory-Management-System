@@ -245,6 +245,109 @@ erDiagram
 - **System roles are global** (`roles.tenant_id IS NULL`); custom roles are tenant-scoped. `user_roles` and `role_permissions` are association tables.
 - **`po_counters`** backs the `next_po_number(tenant)` function for gap-tolerant, per-tenant, per-year PO numbering.
 
+## Motorcycle module (serialized assets)
+
+A tenant-configurable reference catalog (models / variants / colours, reusing
+`brands` + `categories`) plus a per-unit registry. Each physical unit is one
+permanent row tracked by chassis through its whole life; its lifecycle is an
+immutable event ledger. Selling links to the existing sales documents
+(`reserved_ref → sales_orders`, `sold_ref → invoices`) — no parallel sales path.
+
+```mermaid
+erDiagram
+    BRANDS              ||--o{ MOTORCYCLE_MODELS   : "has"
+    CATEGORIES          ||--o{ MOTORCYCLE_MODELS   : "categorised"
+    MOTORCYCLE_MODELS   ||--o{ MOTORCYCLE_VARIANTS : "has"
+    MOTORCYCLE_MODELS   ||--o{ MOTORCYCLE_UNITS    : "typed as"
+    MOTORCYCLE_VARIANTS ||--o{ MOTORCYCLE_UNITS    : "variant of"
+    MOTORCYCLE_COLOURS  ||--o{ MOTORCYCLE_UNITS    : "coloured"
+    SUPPLIERS           ||--o{ MOTORCYCLE_UNITS    : "supplied"
+    CUSTOMERS           ||--o{ MOTORCYCLE_UNITS    : "sold to"
+    SALES_ORDERS        ||--o{ MOTORCYCLE_UNITS    : "reserved_ref"
+    INVOICES            ||--o{ MOTORCYCLE_UNITS    : "sold_ref"
+    MOTORCYCLE_UNITS    ||--o{ MOTORCYCLE_UNIT_EVENTS : "lifecycle ledger"
+
+    MOTORCYCLE_MODELS {
+        uuid id PK
+        uuid tenant_id FK
+        uuid brand_id FK
+        text name
+        uuid category_id FK
+        int engine_cc
+        numeric default_selling_price
+        jsonb specs
+        boolean is_active
+    }
+    MOTORCYCLE_VARIANTS {
+        uuid id PK
+        uuid tenant_id FK
+        uuid model_id FK
+        text name
+        jsonb specs
+        boolean is_active
+    }
+    MOTORCYCLE_COLOURS {
+        uuid id PK
+        uuid tenant_id FK
+        text name
+        text hex_code
+        boolean is_active
+    }
+    MOTORCYCLE_UNITS {
+        uuid id PK
+        uuid tenant_id FK
+        text chassis_number UK
+        text engine_number
+        uuid model_id FK
+        uuid variant_id FK
+        uuid colour_id FK
+        int year
+        uuid supplier_id FK
+        date date_received
+        uuid branch_id FK
+        uuid warehouse_id FK
+        text status
+        text inspection_status
+        text assembly_status
+        uuid reserved_ref FK
+        uuid sold_ref FK
+        uuid customer_id FK
+        numeric selling_price
+        numeric price_charged
+        text payment_status
+        text registration_status
+        text registration_number
+        boolean registration_papers_received
+        date warranty_start
+        date warranty_end
+        int version
+    }
+    MOTORCYCLE_UNIT_EVENTS {
+        uuid id PK
+        uuid tenant_id FK
+        uuid unit_id FK
+        text event_type
+        text from_status
+        text to_status
+        uuid from_branch_id FK
+        uuid to_branch_id FK
+        text reference_type
+        uuid reference_id
+        text note
+        uuid user_id FK
+    }
+```
+
+- **One permanent row per physical unit**, unique by `(tenant_id, chassis_number)`.
+  The lifecycle `status` is an explicit state machine enforced in one place
+  (`app/motorcycles/domain/lifecycle.py`); every accepted transition appends a
+  `motorcycle_unit_events` row (from/to/user, linked to its source document) and an
+  `audit_logs` row.
+- **Reserving** holds one specific chassis for one customer (a serialized hold on the
+  unit itself), distinct from the fungible `inventory.qty_reserved` counter.
+- **Branch transfer** of a unit is a serialized move recorded on its own event ledger
+  (both branches visible), not a second transfer mechanism.
+
 ## Cardinality legend
 
 `||--o{` = one-to-many · `}o--o{` = many-to-many (modeled via a join table) · `PK` = primary key · `FK` = foreign key · `UK` = unique key.

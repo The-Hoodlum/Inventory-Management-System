@@ -5,6 +5,7 @@ import { clsx } from "clsx";
 import {
   Award,
   BarChart3,
+  Bike,
   Boxes,
   ChevronsLeft,
   ChevronsRight,
@@ -59,6 +60,7 @@ const GROUPS: NavGroup[] = [
       { to: "/sales", label: "Sales", icon: Receipt, permission: "sales.read" },
       { to: "/pos", label: "Point of Sale", icon: ShoppingCart, permission: "pos.use" },
       { to: "/customers", label: "Customers", icon: Contact, permission: "customer.read" },
+      { to: "/motorcycles", label: "Motorcycles", icon: Bike, permission: "motorcycle.read" },
     ],
   },
   {
