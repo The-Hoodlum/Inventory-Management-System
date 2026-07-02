@@ -97,6 +97,11 @@ class MotorcycleUnit(Base):
     warranty_start: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     warranty_end: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    # Provenance + historical lifecycle dates for bulk-imported units (migration 0031).
+    imported_historical: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    import_job_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("import_jobs.id", ondelete="SET NULL"), nullable=True)
+    assembled_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    date_sold: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
     updated_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
 

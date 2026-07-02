@@ -14,6 +14,7 @@ import IntelligencePage from "@/pages/IntelligencePage";
 import InventoryPage from "@/pages/InventoryPage";
 import LoginPage from "@/pages/LoginPage";
 import MotorcycleDetailPage from "@/pages/MotorcycleDetailPage";
+import MotorcycleImportPage from "@/pages/MotorcycleImportPage";
 import MotorcyclesPage from "@/pages/MotorcyclesPage";
 import MotorcycleSetupPage from "@/pages/MotorcycleSetupPage";
 import MovementsPage from "@/pages/MovementsPage";
@@ -61,6 +62,7 @@ export default function App() {
         <Route path="/customers" element={<CustomersPage />} />
         <Route path="/motorcycles" element={<MotorcyclesPage />} />
         <Route path="/motorcycles/setup" element={<MotorcycleSetupPage />} />
+        <Route path="/motorcycles/import" element={<MotorcycleImportPage />} />
         <Route path="/motorcycles/:id" element={<MotorcycleDetailPage />} />
         <Route path="/pos" element={<PosPage />} />
         <Route path="/inventory" element={<InventoryPage />} />

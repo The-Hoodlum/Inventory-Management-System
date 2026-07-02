@@ -222,6 +222,9 @@ class UnitOut(BaseModel):
     registration_papers_received: bool
     warranty_start: dt.date | None = None
     warranty_end: dt.date | None = None
+    assembled_date: dt.date | None = None
+    date_sold: dt.date | None = None
+    imported_historical: bool = False
     version: int
     created_at: dt.datetime
     updated_at: dt.datetime

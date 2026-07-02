@@ -30,6 +30,19 @@ class ImportOptions(BaseModel):
     warehouse_mode: Literal["create", "skip"] = "create"
     default_warehouse: str = Field(default="MAIN", max_length=120)
     supplier_mode: Literal["create", "link_only"] = "create"
+    # Atomic targets (e.g. motorcycle units): authorize creating the NEW reference
+    # values the preview surfaced. Left False, an unmatched reference blocks its rows
+    # (guards typos — nothing is created silently).
+    create_missing_references: bool = False
+
+
+class NewReferenceOut(BaseModel):
+    """A reference value in the file that does not yet exist and would be created on
+    confirm (surfaced by an atomic target's preview so the user can confirm/fix)."""
+
+    kind: str  # model | variant | colour | supplier
+    value: str
+    count: int = 1
 
 
 class UploadResponse(BaseModel):
@@ -63,6 +76,11 @@ class PreviewResponse(BaseModel):
     sample_errors: list[RowErrorOut] = []
     sample_rows: list[list[str]] = []
     headers: list[str] = []
+    # Atomic targets: NEW reference values awaiting confirmation, and whether the batch
+    # is committable (all rows valid). ``atomic`` marks the confirm-then-commit flow.
+    atomic: bool = False
+    new_references: list[NewReferenceOut] = []
+    can_commit: bool = True
 
 
 class ConfirmRequest(BaseModel):

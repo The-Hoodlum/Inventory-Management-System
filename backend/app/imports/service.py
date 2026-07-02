@@ -29,6 +29,7 @@ from app.imports.schemas import (
     FieldOut,
     ImportJobOut,
     ImportOptions,
+    NewReferenceOut,
     PreviewResponse,
     RowErrorOut,
     TargetOut,
@@ -275,9 +276,12 @@ class ImportService:
         if missing:
             return PreviewResponse(
                 total_rows=len(parsed.rows), valid_count=0, invalid_count=len(parsed.rows),
-                missing_required=missing, headers=parsed.headers,
-                sample_rows=self._sample(parsed.headers, parsed.rows),
+                missing_required=missing, headers=parsed.headers, atomic=getattr(imp, "atomic", False),
+                can_commit=False, sample_rows=self._sample(parsed.headers, parsed.rows),
             )
+
+        if getattr(imp, "atomic", False):
+            return await self._atomic_preview(job, imp, parsed, mapping, options)
 
         valid = invalid = 0
         sample_errors: list[RowErrorOut] = []
@@ -312,6 +316,13 @@ class ImportService:
         if missing:
             raise BusinessRuleError("Required fields are not mapped: " + ", ".join(missing))
 
+        if getattr(imp, "atomic", False):
+            # All-or-nothing, in THIS request transaction (no background runner).
+            return await self._atomic_confirm(
+                job=job, imp=imp, mapping=mapping, options=options,
+                tenant_id=tenant_id, user_id=user_id,
+            )
+
         # Hand off to the background runner (its own session + per-tenant RLS GUC).
         # The request returns immediately; the client polls GET /imports/{id} for
         # progress + ETA, and can POST /cancel. Local import avoids an import cycle.
@@ -321,6 +332,94 @@ class ImportService:
             job_id=job.id, tenant_id=tenant_id, user_id=user_id, mapping=mapping, options=options
         )
         return ImportJobOut.model_validate(job)  # status "pending" — runner flips it to running
+
+    # --------------------------- atomic targets ------------------------ #
+    def _atomic_rows(self, parsed, mapping, imp) -> list:
+        """Field-validate every row (shared coercion), returning
+        (row_number, clean, field_errors) for the atomic target to finish validating."""
+        rows = []
+        for i, row in enumerate(parsed.rows, start=2):  # row 1 = headers
+            raw = self._row_to_fields(row, mapping, imp)
+            clean, ferrs = validate_mapped(imp.fields, raw)
+            rows.append((i, clean, ferrs))
+        return rows
+
+    async def _atomic_preview(self, job, imp, parsed, mapping, options) -> PreviewResponse:
+        plan = await imp.plan(self.repo.session, tenant_id=job.tenant_id, rows=self._atomic_rows(parsed, mapping, imp))
+        sample_errors = [
+            RowErrorOut(row_number=r.row_number, sku=r.key, errors=r.errors)
+            for r in plan.rows if not r.ok
+        ][:MAX_PREVIEW_ROWS]
+        new_refs = [NewReferenceOut(kind=n.kind, value=n.value, count=n.count) for n in plan.new_refs]
+        can_commit = not plan.has_errors and (options.create_missing_references or not plan.new_refs)
+        return PreviewResponse(
+            total_rows=len(parsed.rows), valid_count=plan.ok_count, invalid_count=plan.error_count,
+            sample_errors=sample_errors, headers=parsed.headers,
+            sample_rows=self._sample(parsed.headers, parsed.rows),
+            atomic=True, new_references=new_refs, can_commit=can_commit,
+        )
+
+    async def _atomic_confirm(self, *, job, imp, mapping, options, tenant_id, user_id) -> ImportJobOut:
+        parsed = self._reparse(job, await self._require_file(job.id))
+        plan = await imp.plan(self.repo.session, tenant_id=tenant_id, rows=self._atomic_rows(parsed, mapping, imp))
+        job.options = options.model_dump()
+        job.started_at = _now()
+        job.processed_rows = len(plan.rows)
+
+        # Serialized registry: never half-create. Any row error, or unconfirmed new
+        # references, fails the WHOLE batch — nothing is written.
+        blockers: list[str] = []
+        if plan.has_errors:
+            blockers.append("row_errors")
+        if plan.new_refs and not options.create_missing_references:
+            blockers.append("unconfirmed_references")
+        if blockers:
+            for r in plan.rows:
+                for e in r.errors:
+                    await self.repo.add_error(
+                        tenant_id=tenant_id, job_id=job.id, row_number=r.row_number, sku=r.key, message=e
+                    )
+            if "unconfirmed_references" in blockers:
+                await self.repo.add_error(
+                    tenant_id=tenant_id, job_id=job.id, row_number=1, sku=None,
+                    message=(
+                        f"{len(plan.new_refs)} new reference value(s) need confirmation before import "
+                        "(enable 'create missing references')."
+                    ),
+                )
+            job.imported_rows = 0
+            job.error_count = plan.error_count + (1 if "unconfirmed_references" in blockers else 0)
+            job.status = "failed"
+            job.completed_at = _now()
+            await self.repo.session.flush()
+            return ImportJobOut.model_validate(job)
+
+        # Commit all rows atomically: a failure rolls the savepoint back (nothing
+        # persisted) and the job is marked failed.
+        try:
+            async with self.repo.session.begin_nested():
+                created = await imp.commit(
+                    self.repo.session, tenant_id=tenant_id, user_id=user_id, job_id=job.id, plan=plan
+                )
+            job.imported_rows = created
+            job.error_count = 0
+            job.status = "completed"
+        except Exception as exc:  # whole-batch failure — nothing committed
+            await self.repo.add_error(
+                tenant_id=tenant_id, job_id=job.id, row_number=1, sku=None,
+                message=f"Import aborted, nothing was saved: {exc}",
+            )
+            job.imported_rows = 0
+            job.error_count = 1
+            job.status = "failed"
+        job.completed_at = _now()
+        await self.repo.session.flush()
+        await self.audit.add(
+            tenant_id=tenant_id, user_id=user_id, action="data.import.commit",
+            entity_type="import_job", entity_id=job.id,
+            changes={"target": job.target_key, "imported": job.imported_rows, "status": job.status},
+        )
+        return ImportJobOut.model_validate(job)
 
     async def cancel(self, *, job_id: uuid.UUID, tenant_id: uuid.UUID, user_id: uuid.UUID) -> ImportJobOut:
         job = await self._require_job(job_id)

@@ -23,6 +23,9 @@ export interface ImportOptions {
   warehouse_mode: "create" | "skip";
   default_warehouse: string;
   supplier_mode: "create" | "link_only";
+  // Atomic targets (motorcycle units): authorize creating the new reference values
+  // the preview surfaced.
+  create_missing_references?: boolean;
 }
 
 export const DEFAULT_OPTIONS: ImportOptions = {
@@ -30,6 +33,12 @@ export const DEFAULT_OPTIONS: ImportOptions = {
   default_warehouse: "MAIN",
   supplier_mode: "create",
 };
+
+export interface NewReference {
+  kind: string; // model | variant | colour | supplier
+  value: string;
+  count: number;
+}
 
 export interface UploadResponse {
   job_id: string;
@@ -57,6 +66,10 @@ export interface PreviewResponse {
   sample_errors: RowError[];
   sample_rows: string[][];
   headers: string[];
+  // Atomic targets (motorcycle units):
+  atomic?: boolean;
+  new_references?: NewReference[];
+  can_commit?: boolean;
 }
 
 export interface ImportJob {
