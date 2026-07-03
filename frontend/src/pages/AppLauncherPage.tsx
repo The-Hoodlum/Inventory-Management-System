@@ -35,6 +35,7 @@ interface ModuleCard {
 
 const MODULES: ModuleCard[] = [
   { title: "Sales", description: "Quotes, orders, invoices, POS", icon: Receipt, to: "/sales", permission: "sales.read" },
+  { title: "Spare Parts", description: "Sell parts & view sales log", icon: Wrench, to: "/parts-sales", permission: "pos.use" },
   { title: "Inventory", description: "Stock, movements, warehouses", icon: Boxes, to: "/inventory", permission: "inventory.read" },
   { title: "Procurement", description: "Purchase orders & reorder", icon: Truck, to: "/purchase-orders", permission: "po.read" },
   { title: "Customers", description: "Accounts & balances", icon: Contact, to: "/customers", permission: "customer.read" },

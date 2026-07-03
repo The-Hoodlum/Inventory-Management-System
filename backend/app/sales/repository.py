@@ -9,10 +9,11 @@ repository never mutates on-hand.
 """
 from __future__ import annotations
 
+import datetime as dt
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import select, text
+from sqlalchemy import column, select, table, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -32,6 +33,16 @@ from app.models import (
 from app.repositories.reservation_repo import ReservationRepository
 
 SO_LINE_REF = "sales_order_line"
+
+# Invoices linked to a sold serialized motorcycle unit. A motorcycle's revenue lives
+# on the unit (``price_charged``), never as an invoice line, so parts aggregations
+# exclude these invoices as a belt-and-suspenders guard against double counting. Kept
+# decoupled from the motorcycles ORM (raw table ref) to avoid a module import cycle.
+_moto_units = table("motorcycle_units", column("sold_ref"))
+
+
+def _motorcycle_linked_invoice_ids():
+    return select(_moto_units.c.sold_ref).where(_moto_units.c.sold_ref.is_not(None))
 
 
 def _f(v) -> float:
@@ -181,6 +192,39 @@ class SalesRepository:
             stmt = stmt.where(model.customer_id == customer_id)
         stmt = stmt.order_by(order_col.desc()).limit(limit)
         return list((await self.session.execute(stmt)).scalars().all())
+
+    # --------------------------- parts sales log ----------------------------- #
+    async def list_parts_sales(
+        self, *, branch_id: uuid.UUID | None = None, product_id: uuid.UUID | None = None,
+        date_from: dt.date | None = None, date_to: dt.date | None = None, limit: int = 200,
+    ) -> list:
+        """Line-grain spare-part sales from invoices (the sale's money document), newest
+        first. Excludes motorcycle-linked invoices (see ``_moto_units``). Rows are tuples
+        aligned to ``SalesService._parts_sale_out``."""
+        stmt = (
+            select(
+                InvoiceLine.id, Invoice.id, Invoice.invoice_number, Invoice.invoice_date,
+                Invoice.status, InvoiceLine.product_id, Product.sku, Product.name,
+                InvoiceLine.qty, InvoiceLine.unit_price, InvoiceLine.line_total,
+                Invoice.branch_id, Branch.name, Invoice.customer_id, Customer.name,
+                Invoice.created_at,
+            )
+            .join(Invoice, InvoiceLine.invoice_id == Invoice.id)
+            .join(Product, InvoiceLine.product_id == Product.id)
+            .join(Customer, Invoice.customer_id == Customer.id)
+            .outerjoin(Branch, Invoice.branch_id == Branch.id)
+            .where(Invoice.id.not_in(_motorcycle_linked_invoice_ids()))
+        )
+        if branch_id is not None:
+            stmt = stmt.where(Invoice.branch_id == branch_id)
+        if product_id is not None:
+            stmt = stmt.where(InvoiceLine.product_id == product_id)
+        if date_from is not None:
+            stmt = stmt.where(Invoice.invoice_date >= date_from)
+        if date_to is not None:
+            stmt = stmt.where(Invoice.invoice_date <= date_to)
+        stmt = stmt.order_by(Invoice.invoice_date.desc(), Invoice.created_at.desc()).limit(limit)
+        return list((await self.session.execute(stmt)).all())
 
     # ----------------------------- enrichment -------------------------- #
     async def product_index(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, tuple[str, str]]:

@@ -1,6 +1,7 @@
 """Sales & Distribution endpoints (mounted at /api/v1/sales). Gated on the sales module."""
 from __future__ import annotations
 
+import datetime as dt
 import uuid
 
 from fastapi import APIRouter, Depends, Query
@@ -23,6 +24,7 @@ from app.sales.schemas import (
     DeliveryNoteOut,
     InvoiceCreate,
     InvoiceOut,
+    PartsSaleLineOut,
     PaymentCreate,
     PosCheckout,
     PosResult,
@@ -243,6 +245,25 @@ async def get_invoice(
     svc: SalesService = Depends(get_sales_service),
 ) -> InvoiceOut:
     return await svc.get_invoice(invoice_id)
+
+
+# ------------------------------- parts sales ------------------------------- #
+@router.get("/parts-sales", response_model=list[PartsSaleLineOut])
+async def list_parts_sales(
+    branch_id: uuid.UUID | None = Query(default=None),
+    product_id: uuid.UUID | None = Query(default=None),
+    date_from: dt.date | None = Query(default=None),
+    date_to: dt.date | None = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=1000),
+    _: CurrentUser = Depends(require_permission(P.SALES_READ)),
+    svc: SalesService = Depends(get_sales_service),
+) -> list[PartsSaleLineOut]:
+    # Line-grain spare-part sales (fungible products), newest first; excludes
+    # motorcycle-linked invoices so a serialized-unit sale never appears here.
+    return await svc.list_parts_sales(
+        branch_id=branch_id, product_id=product_id, date_from=date_from,
+        date_to=date_to, limit=limit,
+    )
 
 
 # --------------------------- payments + receipts --------------------------- #

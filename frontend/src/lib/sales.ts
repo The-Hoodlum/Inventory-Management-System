@@ -167,6 +167,34 @@ export interface ReturnLineIn {
   invoice_line_id?: string | null;
 }
 
+// One invoiced spare-part line — the line-grain parts sales log (fungible products
+// only; motorcycle-linked invoices are excluded server-side).
+export interface PartsSale {
+  invoice_line_id: string;
+  invoice_id: string;
+  invoice_number: string;
+  invoice_status: string;
+  sale_date: string;
+  product_id: string;
+  sku: string | null;
+  name: string | null;
+  qty: number;
+  unit_price: number;
+  line_total: number;
+  branch_id: string | null;
+  branch_name: string | null;
+  customer_id: string;
+  customer_name: string | null;
+}
+
+export interface PartsSalesParams {
+  branch_id?: string;
+  product_id?: string;
+  date_from?: string;
+  date_to?: string;
+  limit?: number;
+}
+
 export const salesApi = {
   // quotations
   listQuotations: (status = "") =>
@@ -201,6 +229,16 @@ export const salesApi = {
   // POS
   posCheckout: (body: { location_id: string; customer_id?: string | null; lines: PricedLineIn[]; payments: PaymentLineIn[] }) =>
     api.post<PosResult>("/sales/pos/checkout", body),
+
+  // parts sales log (line-grain; fungible products only)
+  listPartsSales: (params: PartsSalesParams = {}) => {
+    const sp = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== "") sp.set(k, String(v));
+    }
+    const q = sp.toString();
+    return api.get<PartsSale[]>(`/sales/parts-sales${q ? `?${q}` : ""}`);
+  },
 
   // returns + credit notes
   listReturns: () => api.get<ReturnDoc[]>("/sales/returns"),
