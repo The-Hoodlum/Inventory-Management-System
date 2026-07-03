@@ -367,6 +367,47 @@ export interface StockPositionReport {
   rows: StockPositionRow[];
 }
 
+// ---- Unified sales log (backend /reports/sales-log) ----
+export type SalesLogGranularity = "daily" | "weekly" | "monthly";
+export type SalesLogType = "all" | "parts" | "motorcycles";
+
+export interface SalesLogComponent {
+  type: "parts" | "motorcycle_new" | "motorcycle_historical";
+  label: string;
+  units: number;
+  revenue: number;
+}
+
+export interface SalesLogRow {
+  period_start: string;
+  period_end: string;
+  label: string;
+  units: number;
+  revenue: number;
+  components: SalesLogComponent[];
+}
+
+export interface SalesLogTotals {
+  units: number;
+  revenue: number;
+  parts_units: number;
+  parts_revenue: number;
+  motorcycle_units: number;
+  motorcycle_revenue: number;
+  historical_units: number;
+  historical_revenue: number;
+}
+
+export interface SalesLogReport {
+  granularity: SalesLogGranularity;
+  type: SalesLogType;
+  branch_id: string | null;
+  date_from: string;
+  date_to: string;
+  rows: SalesLogRow[];
+  totals: SalesLogTotals;
+}
+
 // ---- User administration (backend /users) ----
 export interface AppUser {
   id: string;

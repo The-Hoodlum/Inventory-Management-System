@@ -28,6 +28,7 @@ import PurchaseOrderDetailPage from "@/pages/PurchaseOrderDetailPage";
 import PurchaseOrdersPage from "@/pages/PurchaseOrdersPage";
 import ReorderPage from "@/pages/ReorderPage";
 import ReportsPage from "@/pages/ReportsPage";
+import SalesLogPage from "@/pages/SalesLogPage";
 import SalesPage from "@/pages/SalesPage";
 import SettingsPage from "@/pages/SettingsPage";
 import SparePartsSalesPage from "@/pages/SparePartsSalesPage";
@@ -61,6 +62,7 @@ export default function App() {
         <Route path="/supplier-scores" element={<SupplierScoresPage />} />
         <Route path="/order-requests" element={<OrderRequestsPage />} />
         <Route path="/sales" element={<SalesPage />} />
+        <Route path="/sales-log" element={<SalesLogPage />} />
         <Route path="/customers" element={<CustomersPage />} />
         <Route path="/motorcycles" element={<MotorcyclesPage />} />
         <Route path="/motorcycles/setup" element={<MotorcycleSetupPage />} />

@@ -1,0 +1,218 @@
+// Unified Sales Log — one report over BOTH revenue streams (spare parts + motorcycles),
+// bucketed daily / weekly / monthly and filterable by type, branch and date range. Every
+// sale is counted once (parts come from invoice lines, motorcycles from sold units — see
+// the backend's shared no-double-count aggregation). Rows drill down into the per-type
+// breakdown; the whole view exports to CSV.
+import { ChevronDown, ChevronRight, Download } from "lucide-react";
+import { Fragment, useMemo, useState } from "react";
+
+import { PageHeader } from "@/components/PageHeader";
+import { Button, Card, Spinner } from "@/components/ui";
+import { formatDate, formatNumber } from "@/lib/format";
+import { useBranches } from "@/lib/refdata";
+import { useSalesLog } from "@/lib/serverReports";
+import type { SalesLogGranularity, SalesLogRow, SalesLogType } from "@/types/api";
+
+const INPUT =
+  "rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500";
+
+const GRANULARITIES: { value: SalesLogGranularity; label: string }[] = [
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
+  { value: "monthly", label: "Monthly" },
+];
+const TYPES: { value: SalesLogType; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "parts", label: "Spare Parts" },
+  { value: "motorcycles", label: "Motorcycles" },
+];
+
+const isoDaysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+const money = (n: number) => formatNumber(n, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+function toCsv(rows: SalesLogRow[]): string {
+  const head = ["Period", "Start", "End", "Units", "Revenue", "Parts revenue", "Motorcycle revenue", "Historical revenue"];
+  const rev = (r: SalesLogRow, t: string) => r.components.find((c) => c.type === t)?.revenue ?? 0;
+  const lines = rows.map((r) => [
+    r.label, r.period_start, r.period_end, r.units, r.revenue,
+    rev(r, "parts"), rev(r, "motorcycle_new"), rev(r, "motorcycle_historical"),
+  ]);
+  return [head, ...lines].map((cols) => cols.join(",")).join("\n");
+}
+
+export default function SalesLogPage() {
+  const branches = useBranches();
+  const [granularity, setGranularity] = useState<SalesLogGranularity>("daily");
+  const [type, setType] = useState<SalesLogType>("all");
+  const [branchId, setBranchId] = useState("");
+  const [dateFrom, setDateFrom] = useState(isoDaysAgo(84));
+  const [dateTo, setDateTo] = useState(isoDaysAgo(0));
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const q = useSalesLog({ granularity, type, branchId, dateFrom, dateTo });
+  const rows = q.data?.rows ?? [];
+  const totals = q.data?.totals;
+
+  const toggle = (label: string) =>
+    setExpanded((s) => {
+      const next = new Set(s);
+      next.has(label) ? next.delete(label) : next.add(label);
+      return next;
+    });
+
+  const csv = useMemo(() => toCsv(rows), [rows]);
+  function exportCsv() {
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `sales-log-${type}-${granularity}-${dateFrom}_${dateTo}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div>
+      <PageHeader
+        title="Sales Log"
+        description="Unified parts + motorcycle sales, by day, week or month."
+        actions={
+          <Button variant="secondary" disabled={rows.length === 0} onClick={exportCsv}>
+            <Download className="h-4 w-4" /> Export CSV
+          </Button>
+        }
+      />
+
+      {/* Filters */}
+      <Card className="mb-4 p-4">
+        <div className="flex flex-wrap items-end gap-4">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500">Granularity</label>
+            <div className="inline-flex rounded-lg border border-slate-300 p-0.5">
+              {GRANULARITIES.map((g) => (
+                <button
+                  key={g.value}
+                  onClick={() => setGranularity(g.value)}
+                  className={`rounded-md px-3 py-1 text-sm ${
+                    granularity === g.value ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-slate-100"
+                  }`}
+                >
+                  {g.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500">Type</label>
+            <select value={type} onChange={(e) => setType(e.target.value as SalesLogType)} className={INPUT}>
+              {TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500">Branch</label>
+            <select value={branchId} onChange={(e) => setBranchId(e.target.value)} className={INPUT}>
+              <option value="">All branches</option>
+              {branches.list.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500">From</label>
+            <input type="date" value={dateFrom} max={dateTo} onChange={(e) => setDateFrom(e.target.value)} className={INPUT} />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-500">To</label>
+            <input type="date" value={dateTo} min={dateFrom} onChange={(e) => setDateTo(e.target.value)} className={INPUT} />
+          </div>
+          {q.isFetching && <Spinner />}
+        </div>
+      </Card>
+
+      {/* Totals */}
+      {totals && (
+        <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+          <TotalCard label="Total revenue" value={money(totals.revenue)} hint={`${formatNumber(totals.units)} units`} strong />
+          <TotalCard label="Spare parts" value={money(totals.parts_revenue)} hint={`${formatNumber(totals.parts_units)} units`} />
+          <TotalCard label="Motorcycles" value={money(totals.motorcycle_revenue)} hint={`${formatNumber(totals.motorcycle_units)} units`} />
+          <TotalCard label="Motorcycles (historical)" value={money(totals.historical_revenue)} hint={`${formatNumber(totals.historical_units)} units`} />
+        </div>
+      )}
+
+      {/* Period table */}
+      <Card className="overflow-hidden">
+        {q.isLoading ? (
+          <div className="flex h-40 items-center justify-center"><Spinner label="Loading sales…" /></div>
+        ) : q.isError ? (
+          <div className="p-6 text-sm text-red-700">Couldn’t load the sales log.</div>
+        ) : rows.length === 0 ? (
+          <div className="p-10 text-center text-sm text-slate-400">No sales in this range.</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                <th className="px-4 py-2.5 font-medium">Period</th>
+                <th className="px-4 py-2.5 font-medium">Range</th>
+                <th className="px-4 py-2.5 text-right font-medium">Units</th>
+                <th className="px-4 py-2.5 text-right font-medium">Revenue</th>
+                <th className="px-4 py-2.5" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {rows.map((r) => {
+                const open = expanded.has(r.label);
+                return (
+                  <Fragment key={r.label}>
+                    <tr
+                      className="cursor-pointer hover:bg-slate-50"
+                      onClick={() => toggle(r.label)}
+                    >
+                      <td className="px-4 py-3 font-medium text-slate-800">
+                        <span className="inline-flex items-center gap-1.5">
+                          {open ? <ChevronDown className="h-4 w-4 text-slate-400" /> : <ChevronRight className="h-4 w-4 text-slate-400" />}
+                          {r.label}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-500">
+                        {formatDate(r.period_start)}
+                        {r.period_end !== r.period_start ? ` – ${formatDate(r.period_end)}` : ""}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono text-slate-700">{formatNumber(r.units)}</td>
+                      <td className="px-4 py-3 text-right font-mono font-medium text-slate-900">{money(r.revenue)}</td>
+                      <td className="px-4 py-3" />
+                    </tr>
+                    {open &&
+                      r.components.map((c) => (
+                        <tr key={`${r.label}-${c.type}`} className="bg-slate-50/60 text-slate-600">
+                          <td className="px-4 py-2 pl-11 text-xs">{c.label}</td>
+                          <td className="px-4 py-2" />
+                          <td className="px-4 py-2 text-right font-mono text-xs">{formatNumber(c.units)}</td>
+                          <td className="px-4 py-2 text-right font-mono text-xs">{money(c.revenue)}</td>
+                          <td className="px-4 py-2" />
+                        </tr>
+                      ))}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </Card>
+
+      <p className="mt-3 text-xs text-slate-400">
+        Revenue is summed in stored amounts and is not currency-converted (spare parts and
+        motorcycles may be priced in different currencies).
+      </p>
+    </div>
+  );
+}
+
+function TotalCard({ label, value, hint, strong }: { label: string; value: string; hint?: string; strong?: boolean }) {
+  return (
+    <Card className="p-4">
+      <div className="text-xs font-medium text-slate-500">{label}</div>
+      <div className={`mt-1 font-mono ${strong ? "text-2xl font-semibold text-slate-900" : "text-xl text-slate-800"}`}>
+        {value}
+      </div>
+      {hint && <div className="mt-0.5 text-xs text-slate-400">{hint}</div>}
+    </Card>
+  );
+}

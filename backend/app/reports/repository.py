@@ -9,12 +9,15 @@ import datetime as dt
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import Date, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     Branch,
     Inventory,
+    Invoice,
+    InvoiceLine,
+    MotorcycleUnit,
     Product,
     PurchaseOrder,
     PurchaseOrderEvent,
@@ -25,7 +28,9 @@ from app.models import (
     Supplier,
     Warehouse,
 )
+from app.motorcycles.domain import lifecycle as L
 from app.order_requests.domain import status as S
+from app.sales.repository import _motorcycle_linked_invoice_ids
 
 
 class ReportsRepository:
@@ -134,6 +139,54 @@ class ReportsRepository:
             .outerjoin(Branch, Branch.id == Warehouse.branch_id)
         )).all()
         return {r[0]: (r[1], r[2], r[3]) for r in rows}
+
+    # ---------------------------- sales log ------------------------------- #
+    async def parts_sale_events(
+        self, *, branch_id: uuid.UUID | None, date_from: dt.date | None, date_to: dt.date | None,
+    ) -> list[tuple[dt.date, uuid.UUID | None, Decimal, Decimal]]:
+        """Spare-part sale contributions: (sale_date, branch_id, units, revenue) from
+        ``invoice_lines`` (every line is a fungible product). Excludes motorcycle-linked
+        invoices so a serialized-unit sale is never counted as a part."""
+        stmt = (
+            select(Invoice.invoice_date, Invoice.branch_id, InvoiceLine.qty, InvoiceLine.line_total)
+            .join(Invoice, InvoiceLine.invoice_id == Invoice.id)
+            .where(Invoice.id.not_in(_motorcycle_linked_invoice_ids()))
+        )
+        if branch_id is not None:
+            stmt = stmt.where(Invoice.branch_id == branch_id)
+        if date_from is not None:
+            stmt = stmt.where(Invoice.invoice_date >= date_from)
+        if date_to is not None:
+            stmt = stmt.where(Invoice.invoice_date <= date_to)
+        rows = (await self.session.execute(stmt)).all()
+        return [(r[0], r[1], Decimal(r[2]), Decimal(r[3])) for r in rows]
+
+    async def motorcycle_sale_events(
+        self, *, branch_id: uuid.UUID | None, date_from: dt.date | None, date_to: dt.date | None,
+    ) -> list[tuple[dt.date, uuid.UUID | None, Decimal, bool]]:
+        """Motorcycle sale contributions: (sale_date, branch_id, revenue, historical) for
+        every SOLD unit (``status`` in POST_SALE — covers live sales and imported
+        historical ones). One unit == one sale. Revenue is ``price_charged`` (fallback
+        ``selling_price``). Sale date is the linked invoice date, else the recorded
+        ``date_sold``, else the unit's last-update date."""
+        sale_date = func.coalesce(
+            Invoice.invoice_date, MotorcycleUnit.date_sold, cast(MotorcycleUnit.updated_at, Date)
+        )
+        revenue = func.coalesce(MotorcycleUnit.price_charged, MotorcycleUnit.selling_price, 0)
+        stmt = (
+            select(sale_date, MotorcycleUnit.branch_id, revenue, MotorcycleUnit.imported_historical)
+            .select_from(MotorcycleUnit)
+            .outerjoin(Invoice, Invoice.id == MotorcycleUnit.sold_ref)
+            .where(MotorcycleUnit.status.in_(tuple(L.POST_SALE)))
+        )
+        if branch_id is not None:
+            stmt = stmt.where(MotorcycleUnit.branch_id == branch_id)
+        if date_from is not None:
+            stmt = stmt.where(sale_date >= date_from)
+        if date_to is not None:
+            stmt = stmt.where(sale_date <= date_to)
+        rows = (await self.session.execute(stmt)).all()
+        return [(r[0], r[1], Decimal(r[2]), bool(r[3])) for r in rows]
 
     # ------------------------- supplier performance ----------------------- #
     async def suppliers_basic(self) -> list[tuple[uuid.UUID, str, int]]:

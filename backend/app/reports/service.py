@@ -6,12 +6,16 @@ import datetime as dt
 import uuid
 from decimal import Decimal
 
-from app.reports import compute
+from app.reports import compute, sales_log
 from app.reports.repository import ReportsRepository
 from app.reports.schemas import (
     AgingBucket,
     AgingItem,
     InventoryAgingReport,
+    SalesLogComponent,
+    SalesLogReport,
+    SalesLogRow,
+    SalesLogTotals,
     StockPositionReport,
     StockPositionRow,
     SupplierPerformanceReport,
@@ -97,6 +101,61 @@ class ReportsService:
             merged.values(), key=lambda x: ((x.branch_name or ""), (x.location_name or ""), (x.name or ""))
         )
         return StockPositionReport(as_of=as_of, rows=result)
+
+    async def get_sales_log(
+        self, *, granularity: str, type_filter: str, branch_id: uuid.UUID | None,
+        date_from: dt.date, date_to: dt.date,
+    ) -> SalesLogReport:
+        """THE shared sales aggregation (reused by any dashboard sales KPI): fetch parts
+        + motorcycle sale events, bucket them by period with the pure no-double-count
+        aggregator, and wrap into schemas."""
+        events: list[sales_log.SaleEvent] = []
+        # Parts events are needed for 'all' and 'parts'.
+        if type_filter in (sales_log.TYPE_ALL, sales_log.TYPE_PARTS):
+            for day, _branch, units, revenue in await self.repo.parts_sale_events(
+                branch_id=branch_id, date_from=date_from, date_to=date_to
+            ):
+                events.append(sales_log.SaleEvent(day=day, kind=sales_log.PARTS, units=units, revenue=revenue))
+        # Motorcycle events for 'all' and 'motorcycles'.
+        if type_filter in (sales_log.TYPE_ALL, sales_log.TYPE_MOTORCYCLES):
+            for day, _branch, revenue, historical in await self.repo.motorcycle_sale_events(
+                branch_id=branch_id, date_from=date_from, date_to=date_to
+            ):
+                kind = sales_log.MOTO_HISTORICAL if historical else sales_log.MOTO_NEW
+                events.append(sales_log.SaleEvent(day=day, kind=kind, units=Decimal("1"), revenue=revenue))
+
+        rows_raw, totals_raw = sales_log.build_sales_log(
+            events, granularity=granularity, type_filter=type_filter
+        )
+        rows = [
+            SalesLogRow(
+                period_start=r["period_start"], period_end=r["period_end"], label=r["label"],
+                units=float(r["units"]), revenue=float(r["revenue"]),
+                components=[
+                    SalesLogComponent(type=c["type"], label=c["label"],
+                                      units=float(c["units"]), revenue=float(c["revenue"]))
+                    for c in r["components"]
+                ],
+            )
+            for r in rows_raw
+        ]
+        by_kind = totals_raw["by_kind"]
+
+        def _k(kind: str, field: str) -> float:
+            return float(by_kind.get(kind, {}).get(field, 0))
+
+        totals = SalesLogTotals(
+            units=float(totals_raw["units"]), revenue=float(totals_raw["revenue"]),
+            parts_units=_k(sales_log.PARTS, "units"), parts_revenue=_k(sales_log.PARTS, "revenue"),
+            motorcycle_units=_k(sales_log.MOTO_NEW, "units"),
+            motorcycle_revenue=_k(sales_log.MOTO_NEW, "revenue"),
+            historical_units=_k(sales_log.MOTO_HISTORICAL, "units"),
+            historical_revenue=_k(sales_log.MOTO_HISTORICAL, "revenue"),
+        )
+        return SalesLogReport(
+            granularity=granularity, type=type_filter, branch_id=branch_id,
+            date_from=date_from, date_to=date_to, rows=rows, totals=totals,
+        )
 
     async def get_supplier_performance(
         self, window_days: int | None = 365

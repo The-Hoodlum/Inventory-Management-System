@@ -5,9 +5,34 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type {
   InventoryAgingReport,
+  SalesLogGranularity,
+  SalesLogReport,
+  SalesLogType,
   StockPositionReport,
   SupplierPerformanceReport,
 } from "@/types/api";
+
+export interface SalesLogParams {
+  granularity: SalesLogGranularity;
+  type: SalesLogType;
+  branchId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+export function useSalesLog(params: SalesLogParams, enabled = true) {
+  const { granularity, type, branchId, dateFrom, dateTo } = params;
+  const sp = new URLSearchParams({ granularity, type });
+  if (branchId) sp.set("branch_id", branchId);
+  if (dateFrom) sp.set("date_from", dateFrom);
+  if (dateTo) sp.set("date_to", dateTo);
+  return useQuery({
+    queryKey: ["report", "sales-log", granularity, type, branchId ?? "", dateFrom ?? "", dateTo ?? ""],
+    enabled,
+    staleTime: 30_000,
+    queryFn: () => api.get<SalesLogReport>(`/reports/sales-log?${sp.toString()}`),
+  });
+}
 
 export function useStockPosition(branchId: string, warehouseId: string, enabled: boolean) {
   const params = new URLSearchParams();
