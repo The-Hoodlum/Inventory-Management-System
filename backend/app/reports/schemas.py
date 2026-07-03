@@ -75,3 +75,46 @@ class StockPositionRow(BaseModel):
 class StockPositionReport(BaseModel):
     as_of: dt.datetime
     rows: list[StockPositionRow]
+
+
+# ------------------------------- sales log ---------------------------------- #
+class SalesLogComponent(BaseModel):
+    """A single sale type's contribution within a period (the drill-down breakdown).
+    ``type`` is one of parts / motorcycle_new / motorcycle_historical."""
+    type: str
+    label: str
+    units: float
+    revenue: float
+
+
+class SalesLogRow(BaseModel):
+    period_start: dt.date
+    period_end: dt.date
+    label: str
+    units: float
+    revenue: float
+    components: list[SalesLogComponent] = []
+
+
+class SalesLogTotals(BaseModel):
+    units: float
+    revenue: float
+    parts_units: float = 0.0
+    parts_revenue: float = 0.0
+    motorcycle_units: float = 0.0        # live serialized-unit sales
+    motorcycle_revenue: float = 0.0
+    historical_units: float = 0.0        # imported historical sold units
+    historical_revenue: float = 0.0
+
+
+class SalesLogReport(BaseModel):
+    """Unified sales log — parts + motorcycles bucketed by period, filtered by type,
+    branch and date range. Revenue is summed in stored amounts (no FX conversion:
+    parts and motorcycles may be priced in different currencies)."""
+    granularity: str          # daily | weekly | monthly
+    type: str                 # all | parts | motorcycles
+    branch_id: uuid.UUID | None
+    date_from: dt.date
+    date_to: dt.date
+    rows: list[SalesLogRow]
+    totals: SalesLogTotals
