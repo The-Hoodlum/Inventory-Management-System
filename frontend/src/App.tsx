@@ -4,6 +4,7 @@ import { ProtectedRoute } from "@/auth/ProtectedRoute";
 import { AppShell } from "@/components/AppShell";
 import AdvisorPage from "@/pages/AdvisorPage";
 import AppLauncherPage from "@/pages/AppLauncherPage";
+import BranchesPage from "@/pages/BranchesPage";
 import ContainerPage from "@/pages/ContainerPage";
 import CustomersPage from "@/pages/CustomersPage";
 import DashboardPage from "@/pages/DashboardPage";
@@ -72,6 +73,7 @@ export default function App() {
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/products" element={<ProductsPage />} />
         <Route path="/suppliers" element={<SuppliersPage />} />
+        <Route path="/branches" element={<BranchesPage />} />
         <Route path="/warehouses" element={<WarehousesPage />} />
         <Route path="/users" element={<UsersPage />} />
         <Route path="/settings" element={<SettingsPage />} />
