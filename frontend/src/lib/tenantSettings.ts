@@ -6,6 +6,8 @@ export interface TenantSettings {
   brand_name: string | null;
   industry: string | null;
   default_currency: string;
+  // Current USD -> billing-currency rate (numeric serialized as a string), e.g. "20.000000".
+  fx_rate: string;
   country: string | null;
   timezone: string;
   logo_url: string | null;
