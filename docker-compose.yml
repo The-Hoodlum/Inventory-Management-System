@@ -2,9 +2,11 @@
 #  Inventory & Procurement Platform — local / evaluation stack (run from root).
 #
 #  Brings up:
-#    • db  : PostgreSQL 16, provisioned on first boot (in order) with
-#            01 schema → 02 app_user role+grants → 03 RBAC seed →
-#            04 demo data → 05 PO events → 06 auth hardening   (all idempotent)
+#    • db  : PostgreSQL 16, provisioned on first boot by the ordered, idempotent
+#            SQL scripts below (01 schema → app_user role+grants → RBAC + demo seed
+#            → every feature module, ending with the motorcycle registry + import).
+#            This list is the same set CI applies (see .github/workflows/ci.yml);
+#            when a feature adds a SQL file, append it here AND there.
 #    • api : the FastAPI backend, connecting as the NON-superuser app_user so
 #            PostgreSQL Row-Level Security is enforced.
 #
@@ -62,6 +64,8 @@ services:
       - ./database/sql/customers.sql:/docker-entrypoint-initdb.d/31_customers.sql:ro
       - ./database/sql/sales_documents.sql:/docker-entrypoint-initdb.d/32_sales_documents.sql:ro
       - ./database/sql/sales_returns.sql:/docker-entrypoint-initdb.d/33_sales_returns.sql:ro
+      - ./database/sql/motorcycle_units.sql:/docker-entrypoint-initdb.d/34_motorcycle_units.sql:ro
+      - ./database/sql/motorcycle_import.sql:/docker-entrypoint-initdb.d/35_motorcycle_import.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-inventory}"]
       interval: 5s
