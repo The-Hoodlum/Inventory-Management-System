@@ -304,6 +304,28 @@ class CreditNoteOut(BaseModel):
     lines: list[PricedLineOut] = []
 
 
+# ------------------------------ parts sales -------------------------------- #
+class PartsSaleLineOut(BaseModel):
+    """One invoiced spare-part line — the line-grain parts sales log. Sourced from
+    ``invoice_lines`` (every line is a fungible product); motorcycle-linked invoices
+    are excluded so a serialized-unit sale never shows up as a part."""
+    invoice_line_id: uuid.UUID
+    invoice_id: uuid.UUID
+    invoice_number: str
+    invoice_status: str
+    sale_date: dt.date
+    product_id: uuid.UUID
+    sku: str | None = None
+    name: str | None = None
+    qty: float
+    unit_price: float
+    line_total: float
+    branch_id: uuid.UUID | None = None
+    branch_name: str | None = None
+    customer_id: uuid.UUID
+    customer_name: str | None = None
+
+
 # ------------------------------ status actions ----------------------------- #
 class CancelBody(BaseModel):
     reason: str | None = Field(default=None, max_length=1000)

@@ -30,6 +30,7 @@ import ReorderPage from "@/pages/ReorderPage";
 import ReportsPage from "@/pages/ReportsPage";
 import SalesPage from "@/pages/SalesPage";
 import SettingsPage from "@/pages/SettingsPage";
+import SparePartsSalesPage from "@/pages/SparePartsSalesPage";
 import SupplierScoresPage from "@/pages/SupplierScoresPage";
 import SuppliersPage from "@/pages/SuppliersPage";
 import UsersPage from "@/pages/UsersPage";
@@ -66,6 +67,7 @@ export default function App() {
         <Route path="/motorcycles/import" element={<MotorcycleImportPage />} />
         <Route path="/motorcycles/:id" element={<MotorcycleDetailPage />} />
         <Route path="/pos" element={<PosPage />} />
+        <Route path="/parts-sales" element={<SparePartsSalesPage />} />
         <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/import/inventory" element={<ImportInventoryPage />} />
         <Route path="/imports" element={<ImportHistoryPage />} />

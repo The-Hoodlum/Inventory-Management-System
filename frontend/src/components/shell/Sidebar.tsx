@@ -29,6 +29,7 @@ import {
   Upload,
   Users,
   Warehouse,
+  Wrench,
   type LucideIcon,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
@@ -60,6 +61,7 @@ const GROUPS: NavGroup[] = [
     items: [
       { to: "/sales", label: "Sales", icon: Receipt, permission: "sales.read" },
       { to: "/pos", label: "Point of Sale", icon: ShoppingCart, permission: "pos.use" },
+      { to: "/parts-sales", label: "Spare Parts", icon: Wrench, permission: "pos.use" },
       { to: "/customers", label: "Customers", icon: Contact, permission: "customer.read" },
       { to: "/motorcycles", label: "Motorcycles", icon: Bike, permission: "motorcycle.read" },
     ],

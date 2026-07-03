@@ -46,6 +46,7 @@ from app.sales.schemas import (
     DeliveryNoteOut,
     InvoiceCreate,
     InvoiceOut,
+    PartsSaleLineOut,
     PaymentCreate,
     PaymentOut,
     PosCheckout,
@@ -570,6 +571,23 @@ class SalesService:
     async def list_deliveries(self, **f) -> list[DeliveryNoteOut]:
         rows = await self.repo.list_deliveries(**f)
         return [await self._delivery_out(d) for d in rows]
+
+    async def list_parts_sales(self, **f) -> list[PartsSaleLineOut]:
+        rows = await self.repo.list_parts_sales(**f)
+        return [self._parts_sale_out(r) for r in rows]
+
+    @staticmethod
+    def _parts_sale_out(r) -> PartsSaleLineOut:
+        (line_id, inv_id, inv_no, sale_date, status, product_id, sku, name,
+         qty, unit_price, line_total, branch_id, branch_name, customer_id,
+         customer_name, _created_at) = r
+        return PartsSaleLineOut(
+            invoice_line_id=line_id, invoice_id=inv_id, invoice_number=inv_no,
+            invoice_status=status, sale_date=sale_date, product_id=product_id,
+            sku=sku, name=name, qty=_f(qty), unit_price=_f(unit_price),
+            line_total=_f(line_total), branch_id=branch_id, branch_name=branch_name,
+            customer_id=customer_id, customer_name=customer_name,
+        )
 
     # =============================== helpers ============================ #
     async def _priced_lines(self, tenant_id, line_model, lines: list[PricedLineIn]):
