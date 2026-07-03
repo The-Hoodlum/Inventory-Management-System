@@ -17,6 +17,7 @@ from app.motorcycles.schemas import (
     ColourCreate,
     ColourOut,
     ColourUpdate,
+    MetricsOut,
     ModelCreate,
     ModelOut,
     ModelUpdate,
@@ -140,6 +141,16 @@ async def update_colour(
     svc: MotorcycleService = Depends(get_motorcycle_service),
 ) -> ColourOut:
     return await svc.update_colour(tenant_id=user.tenant_id, user_id=user.id, colour_id=colour_id, payload=payload)
+
+
+# ================================ metrics =============================== #
+@router.get("/metrics", response_model=MetricsOut)
+async def metrics(
+    branch_id: uuid.UUID | None = Query(default=None),
+    _: CurrentUser = Depends(require_permission(P.MOTORCYCLE_READ)),
+    svc: MotorcycleService = Depends(get_motorcycle_service),
+) -> MetricsOut:
+    return await svc.metrics(branch_id=branch_id)
 
 
 # ================================= units ================================ #

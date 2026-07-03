@@ -168,6 +168,17 @@ class TransferIn(BaseModel):
     note: str | None = None
 
 
+class MetricsOut(BaseModel):
+    """Dashboard roll-up of the unit registry (tenant-scoped; optionally one branch)."""
+
+    total: int = 0
+    in_stock: int = 0
+    reserved: int = 0
+    sold: int = 0
+    cancelled: int = 0
+    by_status: dict[str, int] = {}
+
+
 class UnitEventOut(BaseModel):
     id: uuid.UUID
     event_type: str

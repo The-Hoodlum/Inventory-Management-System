@@ -32,6 +32,7 @@ from app.motorcycles.schemas import (
     ColourCreate,
     ColourOut,
     ColourUpdate,
+    MetricsOut,
     ModelCreate,
     ModelOut,
     ModelUpdate,
@@ -348,6 +349,19 @@ class MotorcycleService:
     async def get_unit(self, unit_id: uuid.UUID) -> UnitOut:
         return await self._unit_out(
             await self._require(await self.repo.get_unit(unit_id), "Motorcycle unit"), with_events=True
+        )
+
+    async def metrics(self, *, branch_id: uuid.UUID | None = None) -> MetricsOut:
+        counts = await self.repo.status_counts(branch_id=branch_id)
+        in_stock = sum(n for s, n in counts.items() if s in L.IN_STOCK)
+        sold = sum(n for s, n in counts.items() if s in L.POST_SALE)
+        return MetricsOut(
+            total=sum(counts.values()),
+            in_stock=in_stock,
+            reserved=counts.get(L.RESERVED, 0),
+            sold=sold,
+            cancelled=counts.get(L.CANCELLED, 0),
+            by_status=counts,
         )
 
     async def list_units(self, **f) -> tuple[list[UnitOut], int]:

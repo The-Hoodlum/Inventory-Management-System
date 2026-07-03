@@ -84,6 +84,26 @@ async def _unit(client, admin_h, *, model_id, chassis=None, **extra) -> dict:
 
 
 # ------------------------------------------------------------------------- #
+# Dashboard metrics
+# ------------------------------------------------------------------------- #
+async def test_metrics_rolls_up_by_lifecycle_bucket(client):
+    admin_h = await _headers(client, ADMIN_EMAIL, ADMIN_PASSWORD)
+    before = (await client.get("/api/v1/motorcycles/metrics", headers=admin_h)).json()
+
+    model = await _model(client, admin_h)
+    u1 = await _unit(client, admin_h, model_id=model["id"])   # received -> in_stock
+    await _unit(client, admin_h, model_id=model["id"])        # received -> in_stock
+    # Move one unit forward but still in-stock (inspected).
+    await client.post(f"/api/v1/motorcycles/units/{u1['id']}/transition", headers=admin_h,
+                      json={"to_status": "inspected"})
+
+    after = (await client.get("/api/v1/motorcycles/metrics", headers=admin_h)).json()
+    assert after["total"] == before["total"] + 2
+    assert after["in_stock"] == before["in_stock"] + 2
+    assert "received" in after["by_status"] or "inspected" in after["by_status"]
+
+
+# ------------------------------------------------------------------------- #
 # Layer 1: reference catalog CRUD
 # ------------------------------------------------------------------------- #
 async def test_reference_catalog_crud(client):
