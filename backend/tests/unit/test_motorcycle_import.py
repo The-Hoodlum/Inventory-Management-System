@@ -22,8 +22,9 @@ def test_parse_date_rejects_garbage():
 
 def test_status_map_covers_the_sheet_vocabulary():
     assert set(_STATUS_MAP) == {"unassembled", "assembled", "reserved", "sold"}
-    assert _STATUS_MAP["unassembled"][0] == "assembly_required"
-    assert _STATUS_MAP["sold"] == ("sold", "assembled", "passed")
+    # Maps each sheet value to one of the five sale statuses.
+    assert _STATUS_MAP["unassembled"] == "unassembled"
+    assert _STATUS_MAP["sold"] == "sold"
 
 
 def test_importer_is_registered_and_atomic():

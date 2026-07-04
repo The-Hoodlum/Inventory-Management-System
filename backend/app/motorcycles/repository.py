@@ -160,11 +160,16 @@ class MotorcycleRepository:
         self, *, search: str | None = None, status: str | None = None,
         branch_id: uuid.UUID | None = None, model_id: uuid.UUID | None = None,
         variant_id: uuid.UUID | None = None, colour_id: uuid.UUID | None = None,
-        sold: bool | None = None, page: int = 1, page_size: int = 50,
+        sold: bool | None = None, inspected: bool | None = None,
+        registered: bool | None = None, page: int = 1, page_size: int = 50,
     ) -> tuple[list[MotorcycleUnit], int]:
         base = select(MotorcycleUnit)
         if status:
             base = base.where(MotorcycleUnit.status == status)
+        if inspected is not None:
+            base = base.where(MotorcycleUnit.inspected.is_(inspected))
+        if registered is not None:
+            base = base.where(MotorcycleUnit.registered.is_(registered))
         if branch_id is not None:
             base = base.where(MotorcycleUnit.branch_id == branch_id)
         if model_id is not None:

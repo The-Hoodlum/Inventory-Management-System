@@ -6,9 +6,10 @@ import { api } from "@/lib/api";
 import type { Page } from "@/types/api";
 
 // ---- lifecycle -------------------------------------------------------------
+// The five INDEPENDENT sale statuses. Inspection + registration are separate booleans
+// on the unit, not statuses. State machine mirrors app/motorcycles/domain/lifecycle.py.
 export const UNIT_STATUSES = [
-  "received", "assembly_required", "in_assembly", "assembled", "inspected",
-  "reserved", "sold", "delivered", "registered", "warranty_active", "cancelled",
+  "unassembled", "assembled", "reserved", "on_hold", "sold",
 ] as const;
 export type UnitStatus = (typeof UNIT_STATUSES)[number];
 
@@ -92,8 +93,8 @@ export interface MotoUnit {
   warehouse_name: string | null;
   internal_location: string | null;
   status: UnitStatus;
-  inspection_status: string;
-  assembly_status: string;
+  inspected: boolean;              // independent of status
+  hold_reason: string | null;      // set while on_hold; kept for history after
   reserved_ref: string | null;
   reserved_so_number: string | null;
   sold_ref: string | null;
@@ -103,7 +104,7 @@ export interface MotoUnit {
   selling_price: number | null;
   price_charged: number | null;
   payment_status: string;
-  registration_status: string;
+  registered: boolean;             // independent of status
   registration_number: string | null;
   registration_papers_received: boolean;
   warranty_start: string | null;
@@ -123,6 +124,8 @@ export interface UnitListParams {
   variant_id?: string;
   colour_id?: string;
   sold?: boolean;
+  inspected?: boolean;
+  registered?: boolean;
   page?: number;
   page_size?: number;
 }
@@ -157,8 +160,8 @@ export const motorcyclesApi = {
   getUnit: (id: string) => api.get<MotoUnit>(`/motorcycles/units/${id}`),
   createUnit: (body: Record<string, unknown>) => api.post<MotoUnit>("/motorcycles/units", body),
   updateUnit: (id: string, body: Record<string, unknown>) => api.patch<MotoUnit>(`/motorcycles/units/${id}`, body),
-  transition: (id: string, to_status: string, note?: string) =>
-    api.post<MotoUnit>(`/motorcycles/units/${id}/transition`, { to_status, note }),
+  transition: (id: string, to_status: string, body: { note?: string; hold_reason?: string } = {}) =>
+    api.post<MotoUnit>(`/motorcycles/units/${id}/transition`, { to_status, ...body }),
   reserve: (id: string, body: { customer_id: string; sales_order_id?: string; note?: string }) =>
     api.post<MotoUnit>(`/motorcycles/units/${id}/reserve`, body),
   sell: (id: string, body: { invoice_id: string; customer_id?: string; price_charged?: number; note?: string }) =>

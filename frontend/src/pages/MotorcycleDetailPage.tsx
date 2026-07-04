@@ -17,7 +17,7 @@ import { formatDate } from "@/lib/format";
 import { type MotoUnit, motorcyclesApi, statusLabel } from "@/lib/motorcycles";
 import { useBranches } from "@/lib/refdata";
 
-type ActionModal = "reserve" | "sell" | "transfer" | null;
+type ActionModal = "reserve" | "sell" | "transfer" | "on_hold" | null;
 
 export default function MotorcycleDetailPage() {
   const { id = "" } = useParams();
@@ -58,7 +58,7 @@ export default function MotorcycleDetailPage() {
             ) : undefined}
             tabs={[
               { key: "identity", label: "Identity", content: <IdentityTab unit={data} /> },
-              { key: "lifecycle", label: "Lifecycle", content: <LifecycleTab unit={data} /> },
+              { key: "lifecycle", label: "Lifecycle", content: <LifecycleTab unit={data} canManage={canManage} onSaved={invalidate} /> },
               { key: "sale", label: "Sale", content: <SaleTab unit={data} /> },
               { key: "registration", label: "Registration", content: <RegistrationTab unit={data} canManage={canManage} onSaved={invalidate} /> },
               { key: "warranty", label: "Warranty", content: <WarrantyTab unit={data} /> },
@@ -76,6 +76,7 @@ export default function MotorcycleDetailPage() {
           {modal === "reserve" && <ReserveModal unit={data} onClose={() => setModal(null)} onDone={() => { setModal(null); invalidate(); }} />}
           {modal === "sell" && <SellModal unit={data} onClose={() => setModal(null)} onDone={() => { setModal(null); invalidate(); }} />}
           {modal === "transfer" && <TransferModal unit={data} onClose={() => setModal(null)} onDone={() => { setModal(null); invalidate(); }} />}
+          {modal === "on_hold" && <OnHoldModal unit={data} onClose={() => setModal(null)} onDone={() => { setModal(null); invalidate(); }} />}
         </>
       )}
     </DetailScaffold>
@@ -92,21 +93,25 @@ function eventTitle(type: string, to?: string | null): string {
 }
 
 // ---- quick actions --------------------------------------------------------
+// Reserve / sell / on_hold open modals (they need a customer, an invoice, or a reason);
+// the remaining legal moves (assembled/unassembled) are one-click. Illegal moves are
+// never offered — allowed_next comes from the server state machine.
 function LifecycleActions({ unit, onTransition, onModal, busy }: {
   unit: MotoUnit; onTransition: (to: string) => void; onModal: (m: ActionModal) => void; busy: boolean;
 }) {
   const next = unit.allowed_next;
-  const canTransfer = unit.status !== "cancelled";
+  const modalStatuses = ["reserved", "sold", "on_hold"];
   return (
     <>
-      {next.filter((s) => s !== "reserved" && s !== "sold").map((s) => (
+      {next.filter((s) => !modalStatuses.includes(s)).map((s) => (
         <Button key={s} variant="secondary" disabled={busy} onClick={() => onTransition(s)}>
-          {s === "cancelled" ? "Cancel unit" : `Mark ${statusLabel(s)}`}
+          Mark {statusLabel(s)}
         </Button>
       ))}
+      {next.includes("on_hold") && <Button variant="secondary" onClick={() => onModal("on_hold")}>Put on hold…</Button>}
       {next.includes("reserved") && <Button variant="secondary" onClick={() => onModal("reserve")}>Reserve…</Button>}
       {next.includes("sold") && <Button onClick={() => onModal("sell")}>Sell…</Button>}
-      {canTransfer && <Button variant="ghost" onClick={() => onModal("transfer")}>Transfer…</Button>}
+      {unit.status !== "sold" && <Button variant="ghost" onClick={() => onModal("transfer")}>Transfer…</Button>}
     </>
   );
 }
@@ -144,14 +149,21 @@ function IdentityTab({ unit }: { unit: MotoUnit }) {
   );
 }
 
-function LifecycleTab({ unit }: { unit: MotoUnit }) {
+function LifecycleTab({ unit, canManage, onSaved }: { unit: MotoUnit; canManage: boolean; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false);
   return (
     <div className="max-w-xl">
       <Row label="Status">{statusLabel(unit.status)}</Row>
-      <Row label="Inspection">{statusLabel(unit.inspection_status)}</Row>
-      <Row label="Assembly">{statusLabel(unit.assembly_status)}</Row>
+      <Row label="Inspected">{unit.inspected ? "Yes" : "No"}</Row>
+      {unit.status === "on_hold" ? (
+        <Row label="Hold reason">{unit.hold_reason ?? "—"}</Row>
+      ) : unit.hold_reason ? (
+        <Row label="Last hold reason">{unit.hold_reason}</Row>
+      ) : null}
       <Row label="Held for order">{unit.reserved_so_number ?? "—"}</Row>
       <Row label="Next actions">{unit.allowed_next.length ? unit.allowed_next.map(statusLabel).join(", ") : "None (terminal)"}</Row>
+      {canManage && <div className="mt-3"><Button variant="secondary" onClick={() => setEditing(true)}>Edit inspection</Button></div>}
+      {editing && <EditUnitModal unit={unit} fields={["inspected"]} title="Edit inspection" onClose={() => setEditing(false)} onDone={() => { setEditing(false); onSaved(); }} />}
     </div>
   );
 }
@@ -172,11 +184,11 @@ function RegistrationTab({ unit, canManage, onSaved }: { unit: MotoUnit; canMana
   const [editing, setEditing] = useState(false);
   return (
     <div className="max-w-xl">
-      <Row label="Registration status">{statusLabel(unit.registration_status)}</Row>
+      <Row label="Registered">{unit.registered ? "Yes" : "No"}</Row>
       <Row label="Registration number">{unit.registration_number ?? "—"}</Row>
       <Row label="Papers received">{unit.registration_papers_received ? "Yes" : "No"}</Row>
       {canManage && <div className="mt-3"><Button variant="secondary" onClick={() => setEditing(true)}>Edit registration</Button></div>}
-      {editing && <EditUnitModal unit={unit} fields={["registration_number", "registration_papers_received"]} title="Edit registration" onClose={() => setEditing(false)} onDone={() => { setEditing(false); onSaved(); }} />}
+      {editing && <EditUnitModal unit={unit} fields={["registered", "registration_number", "registration_papers_received"]} title="Edit registration" onClose={() => setEditing(false)} onDone={() => { setEditing(false); onSaved(); }} />}
     </div>
   );
 }
@@ -339,10 +351,36 @@ function TransferModal({ unit, onClose, onDone }: { unit: MotoUnit; onClose: () 
   );
 }
 
+function OnHoldModal({ unit, onClose, onDone }: { unit: MotoUnit; onClose: () => void; onDone: () => void }) {
+  const [reason, setReason] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const m = useMutation({
+    mutationFn: () => motorcyclesApi.transition(unit.id, "on_hold", { hold_reason: reason.trim() }),
+    onSuccess: onDone,
+    onError: (e) => setErr(e instanceof ApiError ? e.message : "Could not put on hold."),
+  });
+  return (
+    <Modal title="Put this unit on hold" size="md" onClose={onClose} footer={
+      <><Button variant="secondary" onClick={onClose}>Cancel</Button>
+      <Button disabled={!reason.trim() || m.isPending} onClick={() => { setErr(null); m.mutate(); }}>{m.isPending ? "Holding…" : "Put on hold"}</Button></>
+    }>
+      <div className="space-y-3">
+        {err && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
+        <p className="text-xs text-muted">Holding removes any customer and takes the unit out of sale until it's cleared.</p>
+        <ModalField label="Hold reason *">
+          <input className={INPUT} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Damaged in transit, missing parts" autoFocus />
+        </ModalField>
+      </div>
+    </Modal>
+  );
+}
+
 function EditUnitModal({ unit, fields, title, onClose, onDone }: {
   unit: MotoUnit; fields: string[]; title: string; onClose: () => void; onDone: () => void;
 }) {
   const [form, setForm] = useState<Record<string, unknown>>({
+    inspected: unit.inspected,
+    registered: unit.registered,
     registration_number: unit.registration_number ?? "",
     registration_papers_received: unit.registration_papers_received,
   });
@@ -363,6 +401,18 @@ function EditUnitModal({ unit, fields, title, onClose, onDone }: {
     }>
       <div className="space-y-3">
         {err && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
+        {fields.includes("inspected") && (
+          <label className="flex items-center gap-2 text-sm text-content">
+            <input type="checkbox" checked={Boolean(form.inspected)} onChange={(e) => setForm((f) => ({ ...f, inspected: e.target.checked }))} />
+            Inspected
+          </label>
+        )}
+        {fields.includes("registered") && (
+          <label className="flex items-center gap-2 text-sm text-content">
+            <input type="checkbox" checked={Boolean(form.registered)} onChange={(e) => setForm((f) => ({ ...f, registered: e.target.checked }))} />
+            Registered
+          </label>
+        )}
         {fields.includes("registration_number") && (
           <ModalField label="Registration number">
             <input className={INPUT} value={String(form.registration_number ?? "")} onChange={(e) => setForm((f) => ({ ...f, registration_number: e.target.value }))} />

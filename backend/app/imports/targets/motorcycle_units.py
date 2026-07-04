@@ -57,12 +57,14 @@ _ALL = (LEVEL_BASIC, LEVEL_STANDARD, LEVEL_ADVANCED)
 _STD = (LEVEL_STANDARD, LEVEL_ADVANCED)
 _ADV = (LEVEL_ADVANCED,)
 
-# Spreadsheet status -> (lifecycle status, assembly_status, inspection_status).
-_STATUS_MAP: dict[str, tuple[str, str, str]] = {
-    "unassembled": ("assembly_required", "required", "pending"),
-    "assembled": ("assembled", "assembled", "pending"),
-    "reserved": ("reserved", "assembled", "passed"),
-    "sold": ("sold", "assembled", "passed"),
+# Spreadsheet status -> sale status (one of the five). Sold/reserved rows are also
+# recorded as inspected historicals in commit(). PR 2 adds an interactive mapping so
+# arbitrary sheet wordings (e.g. "Assembly Required", a defect note -> on_hold) resolve.
+_STATUS_MAP: dict[str, str] = {
+    "unassembled": "unassembled",
+    "assembled": "assembled",
+    "reserved": "reserved",
+    "sold": "sold",
 }
 
 _IMPORT_FALLBACK_BRAND = "Unspecified"
@@ -398,8 +400,10 @@ class MotorcycleUnitImporter(AtomicImporter):
             if d.get("supplier"):
                 supplier_id = (await repo.get_or_create_supplier(d["supplier"])).id
 
-            status, assembly_status, inspection_status = _STATUS_MAP[d["status"]]
+            status = _STATUS_MAP[d["status"]]
             historical = d["status"] in ("sold", "reserved")
+            # Sold/reserved historicals have been through the shop floor -> inspected.
+            inspected = status in ("reserved", "sold")
 
             customer_id = None
             if d.get("customer_name"):
@@ -413,12 +417,11 @@ class MotorcycleUnitImporter(AtomicImporter):
                 engine_number=d.get("engine_number"), model_id=model.id, variant_id=variant_id,
                 colour_id=colour_id, supplier_id=supplier_id, branch_id=d.get("branch_id"),
                 date_received=d.get("date_received"), assembled_date=d.get("assembled_date"),
-                status=status, assembly_status=assembly_status, inspection_status=inspection_status,
-                customer_id=customer_id,
+                status=status, inspected=inspected, customer_id=customer_id,
                 selling_price=_dec(d.get("unit_price")),
                 price_charged=_dec(d.get("charged_price")) if d["status"] == "sold" else None,
                 date_sold=d.get("date_sold") if d["status"] == "sold" else None,
-                registration_status="registered" if registered else "unregistered",
+                registered=registered,
                 registration_number=d.get("registration_number"),
                 registration_papers_received=registered,
                 imported_historical=historical, import_job_id=job_id,

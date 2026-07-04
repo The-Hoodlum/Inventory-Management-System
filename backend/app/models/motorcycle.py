@@ -81,9 +81,13 @@ class MotorcycleUnit(Base):
     branch_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("branches.id", ondelete="SET NULL"), nullable=True)
     warehouse_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("warehouses.id", ondelete="SET NULL"), nullable=True)
     internal_location: Mapped[str | None] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'received'"))
-    inspection_status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))
-    assembly_status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'not_required'"))
+    # Sale status: ONE of five (unassembled/assembled/reserved/on_hold/sold). State
+    # machine in app/motorcycles/domain/lifecycle.py.
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'unassembled'"))
+    # Inspection — an INDEPENDENT fact (moves on its own, not part of the sale status).
+    inspected: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    # Reason the unit is on hold; required while status='on_hold', kept for history after.
+    hold_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Serialized hold + sale linkage into the EXISTING sales documents.
     reserved_ref: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("sales_orders.id", ondelete="SET NULL"), nullable=True)
     sold_ref: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("invoices.id", ondelete="SET NULL"), nullable=True)
@@ -91,7 +95,8 @@ class MotorcycleUnit(Base):
     selling_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
     price_charged: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
     payment_status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'unpaid'"))
-    registration_status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'unregistered'"))
+    # Registration — INDEPENDENT of the sale status: a yes/no + the plate when yes.
+    registered: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     registration_number: Mapped[str | None] = mapped_column(Text, nullable=True)
     registration_papers_received: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     warranty_start: Mapped[dt.date | None] = mapped_column(Date, nullable=True)

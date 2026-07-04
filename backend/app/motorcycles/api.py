@@ -172,6 +172,8 @@ async def list_units(
     variant_id: uuid.UUID | None = Query(default=None),
     colour_id: uuid.UUID | None = Query(default=None),
     sold: bool | None = Query(default=None),
+    inspected: bool | None = Query(default=None),
+    registered: bool | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
     _: CurrentUser = Depends(require_permission(P.MOTORCYCLE_READ)),
@@ -179,7 +181,8 @@ async def list_units(
 ) -> Page[UnitOut]:
     items, total = await svc.list_units(
         search=search, status=status_filter, branch_id=branch_id, model_id=model_id,
-        variant_id=variant_id, colour_id=colour_id, sold=sold, page=page, page_size=page_size,
+        variant_id=variant_id, colour_id=colour_id, sold=sold, inspected=inspected,
+        registered=registered, page=page, page_size=page_size,
     )
     return Page[UnitOut](**_page(items, total, page, page_size))
 
