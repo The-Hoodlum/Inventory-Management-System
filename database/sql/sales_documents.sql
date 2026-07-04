@@ -61,6 +61,8 @@ CREATE TABLE IF NOT EXISTS quotations (
     discount_total NUMERIC(18,4) NOT NULL DEFAULT 0,
     tax_total      NUMERIC(18,4) NOT NULL DEFAULT 0,
     grand_total    NUMERIC(18,4) NOT NULL DEFAULT 0,
+    fx_rate         NUMERIC(18,6) NOT NULL DEFAULT 1,  -- USD -> ZMW rate frozen at issue
+    grand_total_zmw NUMERIC(18,4) NOT NULL DEFAULT 0,  -- billed ZMW total (see migration 0033)
     created_by     UUID REFERENCES users(id) ON DELETE SET NULL,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -79,7 +81,8 @@ CREATE TABLE IF NOT EXISTS quotation_lines (
     unit_price    NUMERIC(18,4) NOT NULL DEFAULT 0 CHECK (unit_price >= 0),
     discount_pct  NUMERIC(9,4)  NOT NULL DEFAULT 0 CHECK (discount_pct >= 0 AND discount_pct <= 100),
     tax_pct       NUMERIC(9,4)  NOT NULL DEFAULT 0 CHECK (tax_pct >= 0),
-    line_total    NUMERIC(18,4) NOT NULL DEFAULT 0
+    line_total    NUMERIC(18,4) NOT NULL DEFAULT 0,
+    line_total_zmw NUMERIC(18,4) NOT NULL DEFAULT 0  -- line_total * document fx_rate, frozen
 );
 CREATE INDEX IF NOT EXISTS idx_quotation_lines_quote ON quotation_lines (quotation_id);
 
@@ -183,7 +186,9 @@ CREATE TABLE IF NOT EXISTS invoices (
     discount_total   NUMERIC(18,4) NOT NULL DEFAULT 0,
     tax_total        NUMERIC(18,4) NOT NULL DEFAULT 0,
     grand_total      NUMERIC(18,4) NOT NULL DEFAULT 0,
-    amount_paid      NUMERIC(18,4) NOT NULL DEFAULT 0 CHECK (amount_paid >= 0),
+    fx_rate          NUMERIC(18,6) NOT NULL DEFAULT 1,  -- USD -> ZMW rate frozen at issue
+    grand_total_zmw  NUMERIC(18,4) NOT NULL DEFAULT 0,  -- ZMW payable (payments settle here)
+    amount_paid      NUMERIC(18,4) NOT NULL DEFAULT 0 CHECK (amount_paid >= 0),  -- in ZMW
     created_by       UUID REFERENCES users(id) ON DELETE SET NULL,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -202,7 +207,8 @@ CREATE TABLE IF NOT EXISTS invoice_lines (
     unit_price   NUMERIC(18,4) NOT NULL DEFAULT 0 CHECK (unit_price >= 0),
     discount_pct NUMERIC(9,4)  NOT NULL DEFAULT 0 CHECK (discount_pct >= 0 AND discount_pct <= 100),
     tax_pct      NUMERIC(9,4)  NOT NULL DEFAULT 0 CHECK (tax_pct >= 0),
-    line_total   NUMERIC(18,4) NOT NULL DEFAULT 0
+    line_total   NUMERIC(18,4) NOT NULL DEFAULT 0,
+    line_total_zmw NUMERIC(18,4) NOT NULL DEFAULT 0  -- line_total * invoice fx_rate, frozen (billed)
 );
 CREATE INDEX IF NOT EXISTS idx_invoice_lines_invoice ON invoice_lines (invoice_id);
 

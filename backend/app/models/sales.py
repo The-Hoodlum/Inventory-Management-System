@@ -42,6 +42,10 @@ class Quotation(Base):
     discount_total: Mapped[Decimal] = _num()
     tax_total: Mapped[Decimal] = _num()
     grand_total: Mapped[Decimal] = _num()
+    # USD -> billing-currency (ZMW) rate frozen when the quote is created, and the billed
+    # ZMW grand total derived from it (never recomputed at view time). See migration 0033.
+    fx_rate: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False, server_default=text("1"))
+    grand_total_zmw: Mapped[Decimal] = _num()
     created_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
     updated_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
@@ -64,6 +68,7 @@ class QuotationLine(Base):
     discount_pct: Mapped[Decimal] = _num()
     tax_pct: Mapped[Decimal] = _num()
     line_total: Mapped[Decimal] = _num()
+    line_total_zmw: Mapped[Decimal] = _num()  # line_total * document fx_rate, frozen
 
 
 # ------------------------------ Sales order -------------------------------- #
@@ -173,8 +178,13 @@ class Invoice(Base):
     discount_total: Mapped[Decimal] = _num()
     tax_total: Mapped[Decimal] = _num()
     grand_total: Mapped[Decimal] = _num()
-    amount_paid: Mapped[Decimal] = _num()
-    credit_total: Mapped[Decimal] = _num()  # applied credit notes (invoice stays immutable)
+    # USD -> ZMW rate frozen when the invoice is issued; ZMW grand total is the PAYABLE
+    # (payments settle against it, in ZMW). ``amount_paid``/``credit_total`` reconcile in
+    # ZMW at this frozen rate. See migration 0033.
+    fx_rate: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False, server_default=text("1"))
+    grand_total_zmw: Mapped[Decimal] = _num()
+    amount_paid: Mapped[Decimal] = _num()   # in ZMW (the billing currency)
+    credit_total: Mapped[Decimal] = _num()  # applied credit notes, in USD (converted at fx_rate)
     created_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
     updated_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
@@ -197,6 +207,7 @@ class InvoiceLine(Base):
     discount_pct: Mapped[Decimal] = _num()
     tax_pct: Mapped[Decimal] = _num()
     line_total: Mapped[Decimal] = _num()
+    line_total_zmw: Mapped[Decimal] = _num()  # line_total * invoice fx_rate, frozen (billed)
 
 
 # --------------------------- Payment + Receipt ----------------------------- #

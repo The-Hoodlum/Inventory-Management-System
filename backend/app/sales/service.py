@@ -92,14 +92,17 @@ class SalesService:
     ) -> QuotationOut:
         await self._require_customer(payload.customer_id)
         lines, totals = await self._priced_lines(tenant_id, QuotationLine, payload.lines)
+        # Snapshot the CURRENT tenant rate onto the quotation and freeze the billed ZMW.
+        fx_rate = await self.repo.current_fx_rate(tenant_id)
         quote = Quotation(
             tenant_id=tenant_id, quote_number=await self.repo.number(tenant_id, "quotation", "QUO"),
             customer_id=payload.customer_id, branch_id=payload.branch_id,
             salesperson_id=payload.salesperson_id or user_id, currency=payload.currency,
             valid_until=payload.valid_until, status=S.Q_DRAFT, notes=payload.notes,
-            created_by=user_id, **totals,
+            created_by=user_id, fx_rate=fx_rate, **totals,
         )
         quote.lines = lines
+        quote.grand_total_zmw = self._freeze_line_zmw(fx_rate, lines)
         self.repo.session.add(quote)
         await self.repo.session.flush()
         await self._audit(tenant_id, user_id, "sales_quotation", quote.id, "created", None, S.Q_DRAFT)
@@ -307,14 +310,18 @@ class SalesService:
             ))
             totals_in.append({"qty": _f(qty), "unit_price": _f(unit), "discount_pct": _f(disc), "tax_pct": _f(tax)})
         totals = pricing.document_totals(totals_in)
+        # Snapshot the CURRENT tenant rate onto the invoice (its issue moment) and freeze
+        # the billed ZMW per line + total. This is the PAYABLE the customer settles in ZMW.
+        fx_rate = await self.repo.current_fx_rate(tenant_id)
         invoice = Invoice(
             tenant_id=tenant_id, invoice_number=await self.repo.number(tenant_id, "invoice", "INV"),
             sales_order_id=so.id, delivery_note_id=payload.delivery_note_id, customer_id=so.customer_id,
             branch_id=so.branch_id, currency=so.currency, payment_terms=payload.payment_terms or so.payment_terms,
             due_date=payload.due_date, status=S.INV_SENT, amount_paid=Decimal("0"),
-            created_by=user_id, **totals,
+            created_by=user_id, fx_rate=fx_rate, **totals,
         )
         invoice.lines = inv_lines
+        invoice.grand_total_zmw = self._freeze_line_zmw(fx_rate, inv_lines)
         self.repo.session.add(invoice)
         await self.repo.session.flush()
         await self._audit(tenant_id, user_id, "sales_invoice", invoice.id, "created", None, S.INV_SENT)
@@ -328,7 +335,9 @@ class SalesService:
         invoice = await self._require(self.repo.get_invoice(payload.invoice_id, lock=True), "Invoice")
         if invoice.status not in S.INVOICE_PAYABLE:
             raise BusinessRuleError(f"Invoice in status {invoice.status} cannot take a payment.")
-        balance = _d(invoice.grand_total) - _d(invoice.amount_paid)
+        # Payments are in ZMW and settle against the frozen ZMW payable (not re-derived
+        # from USD at today's rate).
+        balance = self._invoice_balance_zmw(invoice)
         total = sum((_d(p.amount) for p in payload.payments), Decimal("0"))
         if total > balance + Decimal("0.0001"):
             raise BusinessRuleError(
@@ -343,10 +352,11 @@ class SalesService:
     async def _settle(self, *, tenant_id, user_id, invoice, payments, branch_id) -> Receipt:
         """Create payment rows + a grouping receipt, allocate to the invoice, and advance
         the invoice status. Caller has locked the invoice and validated the total."""
-        total = sum((_d(p.amount) for p in payments), Decimal("0"))
+        total = sum((_d(p.amount) for p in payments), Decimal("0"))  # ZMW
         invoice.amount_paid = _d(invoice.amount_paid) + total
-        invoice.status = S.invoice_status_after_payment(invoice.grand_total, invoice.amount_paid)
-        balance = _d(invoice.grand_total) - _d(invoice.amount_paid)
+        settled = _d(invoice.amount_paid) + self._credit_zmw(invoice)
+        invoice.status = S.invoice_status_after_payment(_d(invoice.grand_total_zmw), settled)
+        balance = _d(invoice.grand_total_zmw) - settled
         receipt = Receipt(
             tenant_id=tenant_id, receipt_number=await self.repo.number(tenant_id, "receipt", "RCP"),
             invoice_id=invoice.id, customer_id=invoice.customer_id, branch_id=branch_id,
@@ -521,12 +531,14 @@ class SalesService:
         old, cn.status = cn.status, new
         if new == S.CN_APPLIED:
             cn.applied_at = dt.datetime.now(dt.UTC)
-            # Offset the invoice without editing it: bump credit_total + recompute status.
+            # Offset the invoice without editing it: bump credit_total (USD) + recompute
+            # status in ZMW (amount_paid is ZMW; the credit is converted at the invoice's
+            # own frozen rate, never today's).
             if cn.invoice_id:
                 invoice = await self._require(self.repo.get_invoice(cn.invoice_id, lock=True), "Invoice")
                 invoice.credit_total = _d(invoice.credit_total) + _d(cn.grand_total)
-                settled = _d(invoice.amount_paid) + _d(invoice.credit_total)
-                invoice.status = S.invoice_status_after_payment(invoice.grand_total, settled)
+                settled = _d(invoice.amount_paid) + self._credit_zmw(invoice)
+                invoice.status = S.invoice_status_after_payment(_d(invoice.grand_total_zmw), settled)
         await self.repo.session.flush()
         await self._audit(tenant_id, user_id, "sales_credit_note", cn.id, new, old, new)
         return await self._credit_note_out(cn)
@@ -590,6 +602,27 @@ class SalesService:
         )
 
     # =============================== helpers ============================ #
+    @staticmethod
+    def _freeze_line_zmw(fx_rate, lines) -> Decimal:
+        """Set ``line_total_zmw = round2(line_total * rate)`` on each line and return the
+        sum — the document's billed ZMW grand total. Summing the rounded per-line ZMW
+        guarantees the line ZMW sum equals the document ZMW total exactly."""
+        total = Decimal("0")
+        for ln in lines:
+            z = pricing.to_zmw(ln.line_total, fx_rate)
+            ln.line_total_zmw = z
+            total += z
+        return total
+
+    @staticmethod
+    def _credit_zmw(invoice) -> Decimal:
+        """Applied credit notes converted to ZMW at the invoice's OWN frozen rate."""
+        return pricing.to_zmw(invoice.credit_total, invoice.fx_rate)
+
+    @classmethod
+    def _invoice_balance_zmw(cls, invoice) -> Decimal:
+        return _d(invoice.grand_total_zmw) - _d(invoice.amount_paid) - cls._credit_zmw(invoice)
+
     async def _priced_lines(self, tenant_id, line_model, lines: list[PricedLineIn]):
         prices = await self.repo.product_prices([ln.product_id for ln in lines])
         objs, totals_in = [], []
@@ -633,6 +666,7 @@ class SalesService:
                 id=ln.id, product_id=ln.product_id, sku=sku, name=name, description=ln.description,
                 qty=_f(ln.qty), unit_price=_f(ln.unit_price), discount_pct=_f(ln.discount_pct),
                 tax_pct=_f(ln.tax_pct), line_total=_f(ln.line_total),
+                line_total_zmw=_f(getattr(ln, "line_total_zmw", 0)),
             ))
         return out
 
@@ -645,6 +679,7 @@ class SalesService:
             salesperson_id=q.salesperson_id, status=q.status, currency=q.currency,
             valid_until=q.valid_until, notes=q.notes, subtotal=_f(q.subtotal),
             discount_total=_f(q.discount_total), tax_total=_f(q.tax_total), grand_total=_f(q.grand_total),
+            fx_rate=_f(q.fx_rate), grand_total_zmw=_f(q.grand_total_zmw),
             created_at=q.created_at, lines=await self._priced_line_outs(q.lines),
         )
 
@@ -701,9 +736,10 @@ class SalesService:
             customer_name=cust.get(inv.customer_id), branch_id=inv.branch_id, branch_name=br.get(inv.branch_id),
             status=inv.status, currency=inv.currency, invoice_date=inv.invoice_date, due_date=inv.due_date,
             payment_terms=inv.payment_terms, subtotal=_f(inv.subtotal), discount_total=_f(inv.discount_total),
-            tax_total=_f(inv.tax_total), grand_total=_f(inv.grand_total), amount_paid=_f(inv.amount_paid),
-            credit_total=_f(inv.credit_total),
-            balance=_f(inv.grand_total) - _f(inv.amount_paid) - _f(inv.credit_total), created_at=inv.created_at,
+            tax_total=_f(inv.tax_total), grand_total=_f(inv.grand_total),
+            fx_rate=_f(inv.fx_rate), grand_total_zmw=_f(inv.grand_total_zmw),
+            amount_paid=_f(inv.amount_paid), credit_total=_f(inv.credit_total),
+            balance=_f(self._invoice_balance_zmw(inv)), created_at=inv.created_at,
             lines=await self._priced_line_outs(inv.lines),
         )
 

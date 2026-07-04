@@ -38,6 +38,14 @@ async def _headers(client, email, password) -> dict[str, str]:
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def _restore_rate(client):
+    """Sales tests assume the tenant rate is 1 (ZMW == USD); reset it after each test."""
+    yield
+    h = await _headers(client, ADMIN_EMAIL, ADMIN_PASSWORD)
+    await client.put("/api/v1/tenant/settings", headers=h, json={"fx_rate": "1"})
+
+
 async def _role_id(client, admin_h, name) -> str:
     r = await client.get("/api/v1/users/roles", headers=admin_h)
     role = next((x for x in r.json() if x["name"] == name), None)

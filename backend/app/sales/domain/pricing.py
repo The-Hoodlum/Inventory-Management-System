@@ -10,6 +10,7 @@ from __future__ import annotations
 from decimal import ROUND_HALF_UP, Decimal
 
 _Q = Decimal("0.0001")
+_ZMW_Q = Decimal("0.01")   # billing currency (ZMW) is quoted to 2 dp (ngwee)
 _HUNDRED = Decimal("100")
 
 
@@ -19,6 +20,13 @@ def _d(v) -> Decimal:
 
 def _round(v: Decimal) -> Decimal:
     return v.quantize(_Q, rounding=ROUND_HALF_UP)
+
+
+def to_zmw(usd_amount, fx_rate) -> Decimal:
+    """Convert a USD amount to the billing currency at ``fx_rate``, rounded to 2 dp
+    (ROUND_HALF_UP). Rounding each line the same way and summing line ZMW into the
+    document total keeps ``sum(lines) == total`` by construction."""
+    return (_d(usd_amount) * _d(fx_rate)).quantize(_ZMW_Q, rounding=ROUND_HALF_UP)
 
 
 def line_amounts(qty, unit_price, discount_pct=0, tax_pct=0) -> dict[str, Decimal]:
