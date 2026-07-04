@@ -34,6 +34,7 @@ from app.imports.schemas import (
     RowErrorOut,
     TargetOut,
     UploadResponse,
+    ValueResolutionOut,
 )
 from app.repositories.audit_repo import AuditRepository
 
@@ -345,23 +346,36 @@ class ImportService:
         return rows
 
     async def _atomic_preview(self, job, imp, parsed, mapping, options) -> PreviewResponse:
-        plan = await imp.plan(self.repo.session, tenant_id=job.tenant_id, rows=self._atomic_rows(parsed, mapping, imp))
+        plan = await imp.plan(
+            self.repo.session, tenant_id=job.tenant_id,
+            rows=self._atomic_rows(parsed, mapping, imp), options=options,
+        )
         sample_errors = [
             RowErrorOut(row_number=r.row_number, sku=r.key, errors=r.errors)
             for r in plan.rows if not r.ok
         ][:MAX_PREVIEW_ROWS]
         new_refs = [NewReferenceOut(kind=n.kind, value=n.value, count=n.count) for n in plan.new_refs]
+        resolutions = [
+            ValueResolutionOut(
+                kind=v.kind, value=v.value, count=v.count, suggestion=v.suggestion,
+                suggested_consignment=v.suggested_consignment, can_create=v.can_create,
+            )
+            for v in plan.value_options
+        ]
         can_commit = not plan.has_errors and (options.create_missing_references or not plan.new_refs)
         return PreviewResponse(
             total_rows=len(parsed.rows), valid_count=plan.ok_count, invalid_count=plan.error_count,
             sample_errors=sample_errors, headers=parsed.headers,
             sample_rows=self._sample(parsed.headers, parsed.rows),
-            atomic=True, new_references=new_refs, can_commit=can_commit,
+            atomic=True, new_references=new_refs, value_resolutions=resolutions, can_commit=can_commit,
         )
 
     async def _atomic_confirm(self, *, job, imp, mapping, options, tenant_id, user_id) -> ImportJobOut:
         parsed = self._reparse(job, await self._require_file(job.id))
-        plan = await imp.plan(self.repo.session, tenant_id=tenant_id, rows=self._atomic_rows(parsed, mapping, imp))
+        plan = await imp.plan(
+            self.repo.session, tenant_id=tenant_id,
+            rows=self._atomic_rows(parsed, mapping, imp), options=options,
+        )
         job.options = options.model_dump()
         job.started_at = _now()
         job.processed_rows = len(plan.rows)

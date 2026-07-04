@@ -25,8 +25,8 @@ ADMIN_PASSWORD = os.getenv("DEMO_ADMIN_PASSWORD", "ChangeMe123!")
 KEY = "motorcycle_units"
 HEADERS = [
     "Chassis Number", "Engine Number", "Model", "Make / Brand", "Variant", "Colour",
-    "Date Received", "Branch", "Status", "Customer Name", "Customer Phone", "Date Sold",
-    "Registered", "Registration Number", "Unit Price", "Charged Price", "Supplier",
+    "Date Received", "Branch", "Status", "Hold Reason", "Customer Name", "Customer Phone",
+    "Date Sold", "Registered", "Registration Number", "Unit Price", "Charged Price", "Supplier",
 ]
 
 
@@ -69,6 +69,7 @@ def _csv(rows: list[dict]) -> bytes:
         "Chassis Number": "chassis", "Engine Number": "engine", "Model": "model",
         "Make / Brand": "make", "Variant": "variant", "Colour": "colour",
         "Date Received": "date_received", "Branch": "branch", "Status": "status",
+        "Hold Reason": "hold_reason",
         "Customer Name": "customer", "Customer Phone": "phone", "Date Sold": "date_sold",
         "Registered": "registered", "Registration Number": "reg_no", "Unit Price": "unit_price",
         "Charged Price": "charged", "Supplier": "supplier",
@@ -86,18 +87,35 @@ async def _upload(client, admin_h, data: bytes) -> tuple[str, dict]:
     return j["job_id"], j["detected_mapping"]
 
 
-async def _preview(client, admin_h, job_id, mapping, *, create_missing=False):
+def _opts(create_missing, value_maps):
+    return {"create_missing_references": create_missing, "value_maps": value_maps or []}
+
+
+async def _preview(client, admin_h, job_id, mapping, *, create_missing=False, value_maps=None):
     r = await client.post(f"/api/v1/imports/{KEY}/{job_id}/preview", headers=admin_h,
-                          json={"mapping": mapping, "options": {"create_missing_references": create_missing}})
+                          json={"mapping": mapping, "options": _opts(create_missing, value_maps)})
     assert r.status_code == 200, r.text
     return r.json()
 
 
-async def _confirm(client, admin_h, job_id, mapping, *, create_missing=False):
+async def _confirm(client, admin_h, job_id, mapping, *, create_missing=False, value_maps=None):
     r = await client.post(f"/api/v1/imports/{KEY}/{job_id}/confirm", headers=admin_h,
-                          json={"mapping": mapping, "options": {"create_missing_references": create_missing}})
+                          json={"mapping": mapping, "options": _opts(create_missing, value_maps)})
     assert r.status_code == 200, r.text
     return r.json()
+
+
+async def _create_model(client, admin_h, name: str) -> None:
+    r = await client.post("/api/v1/motorcycles/models", headers=admin_h,
+                          json={"brand": _rand("Brand"), "name": name})
+    assert r.status_code == 201, r.text
+
+
+async def _unit_by_chassis(client, admin_h, chassis: str) -> dict:
+    r = await client.get("/api/v1/motorcycles/units", headers=admin_h, params={"search": chassis})
+    items = r.json()["items"]
+    assert len(items) == 1, f"expected exactly one unit for {chassis}"
+    return (await client.get(f"/api/v1/motorcycles/units/{items[0]['id']}", headers=admin_h)).json()
 
 
 # ------------------------------------------------------------------------- #
@@ -202,3 +220,79 @@ async def test_clean_batch_confirms_refs_commits_and_dedupes_against_db(client):
     p2 = await _preview(client, admin_h, job_id2, mapping2, create_missing=True)
     assert p2["invalid_count"] == 1
     assert any("already exists" in e for row in p2["sample_errors"] for e in row["errors"])
+
+
+# ------------------------------------------------------------------------- #
+# Value mapping: a typo status/model maps to an existing value (not created),
+# a batch suffix splits into the consignment, and reserved-without-customer
+# still errors. After mapping, a previously-erroring file imports clean.
+# ------------------------------------------------------------------------- #
+async def test_reserved_without_customer_still_errors(client):
+    admin_h = await _headers(client, ADMIN_EMAIL, ADMIN_PASSWORD)
+    branch = await _a_branch(client, admin_h)
+    base = _rand("HLX")
+    await _create_model(client, admin_h, base)
+    job_id, mapping = await _upload(client, admin_h, _csv([
+        {"chassis": _rand("CHRES"), "model": base, "branch": branch, "status": "reserved"},  # no customer
+    ]))
+    p = await _preview(client, admin_h, job_id, mapping)
+    assert p["invalid_count"] == 1
+    assert any("Customer" in e for row in p["sample_errors"] for e in row["errors"])
+
+
+async def test_mapping_resolves_status_and_model_splits_consignment_imports_clean(client):
+    admin_h = await _headers(client, ADMIN_EMAIL, ADMIN_PASSWORD)
+    branch = await _a_branch(client, admin_h)
+    base = _rand("HLX")                    # e.g. "HLX-1a2b3c4d" (an existing model)
+    typo = base.replace("-", "")            # same model, written without the dash
+    await _create_model(client, admin_h, base)
+
+    ch_status, ch_typo = _rand("CHST"), _rand("CHTY")
+    ch_cons, ch_hold = _rand("CHCO"), _rand("CHHO")
+    rows = [
+        {"chassis": ch_status, "model": base, "branch": branch, "status": "Assembly Required"},
+        {"chassis": ch_typo, "model": typo, "branch": branch, "status": "assembled"},
+        {"chassis": ch_cons, "model": f"{base} CONGO", "branch": branch, "status": "assembled"},
+        {"chassis": ch_hold, "model": base, "branch": branch, "status": "on_hold",
+         "hold_reason": "Cracked frame"},
+    ]
+    job_id, mapping = await _upload(client, admin_h, _csv(rows))
+
+    # Preview WITHOUT mappings: the unknown status errors; the values surface for mapping,
+    # incl. a split suggestion for "<base> CONGO".
+    p = await _preview(client, admin_h, job_id, mapping)
+    assert p["invalid_count"] >= 1
+    res = {(v["kind"], v["value"]) for v in p["value_resolutions"]}
+    assert ("status", "Assembly Required") in res
+    split = next(v for v in p["value_resolutions"] if v["kind"] == "model" and v["value"] == f"{base} CONGO")
+    assert split["suggestion"] == base and split["suggested_consignment"] == "CONGO"
+
+    # Provide the mappings: status -> unassembled, typo -> existing base, "<base> CONGO"
+    # -> base + consignment CONGO. All map to EXISTING values, so nothing is created.
+    value_maps = [
+        {"kind": "status", "value": "Assembly Required", "action": "map", "target": "unassembled"},
+        {"kind": "model", "value": typo, "action": "map", "target": base},
+        {"kind": "model", "value": f"{base} CONGO", "action": "map", "target": base, "consignment": "CONGO"},
+    ]
+    p2 = await _preview(client, admin_h, job_id, mapping, value_maps=value_maps)
+    assert p2["invalid_count"] == 0 and p2["can_commit"] is True
+    assert p2["new_references"] == []  # mapped to existing — nothing new to create
+
+    job = await _confirm(client, admin_h, job_id, mapping, value_maps=value_maps)
+    assert job["status"] == "completed" and job["imported_rows"] == 4
+
+    # The status typo mapped to unassembled.
+    assert (await _unit_by_chassis(client, admin_h, ch_status))["status"] == "unassembled"
+    # The model typo linked to the existing base model (not a duplicate).
+    assert (await _unit_by_chassis(client, admin_h, ch_typo))["model_name"] == base
+    # The batch token split into the consignment; the model is the base.
+    u_cons = await _unit_by_chassis(client, admin_h, ch_cons)
+    assert u_cons["model_name"] == base and u_cons["container_ref"] == "CONGO"
+    # on_hold imported with its reason and no customer.
+    u_hold = await _unit_by_chassis(client, admin_h, ch_hold)
+    assert u_hold["status"] == "on_hold" and u_hold["hold_reason"] == "Cracked frame"
+    assert u_hold["customer_name"] is None
+
+    # Exactly one model named `base` exists — the typo/split did NOT duplicate it.
+    r = await client.get("/api/v1/motorcycles/models", headers=admin_h, params={"search": base})
+    assert sum(1 for m in r.json()["items"] if m["name"] == base) == 1
