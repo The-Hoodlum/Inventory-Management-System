@@ -8,6 +8,8 @@ import BranchesPage from "@/pages/BranchesPage";
 import ContainerPage from "@/pages/ContainerPage";
 import CustomersPage from "@/pages/CustomersPage";
 import DashboardPage from "@/pages/DashboardPage";
+import DeliveryNoteDetailPage from "@/pages/DeliveryNoteDetailPage";
+import DeliveryNotesPage from "@/pages/DeliveryNotesPage";
 import ForecastPage from "@/pages/ForecastPage";
 import ImportHistoryPage from "@/pages/ImportHistoryPage";
 import ImportInventoryPage from "@/pages/ImportInventoryPage";
@@ -79,6 +81,8 @@ export default function App() {
         <Route path="/suppliers" element={<SuppliersPage />} />
         <Route path="/branches" element={<BranchesPage />} />
         <Route path="/warehouses" element={<WarehousesPage />} />
+        <Route path="/delivery-notes" element={<DeliveryNotesPage />} />
+        <Route path="/delivery-notes/:id" element={<DeliveryNoteDetailPage />} />
         <Route path="/users" element={<UsersPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>

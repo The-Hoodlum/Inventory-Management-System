@@ -19,6 +19,7 @@ from app.assistant.api import router as assistant_router
 from app.container.api import router as container_router
 from app.dashboard.api import router as dashboard_router
 from app.demand.api import router as demand_router
+from app.dispatch.api import router as dispatch_router
 from app.forecast.api import router as forecast_router
 from app.imports.api import router as imports_router
 from app.integrations.whatsapp.router import router as whatsapp_router
@@ -59,4 +60,5 @@ api_router.include_router(tenant.router, prefix="/tenant", tags=["tenant"])
 api_router.include_router(order_requests_router, prefix="/order-requests", tags=["order-requests"])
 api_router.include_router(sales_router, prefix="/sales", tags=["sales"])
 api_router.include_router(motorcycles_router, prefix="/motorcycles", tags=["motorcycles"])
+api_router.include_router(dispatch_router, prefix="/delivery-notes", tags=["delivery-notes"])
 api_router.include_router(search_router, prefix="/search", tags=["search"])
