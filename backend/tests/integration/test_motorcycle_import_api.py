@@ -194,7 +194,7 @@ async def test_clean_batch_confirms_refs_commits_and_dedupes_against_db(client):
     assert u["status"] == "sold" and u["imported_historical"] is True
     assert u["sold_ref"] is None and u["sold_invoice_number"] is None  # no fabricated sales doc
     assert u["customer_name"] and u["price_charged"] == 5200 and u["date_sold"] == "2026-02-10"
-    assert u["registration_status"] == "registered"
+    assert u["registered"] is True and u["inspected"] is True  # sold historical -> inspected
     assert u["model_name"] == model  # the new model was created + linked (this row carried no colour)
 
     # Re-importing a chassis that now exists is rejected (DB uniqueness).

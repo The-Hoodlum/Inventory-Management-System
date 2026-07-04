@@ -95,10 +95,13 @@ CREATE TABLE IF NOT EXISTS motorcycle_units (
     branch_id                     UUID REFERENCES branches(id)                     ON DELETE SET NULL,
     warehouse_id                  UUID REFERENCES warehouses(id)                   ON DELETE SET NULL,
     internal_location             TEXT,
-    -- Lifecycle state (state machine lives in app/motorcycles/domain/lifecycle.py).
-    status                        TEXT NOT NULL DEFAULT 'received',
-    inspection_status             TEXT NOT NULL DEFAULT 'pending',
-    assembly_status               TEXT NOT NULL DEFAULT 'not_required',
+    -- Sale status: ONE of five (unassembled/assembled/reserved/on_hold/sold). State
+    -- machine lives in app/motorcycles/domain/lifecycle.py. Assembly is folded in here.
+    status                        TEXT NOT NULL DEFAULT 'unassembled',
+    -- Inspection is an INDEPENDENT fact (not part of the sale status).
+    inspected                     BOOLEAN NOT NULL DEFAULT false,
+    -- Reason a unit is on hold; required while status='on_hold', kept for history after.
+    hold_reason                   TEXT,
     -- Serialized hold + sale linkage into the EXISTING sales documents.
     reserved_ref                  UUID REFERENCES sales_orders(id)                 ON DELETE SET NULL,
     sold_ref                      UUID REFERENCES invoices(id)                     ON DELETE SET NULL,
@@ -106,8 +109,8 @@ CREATE TABLE IF NOT EXISTS motorcycle_units (
     selling_price                 NUMERIC(18,4),
     price_charged                 NUMERIC(18,4),
     payment_status                TEXT NOT NULL DEFAULT 'unpaid',
-    -- Registration + warranty (fields future modules attach to; no logic here yet).
-    registration_status           TEXT NOT NULL DEFAULT 'unregistered',
+    -- Registration is INDEPENDENT of the sale status: a yes/no + the plate when yes.
+    registered                    BOOLEAN NOT NULL DEFAULT false,
     registration_number           TEXT,
     registration_papers_received  BOOLEAN NOT NULL DEFAULT false,
     warranty_start                DATE,

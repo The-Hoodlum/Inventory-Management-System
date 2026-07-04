@@ -91,16 +91,16 @@ async def test_metrics_rolls_up_by_lifecycle_bucket(client):
     before = (await client.get("/api/v1/motorcycles/metrics", headers=admin_h)).json()
 
     model = await _model(client, admin_h)
-    u1 = await _unit(client, admin_h, model_id=model["id"])   # received -> in_stock
-    await _unit(client, admin_h, model_id=model["id"])        # received -> in_stock
-    # Move one unit forward but still in-stock (inspected).
+    u1 = await _unit(client, admin_h, model_id=model["id"])   # assembled -> in_stock
+    await _unit(client, admin_h, model_id=model["id"], assembly_required=True)  # unassembled -> in_stock
+    # Put one on hold — still physically in stock (not sold / reserved).
     await client.post(f"/api/v1/motorcycles/units/{u1['id']}/transition", headers=admin_h,
-                      json={"to_status": "inspected"})
+                      json={"to_status": "on_hold", "hold_reason": "Awaiting parts"})
 
     after = (await client.get("/api/v1/motorcycles/metrics", headers=admin_h)).json()
     assert after["total"] == before["total"] + 2
-    assert after["in_stock"] == before["in_stock"] + 2
-    assert "received" in after["by_status"] or "inspected" in after["by_status"]
+    assert after["in_stock"] == before["in_stock"] + 2  # assembled + unassembled + on_hold all count
+    assert set(after["by_status"]).issubset({"unassembled", "assembled", "reserved", "on_hold", "sold"})
 
 
 # ------------------------------------------------------------------------- #
@@ -183,39 +183,47 @@ async def test_full_unit_lifecycle_with_sales_linkage(client):
     model = await _model(client, admin_h)
     colour = await _colour(client, admin_h)
     unit = await _unit(client, admin_h, model_id=model["id"], colour_id=colour["id"],
-                       selling_price=2500)
-    assert unit["status"] == "received" and unit["assembly_status"] == "not_required"
+                       selling_price=2500, assembly_required=True)
+    # Assembly-required units start 'unassembled'; inspection/registration default off.
+    assert unit["status"] == "unassembled" and unit["inspected"] is False and unit["registered"] is False
     uid = unit["id"]
 
-    # Skip assembly: received -> inspected. Side effect: inspection passes.
+    # Assemble it. Now sellable.
     r = await client.post(f"/api/v1/motorcycles/units/{uid}/transition", headers=admin_h,
-                          json={"to_status": "inspected"})
+                          json={"to_status": "assembled"})
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["status"] == "inspected" and body["inspection_status"] == "passed"
-    assert set(body["allowed_next"]) == {"reserved", "sold", "cancelled"}
+    assert body["status"] == "assembled"
+    assert set(body["allowed_next"]) == {"reserved", "on_hold", "sold"}
 
-    # Illegal transition is rejected.
+    # Illegal transition is rejected (assembled cannot go back to unassembled).
     r = await client.post(f"/api/v1/motorcycles/units/{uid}/transition", headers=admin_h,
-                          json={"to_status": "delivered"})
+                          json={"to_status": "unassembled"})
     assert r.status_code == 400, r.text
     # Cannot jump to reserved/sold via the generic transition (must use the actions).
     r = await client.post(f"/api/v1/motorcycles/units/{uid}/transition", headers=admin_h,
                           json={"to_status": "sold"})
     assert r.status_code == 400, r.text
 
+    # Inspection is an INDEPENDENT fact — set it without touching the sale status.
+    r = await client.patch(f"/api/v1/motorcycles/units/{uid}", headers=admin_h,
+                           json={"inspected": True})
+    assert r.status_code == 200 and r.json()["inspected"] is True and r.json()["status"] == "assembled"
+
     sale = await _invoice_for_sale(client, admin_h)
     customer_id, invoice = sale["customer_id"], sale["invoice"]
 
-    # Reserve this specific chassis for the customer (serialized hold), then release it.
+    # Reserve this specific chassis for the customer (serialized hold), then let it fall
+    # through (reserved -> assembled releases the hold + clears the customer).
     r = await client.post(f"/api/v1/motorcycles/units/{uid}/reserve", headers=admin_h,
                           json={"customer_id": customer_id, "sales_order_id": sale["so_id"]})
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "reserved" and r.json()["customer_id"] == customer_id
     assert r.json()["reserved_so_number"]  # linked to the sales order
     r = await client.post(f"/api/v1/motorcycles/units/{uid}/transition", headers=admin_h,
-                          json={"to_status": "inspected"})
-    assert r.status_code == 200 and r.json()["reserved_ref"] is None  # hold released
+                          json={"to_status": "assembled"})
+    assert r.status_code == 200
+    assert r.json()["reserved_ref"] is None and r.json()["customer_id"] is None  # released
 
     # Sell against the real invoice: unit links to the sales document.
     r = await client.post(f"/api/v1/motorcycles/units/{uid}/sell", headers=admin_h,
@@ -227,24 +235,64 @@ async def test_full_unit_lifecycle_with_sales_linkage(client):
     assert sold["sold_invoice_number"] == invoice["invoice_number"]
     assert sold["price_charged"] == 2450 and sold["customer_id"] == invoice["customer_id"]
 
-    # Finish the lifecycle: sold -> delivered -> registered -> warranty_active.
-    for target in ("delivered", "registered", "warranty_active"):
-        r = await client.post(f"/api/v1/motorcycles/units/{uid}/transition", headers=admin_h,
-                              json={"to_status": target})
-        assert r.status_code == 200, r.text
-    final = r.json()
-    assert final["status"] == "warranty_active"
-    assert final["registration_status"] == "registered"
-    assert final["warranty_start"] is not None
+    # 'sold' is terminal — no further sale-status transitions.
+    assert sold["allowed_next"] == []
+
+    # Registration is INDEPENDENT — a sold unit can still be registered afterwards.
+    r = await client.patch(f"/api/v1/motorcycles/units/{uid}", headers=admin_h,
+                           json={"registered": True, "registration_number": "ABZ 1234"})
+    assert r.status_code == 200, r.text
+    reg = r.json()
+    assert reg["registered"] is True and reg["registration_number"] == "ABZ 1234"
+    assert reg["status"] == "sold"  # unchanged by registration
 
     # The immutable event ledger recorded every step (created + each transition/action).
-    events = final["events"]
-    types = [e["event_type"] for e in events]
+    types = [e["event_type"] for e in reg["events"]]
     assert types[0] == "created"
     assert "reserved" in types and "sold" in types
-    assert types.count("status_change") >= 4  # inspected, release, delivered, registered, warranty
-    # Terminal state: no further transitions offered.
-    assert final["allowed_next"] == []
+
+
+async def test_reserved_requires_a_customer(client):
+    admin_h = await _headers(client, ADMIN_EMAIL, ADMIN_PASSWORD)
+    model = await _model(client, admin_h)
+    unit = await _unit(client, admin_h, model_id=model["id"])  # assembled
+    # No customer_id at all -> schema rejects it (422).
+    r = await client.post(f"/api/v1/motorcycles/units/{unit['id']}/reserve", headers=admin_h, json={})
+    assert r.status_code == 422, r.text
+    # A non-existent customer -> 404.
+    r = await client.post(f"/api/v1/motorcycles/units/{unit['id']}/reserve", headers=admin_h,
+                          json={"customer_id": str(uuid.uuid4())})
+    assert r.status_code == 404, r.text
+
+
+async def test_on_hold_requires_reason_no_customer_and_cannot_sell(client):
+    admin_h = await _headers(client, ADMIN_EMAIL, ADMIN_PASSWORD)
+    model = await _model(client, admin_h)
+    unit = await _unit(client, admin_h, model_id=model["id"])  # assembled
+    uid = unit["id"]
+
+    # on_hold without a reason is rejected.
+    r = await client.post(f"/api/v1/motorcycles/units/{uid}/transition", headers=admin_h,
+                          json={"to_status": "on_hold"})
+    assert r.status_code == 400, r.text
+
+    # With a reason it holds — carries the reason, no customer, and no reservation.
+    r = await client.post(f"/api/v1/motorcycles/units/{uid}/transition", headers=admin_h,
+                          json={"to_status": "on_hold", "hold_reason": "Cracked mudguard"})
+    assert r.status_code == 200, r.text
+    held = r.json()
+    assert held["status"] == "on_hold" and held["hold_reason"] == "Cracked mudguard"
+    assert held["customer_id"] is None
+    # A held unit cannot be sold (must clear the hold first).
+    sale = await _invoice_for_sale(client, admin_h)
+    r = await client.post(f"/api/v1/motorcycles/units/{uid}/sell", headers=admin_h,
+                          json={"invoice_id": sale["invoice"]["id"]})
+    assert r.status_code == 400, r.text
+    # Clear the hold back to assembled; the reason is kept for history.
+    r = await client.post(f"/api/v1/motorcycles/units/{uid}/transition", headers=admin_h,
+                          json={"to_status": "assembled"})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "assembled" and r.json()["hold_reason"] == "Cracked mudguard"
 
 
 # ------------------------------------------------------------------------- #

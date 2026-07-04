@@ -1,69 +1,65 @@
-"""Serialized-unit lifecycle state machine (pure, unit-tested).
+"""Serialized-unit SALE-STATUS state machine (pure, unit-tested).
 
-ONE explicit transition graph for a serialized asset's whole life. Legal
-transitions only; illegal ones are rejected, and (in the service) every accepted
-transition is written to the unit's immutable event ledger with from/to/user —
-exactly like the sales-document state machines.
+The unit tracks four INDEPENDENT facts that move on their own — this module owns only
+the first (the sale status); the others are plain columns on the unit:
 
-    received -> assembly_required -> in_assembly -> assembled -> inspected ->
-    reserved -> sold -> delivered -> registered -> warranty_active
+  * SALE STATUS   — one of exactly five values (assembly is folded in here).
+  * inspected     — boolean, set independently of the sale status.
+  * registered    — boolean (+ registration number), independent of the sale status.
+  * hold reason    — text, required while on hold, kept for history once cleared.
 
-Defined skips are explicit in the graph: a unit needing no assembly goes
-``received -> inspected`` directly, and ``inspected`` can go straight to ``sold``
-without ``reserved``. ``reserved -> inspected`` releases a hold. ``cancelled`` is a
-terminal state reachable only before a unit is sold (once sold, a sales document
-exists and the sale is the system of record).
+The five sale statuses and their legal transitions:
+
+    unassembled --> assembled              (assembly done)
+    unassembled --> on_hold                (pulled aside before assembly)
+    assembled   --> reserved | sold | on_hold
+    reserved    --> sold | assembled       (fulfilled, or the reservation fell through)
+    on_hold     --> assembled | unassembled   (cleared -> back to sellable)
+
+Rules the service layer enforces on top of this graph:
+  * `reserved` REQUIRES a customer; `sold` carries the buyer via the sales invoice.
+  * `on_hold` REQUIRES a hold reason and NO customer, and can NOT go straight to `sold`
+    (it must return to `assembled` first — enforced by the graph + SELLABLE_FROM).
+
+Selling still goes through the existing sales documents (reserve links a sales order,
+sell links an invoice); there is no parallel sales path here.
 """
 from __future__ import annotations
 
-# --- statuses ---
-RECEIVED = "received"
-ASSEMBLY_REQUIRED = "assembly_required"
-IN_ASSEMBLY = "in_assembly"
+# --- the five sale statuses ---
+UNASSEMBLED = "unassembled"
 ASSEMBLED = "assembled"
-INSPECTED = "inspected"
 RESERVED = "reserved"
+ON_HOLD = "on_hold"
 SOLD = "sold"
-DELIVERED = "delivered"
-REGISTERED = "registered"
-WARRANTY_ACTIVE = "warranty_active"
-CANCELLED = "cancelled"
 
-STATUSES = frozenset({
-    RECEIVED, ASSEMBLY_REQUIRED, IN_ASSEMBLY, ASSEMBLED, INSPECTED,
-    RESERVED, SOLD, DELIVERED, REGISTERED, WARRANTY_ACTIVE, CANCELLED,
-})
+STATUSES = frozenset({UNASSEMBLED, ASSEMBLED, RESERVED, ON_HOLD, SOLD})
 
-# The allowed transition graph — the single source of truth for legality.
+# The legal transition graph — the single source of truth for legality.
 _ALLOWED: dict[str, set[str]] = {
-    RECEIVED: {ASSEMBLY_REQUIRED, INSPECTED, CANCELLED},   # -> inspected: no assembly needed
-    ASSEMBLY_REQUIRED: {IN_ASSEMBLY, CANCELLED},
-    IN_ASSEMBLY: {ASSEMBLED, CANCELLED},
-    ASSEMBLED: {INSPECTED, CANCELLED},
-    INSPECTED: {RESERVED, SOLD, CANCELLED},                # -> sold: skip the reservation
-    RESERVED: {SOLD, INSPECTED, CANCELLED},                # -> inspected: release the hold
-    SOLD: {DELIVERED},
-    DELIVERED: {REGISTERED},
-    REGISTERED: {WARRANTY_ACTIVE},
-    WARRANTY_ACTIVE: set(),
-    CANCELLED: set(),
+    UNASSEMBLED: {ASSEMBLED, ON_HOLD},
+    ASSEMBLED: {RESERVED, SOLD, ON_HOLD},
+    RESERVED: {SOLD, ASSEMBLED},          # fulfilled, or the reservation fell through
+    ON_HOLD: {ASSEMBLED, UNASSEMBLED},    # cleared -> back to sellable
+    SOLD: set(),
 }
 
-TERMINAL = frozenset({WARRANTY_ACTIVE, CANCELLED})
+TERMINAL = frozenset({SOLD})
 
-# Reporting roll-ups (dashboard KPI): physical stock on hand not yet sold, vs post-sale.
-IN_STOCK = frozenset({RECEIVED, ASSEMBLY_REQUIRED, IN_ASSEMBLY, ASSEMBLED, INSPECTED})
-POST_SALE = frozenset({SOLD, DELIVERED, REGISTERED, WARRANTY_ACTIVE})
+# Reporting roll-ups. IN_STOCK = physically on hand, not sold and not reserved; POST_SALE
+# is what the unified sales log counts as a motorcycle sale (see reports.sales_log).
+IN_STOCK = frozenset({UNASSEMBLED, ASSEMBLED, ON_HOLD})
+POST_SALE = frozenset({SOLD})
 
-# States a serialized hold / sale may originate from (used by the service + UI).
-RESERVABLE_FROM = frozenset({INSPECTED, RESERVED})
-SELLABLE_FROM = frozenset({INSPECTED, RESERVED})
+# Where a serialized hold / sale may ORIGINATE from (the service checks these).
+RESERVABLE_FROM = frozenset({ASSEMBLED})
+SELLABLE_FROM = frozenset({ASSEMBLED, RESERVED})
+
+# The only statuses that carry a customer; every other status must have none.
+CUSTOMER_STATUSES = frozenset({RESERVED, SOLD})
 
 # Stable ordering for quick-action UIs / APIs.
-_ORDER = [
-    ASSEMBLY_REQUIRED, IN_ASSEMBLY, ASSEMBLED, INSPECTED, RESERVED, SOLD,
-    DELIVERED, REGISTERED, WARRANTY_ACTIVE, CANCELLED,
-]
+_ORDER = [UNASSEMBLED, ASSEMBLED, RESERVED, ON_HOLD, SOLD]
 
 
 def can_transition(old: str, new: str) -> bool:
@@ -71,6 +67,6 @@ def can_transition(old: str, new: str) -> bool:
 
 
 def allowed_next(status: str) -> list[str]:
-    """The legal next statuses from ``status`` (stable order), for quick-action UIs."""
+    """Legal next statuses from ``status`` (stable order), for quick-action UIs."""
     nxt = _ALLOWED.get(status, set())
     return [s for s in _ORDER if s in nxt]

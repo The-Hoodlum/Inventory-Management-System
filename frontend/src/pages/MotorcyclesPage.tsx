@@ -38,6 +38,8 @@ export default function MotorcyclesPage() {
   const [model, setModel] = useState("");
   const [colour, setColour] = useState("");
   const [sold, setSold] = useState("");
+  const [inspected, setInspected] = useState("");
+  const [registered, setRegistered] = useState("");
   const [showNew, setShowNew] = useState(false);
 
   const { list: branches } = useBranches();
@@ -45,7 +47,7 @@ export default function MotorcyclesPage() {
   const colours = useMotoColours();
 
   const { data, isFetching } = useQuery({
-    queryKey: ["moto", "units", table.search, status, branch, model, colour, sold, table.page],
+    queryKey: ["moto", "units", table.search, status, branch, model, colour, sold, inspected, registered, table.page],
     queryFn: () =>
       motorcyclesApi.listUnits({
         search: table.search || undefined,
@@ -54,6 +56,8 @@ export default function MotorcyclesPage() {
         model_id: model || undefined,
         colour_id: colour || undefined,
         sold: sold === "" ? undefined : sold === "sold",
+        inspected: inspected === "" ? undefined : inspected === "yes",
+        registered: registered === "" ? undefined : registered === "yes",
         page: table.page,
         page_size: PAGE_SIZE,
       }),
@@ -133,6 +137,16 @@ export default function MotorcyclesPage() {
                 <option value="">Sold & unsold</option>
                 <option value="unsold">Unsold</option>
                 <option value="sold">Sold</option>
+              </select>
+              <select className={SELECT} value={inspected} onChange={(e) => { setInspected(e.target.value); setTable((t) => ({ ...t, page: 1 })); }}>
+                <option value="">Any inspection</option>
+                <option value="yes">Inspected</option>
+                <option value="no">Not inspected</option>
+              </select>
+              <select className={SELECT} value={registered} onChange={(e) => { setRegistered(e.target.value); setTable((t) => ({ ...t, page: 1 })); }}>
+                <option value="">Any registration</option>
+                <option value="yes">Registered</option>
+                <option value="no">Not registered</option>
               </select>
             </div>
           ),

@@ -307,15 +307,15 @@ erDiagram
         uuid branch_id FK
         uuid warehouse_id FK
         text status
-        text inspection_status
-        text assembly_status
+        boolean inspected
+        text hold_reason
         uuid reserved_ref FK
         uuid sold_ref FK
         uuid customer_id FK
         numeric selling_price
         numeric price_charged
         text payment_status
-        text registration_status
+        boolean registered
         text registration_number
         boolean registration_papers_received
         date warranty_start

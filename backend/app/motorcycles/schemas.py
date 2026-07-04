@@ -135,6 +135,9 @@ class UnitUpdate(BaseModel):
     warehouse_id: uuid.UUID | None = None
     internal_location: str | None = None
     selling_price: float | None = Field(default=None, ge=0)
+    # Inspection + registration are INDEPENDENT facts, edited here (not via the lifecycle).
+    inspected: bool | None = None
+    registered: bool | None = None
     registration_number: str | None = None
     registration_papers_received: bool | None = None
     warranty_start: dt.date | None = None
@@ -146,6 +149,8 @@ class UnitUpdate(BaseModel):
 class TransitionIn(BaseModel):
     to_status: str
     note: str | None = None
+    # Required when moving to on_hold (why it's held).
+    hold_reason: str | None = Field(default=None, max_length=500)
 
 
 class ReserveIn(BaseModel):
@@ -216,9 +221,9 @@ class UnitOut(BaseModel):
     warehouse_id: uuid.UUID | None = None
     warehouse_name: str | None = None
     internal_location: str | None = None
-    status: str
-    inspection_status: str
-    assembly_status: str
+    status: str                      # one of the five sale statuses
+    inspected: bool                  # independent of status
+    hold_reason: str | None = None   # set while on_hold; kept for history after
     reserved_ref: uuid.UUID | None = None
     reserved_so_number: str | None = None
     sold_ref: uuid.UUID | None = None
@@ -228,7 +233,7 @@ class UnitOut(BaseModel):
     selling_price: float | None = None
     price_charged: float | None = None
     payment_status: str
-    registration_status: str
+    registered: bool                 # independent of status
     registration_number: str | None = None
     registration_papers_received: bool
     warranty_start: dt.date | None = None

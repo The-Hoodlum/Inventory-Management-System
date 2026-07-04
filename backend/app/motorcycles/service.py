@@ -15,7 +15,6 @@ Two responsibilities:
 """
 from __future__ import annotations
 
-import datetime as dt
 import uuid
 from decimal import Decimal
 
@@ -189,6 +188,9 @@ class MotorcycleService:
             raise NotFoundError("Colour not found")
         if payload.supplier_id and not await self.repo.supplier_exists(payload.supplier_id):
             raise NotFoundError("Supplier not found")
+        # A unit that still needs assembly starts 'unassembled'; otherwise it is ready
+        # ('assembled'). Inspection + registration are independent facts (default no).
+        status = L.UNASSEMBLED if payload.assembly_required else L.ASSEMBLED
         unit = MotorcycleUnit(
             tenant_id=tenant_id, chassis_number=payload.chassis_number.strip(),
             engine_number=payload.engine_number, model_id=payload.model_id,
@@ -196,16 +198,15 @@ class MotorcycleService:
             supplier_id=payload.supplier_id, container_ref=payload.container_ref,
             date_received=payload.date_received, branch_id=payload.branch_id,
             warehouse_id=payload.warehouse_id, internal_location=payload.internal_location,
-            status=L.RECEIVED, assembly_status="required" if payload.assembly_required else "not_required",
-            selling_price=_d(payload.selling_price),
+            status=status, selling_price=_d(payload.selling_price),
         )
         self.repo.session.add(unit)
         await self.repo.session.flush()
         await self.repo.add_event(
             tenant_id=tenant_id, unit_id=unit.id, event_type="created",
-            to_status=L.RECEIVED, user_id=user_id, note=payload.notes or "Unit received",
+            to_status=status, user_id=user_id, note=payload.notes or "Unit received",
         )
-        await self._audit(tenant_id, user_id, "unit", unit.id, "created", old=None, new=L.RECEIVED)
+        await self._audit(tenant_id, user_id, "unit", unit.id, "created", old=None, new=status)
         return await self._unit_out(unit, with_events=True)
 
     async def update_unit(self, *, tenant_id, user_id, unit_id, payload: UnitUpdate) -> UnitOut:
@@ -229,6 +230,10 @@ class MotorcycleService:
         return await self._unit_out(unit, with_events=True)
 
     async def transition(self, *, tenant_id, user_id, unit_id, payload: TransitionIn) -> UnitOut:
+        """Move the SALE STATUS between the five values. Reserving / selling set the
+        customer + sales-document linkage and go through their own actions, so they are
+        rejected here. Putting a unit on hold needs a reason and drops any customer;
+        clearing a reservation (reserved -> assembled) releases the hold."""
         unit = await self._require(await self.repo.get_unit(unit_id, lock=True), "Motorcycle unit")
         new = payload.to_status
         if new in (L.RESERVED, L.SOLD):
@@ -240,33 +245,28 @@ class MotorcycleService:
         if not L.can_transition(unit.status, new):
             raise BusinessRuleError(f"Cannot move unit from {unit.status} to {new}.")
         old = unit.status
+        note = payload.note
+        if new == L.ON_HOLD:
+            reason = (payload.hold_reason or "").strip()
+            if not reason:
+                raise BusinessRuleError("A hold reason is required to put a unit on hold.")
+            unit.hold_reason = reason           # on_hold carries no customer
+            unit.customer_id = None
+            unit.reserved_ref = None
+            note = note or reason
+        elif old == L.RESERVED and new == L.ASSEMBLED:
+            # The reservation fell through — release the serialized hold.
+            unit.customer_id = None
+            unit.reserved_ref = None
         unit.status = new
-        self._apply_side_effects(unit, new)
         unit.version += 1
         await self.repo.session.flush()
         await self.repo.add_event(
             tenant_id=tenant_id, unit_id=unit.id, event_type="status_change",
-            from_status=old, to_status=new, user_id=user_id, note=payload.note,
+            from_status=old, to_status=new, user_id=user_id, note=note,
         )
         await self._audit(tenant_id, user_id, "unit", unit.id, f"status:{new}", old=old, new=new)
         return await self._unit_out(unit, with_events=True)
-
-    @staticmethod
-    def _apply_side_effects(unit: MotorcycleUnit, new: str) -> None:
-        """Keep the convenience fields consistent with the lifecycle position."""
-        if new == L.INSPECTED:
-            if unit.inspection_status == "pending":
-                unit.inspection_status = "passed"
-            # reserved -> inspected releases the serialized hold
-            unit.reserved_ref = None
-        elif new == L.IN_ASSEMBLY:
-            unit.assembly_status = "in_progress"
-        elif new == L.ASSEMBLED:
-            unit.assembly_status = "assembled"
-        elif new == L.REGISTERED:
-            unit.registration_status = "registered"
-        elif new == L.WARRANTY_ACTIVE and unit.warranty_start is None:
-            unit.warranty_start = dt.date.today()
 
     async def reserve(self, *, tenant_id, user_id, unit_id, payload: ReserveIn) -> UnitOut:
         """Hold ONE specific chassis for one customer — a serialized hold mirroring the
@@ -326,8 +326,8 @@ class MotorcycleService:
         Reuses the transfer CONCEPT on the unit's own ledger — the fungible stock-transfer
         engine cannot represent a single serialized unit."""
         unit = await self._require(await self.repo.get_unit(unit_id, lock=True), "Motorcycle unit")
-        if unit.status == L.CANCELLED:
-            raise BusinessRuleError("A cancelled unit cannot be transferred.")
+        if unit.status == L.SOLD:
+            raise BusinessRuleError("A sold unit cannot be transferred.")
         if payload.to_branch_id == unit.branch_id and payload.to_warehouse_id == unit.warehouse_id:
             raise BusinessRuleError("Destination is the same as the current location.")
         from_branch = unit.branch_id
@@ -360,7 +360,7 @@ class MotorcycleService:
             in_stock=in_stock,
             reserved=counts.get(L.RESERVED, 0),
             sold=sold,
-            cancelled=counts.get(L.CANCELLED, 0),
+            cancelled=0,  # no 'cancelled' status in the five-status model
             by_status=counts,
         )
 
@@ -453,12 +453,12 @@ class MotorcycleService:
             branch_id=unit.branch_id, branch_name=branches.get(unit.branch_id),
             warehouse_id=unit.warehouse_id, warehouse_name=warehouses.get(unit.warehouse_id),
             internal_location=unit.internal_location, status=unit.status,
-            inspection_status=unit.inspection_status, assembly_status=unit.assembly_status,
+            inspected=unit.inspected, hold_reason=unit.hold_reason,
             reserved_ref=unit.reserved_ref, reserved_so_number=await self.repo.so_number(unit.reserved_ref),
             sold_ref=unit.sold_ref, sold_invoice_number=await self.repo.invoice_number(unit.sold_ref),
             customer_id=unit.customer_id, customer_name=customers.get(unit.customer_id),
             selling_price=_f(unit.selling_price), price_charged=_f(unit.price_charged),
-            payment_status=unit.payment_status, registration_status=unit.registration_status,
+            payment_status=unit.payment_status, registered=unit.registered,
             registration_number=unit.registration_number,
             registration_papers_received=unit.registration_papers_received,
             warranty_start=unit.warranty_start, warranty_end=unit.warranty_end,
