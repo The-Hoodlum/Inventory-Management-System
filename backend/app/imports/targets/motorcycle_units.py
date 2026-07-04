@@ -30,7 +30,14 @@ from typing import Any
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.imports.domain.atomic import AtomicImporter, ImportPlan, NewRef, RowInput, RowPlan
+from app.imports.domain.atomic import (
+    AtomicImporter,
+    ImportPlan,
+    NewRef,
+    RowInput,
+    RowPlan,
+    ValueOption,
+)
 from app.imports.domain.fields import (
     LEVEL_ADVANCED,
     LEVEL_BASIC,
@@ -57,18 +64,58 @@ _ALL = (LEVEL_BASIC, LEVEL_STANDARD, LEVEL_ADVANCED)
 _STD = (LEVEL_STANDARD, LEVEL_ADVANCED)
 _ADV = (LEVEL_ADVANCED,)
 
-# Spreadsheet status -> sale status (one of the five). Sold/reserved rows are also
-# recorded as inspected historicals in commit(). PR 2 adds an interactive mapping so
-# arbitrary sheet wordings (e.g. "Assembly Required", a defect note -> on_hold) resolve.
-_STATUS_MAP: dict[str, str] = {
-    "unassembled": "unassembled",
-    "assembled": "assembled",
-    "reserved": "reserved",
-    "sold": "sold",
-}
+# The five sale statuses (app/motorcycles/domain/lifecycle.py). A sheet value that is not
+# one of these must be MAPPED to one in the preview (a status cannot be created).
+FIVE_STATUSES: tuple[str, ...] = ("unassembled", "assembled", "reserved", "on_hold", "sold")
 
 _IMPORT_FALLBACK_BRAND = "Unspecified"
 _DATE_FORMATS = ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d", "%m/%d/%Y")
+
+
+def _norm(s: Any) -> str:
+    return ("" if s is None else str(s)).strip().lower()
+
+
+def guess_status(raw: Any) -> str | None:
+    """Best-guess mapping for an unrecognised sheet status (a SUGGESTION the user
+    confirms). Returns one of the five, or None when nothing fits."""
+    n = _norm(raw)
+    if not n:
+        return None
+    checks = (
+        ("unassembled", ("unassembl", "not assembled", "assembly required", "to assemble",
+                          "kd", "knock", "crate", "ckd")),
+        ("on_hold", ("hold", "defect", "damage", "faulty", "repair", "quarantin", "reject")),
+        ("reserved", ("reserv", "booked", "deposit", "pre-order", "preorder")),
+        ("sold", ("sold", "delivered", "invoiced", "dispatched")),
+        ("assembled", ("assembled", "ready", "available", "in stock", "pdi", "showroom")),
+    )
+    for status, needles in checks:
+        if any(needle in n for needle in needles):
+            return status
+    return None
+
+
+def split_consignment(raw: Any, existing_lower: set[str]) -> tuple[str, str] | None:
+    """If ``raw`` reads as '<base model> <batch token(s)>' where the base matches an
+    EXISTING model name, return (base, token). Prefers the longest matching base, so
+    "HLX 150 CONGO" -> ("HLX 150", "CONGO") and "RTR 180 NEW KENYA" -> ("RTR 180", ...)."""
+    parts = ("" if raw is None else str(raw)).split()
+    for i in range(len(parts) - 1, 0, -1):
+        base = " ".join(parts[:i]).strip()
+        if base.lower() in existing_lower:
+            token = " ".join(parts[i:]).strip()
+            if token:
+                return base, token
+    return None
+
+
+def build_value_maps(options: Any) -> dict[str, dict[str, Any]]:
+    """Index the user's value-map decisions by kind -> normalised sheet value."""
+    out: dict[str, dict[str, Any]] = {"status": {}, "model": {}, "colour": {}}
+    for vm in (getattr(options, "value_maps", None) or []):
+        out.setdefault(vm.kind, {})[_norm(vm.value)] = vm
+    return out
 
 
 def _parse_date(raw: Any) -> tuple[dt.date | None, bool]:
@@ -102,9 +149,15 @@ _FIELDS: tuple[FieldSpec, ...] = (
               aliases=("date received", "received", "received date", "arrival date", "grn date")),
     FieldSpec("branch", "Branch", required=True, kind=FieldKind.STRING, levels=_ALL,
               aliases=("branch", "branch name", "location", "showroom", "outlet")),
-    FieldSpec("status", "Status", required=True, kind=FieldKind.ENUM, levels=_ALL,
-              choices=tuple(_STATUS_MAP.keys()),
+    # STRING (not ENUM) so arbitrary sheet wordings reach plan() and can be MAPPED to one
+    # of the five in the preview. ``choices`` is kept as a template hint only.
+    FieldSpec("status", "Status", required=True, kind=FieldKind.STRING, levels=_ALL,
+              choices=FIVE_STATUSES,
               aliases=("status", "state", "stage", "condition")),
+    FieldSpec("inspected", "Inspected", kind=FieldKind.BOOL, levels=_ADV,
+              aliases=("inspected", "inspection", "pdi done", "qc passed")),
+    FieldSpec("hold_reason", "Hold Reason", kind=FieldKind.STRING, levels=_ADV,
+              aliases=("hold reason", "on hold reason", "defect reason", "reason")),
     FieldSpec("assembled_date", "Assembled Date", kind=FieldKind.STRING, levels=_ADV,
               aliases=("assembled date", "assembly date", "pdi date")),
     FieldSpec("customer_name", "Customer Name", kind=FieldKind.STRING, levels=_STD,
@@ -152,6 +205,11 @@ class _Repo:
         return await self.s.scalar(
             select(MotorcycleColour).where(func.lower(MotorcycleColour.name) == name.strip().lower()).limit(1)
         )
+
+    async def all_model_names_lower(self) -> set[str]:
+        """Lowercased names of every existing model — for the consignment-split suggestion."""
+        rows = await self.s.execute(select(func.lower(MotorcycleModel.name)))
+        return {r[0] for r in rows.all()}
 
     async def find_supplier(self, name: str) -> Supplier | None:
         return await self.s.scalar(
@@ -252,14 +310,20 @@ class MotorcycleUnitImporter(AtomicImporter):
         return _FIELDS
 
     # ------------------------------- plan ------------------------------ #
-    async def plan(self, session: Any, *, tenant_id: Any, rows: list[RowInput]) -> ImportPlan:
+    async def plan(
+        self, session: Any, *, tenant_id: Any, rows: list[RowInput], options: Any = None
+    ) -> ImportPlan:
         repo = _Repo(session, tenant_id)
         plan = ImportPlan()
         seen_chassis: dict[str, int] = {}
         seen_engine: dict[str, int] = {}
         new_refs: dict[tuple[str, str], NewRef] = {}
+        # (kind, norm) -> [display, count, suggestion, suggested_consignment, can_create]
+        value_opts: dict[tuple[str, str], list] = {}
 
-        # per-plan resolution caches (name.lower -> found?/display)
+        vmaps = build_value_maps(options)
+        existing_models_lower = await repo.all_model_names_lower()
+
         model_cache: dict[str, MotorcycleModel | None] = {}
         colour_cache: dict[str, MotorcycleColour | None] = {}
         supplier_cache: dict[str, Supplier | None] = {}
@@ -273,10 +337,28 @@ class MotorcycleUnitImporter(AtomicImporter):
             else:
                 new_refs[k] = NewRef(kind, display.strip(), 1)
 
+        def add_value_option(kind, display, *, suggestion=None, suggested_consignment=None, can_create=False) -> None:
+            k = (kind, _norm(display))
+            if k in value_opts:
+                value_opts[k][1] += 1
+            else:
+                value_opts[k] = [str(display).strip(), 1, suggestion, suggested_consignment, can_create]
+
+        async def find_model_cached(name: str) -> MotorcycleModel | None:
+            nl = _norm(name)
+            if nl not in model_cache:
+                model_cache[nl] = await repo.find_model(name)
+            return model_cache[nl]
+
+        async def find_colour_cached(name: str) -> MotorcycleColour | None:
+            nl = _norm(name)
+            if nl not in colour_cache:
+                colour_cache[nl] = await repo.find_colour(name)
+            return colour_cache[nl]
+
         for row_number, clean, field_errors in rows:
             errors = list(field_errors)
             chassis = clean.get("chassis_number")
-            status = clean.get("status")
 
             # chassis uniqueness (in-file + DB)
             if chassis:
@@ -307,7 +389,23 @@ class MotorcycleUnitImporter(AtomicImporter):
                 if not ok:
                     errors.append(f"{lbl} is not a valid date")
 
-            # consistency
+            # ---- STATUS: exact-match one of the five, or a value-map, else needs mapping.
+            raw_status = clean.get("status") or ""
+            sn = _norm(raw_status)
+            status: str | None = None
+            if sn in FIVE_STATUSES:
+                status = sn
+            else:
+                vm = vmaps["status"].get(sn)
+                if vm and vm.action == "map" and _norm(vm.target) in FIVE_STATUSES:
+                    status = _norm(vm.target)
+                elif raw_status:
+                    add_value_option("status", raw_status, suggestion=guess_status(raw_status))
+                    errors.append(
+                        f"Status '{raw_status}' is not one of the five statuses — map it in the preview"
+                    )
+
+            # ---- consistency (uses the RESOLVED status) ----
             customer_name = clean.get("customer_name")
             charged = clean.get("charged_price")
             if status == "sold":
@@ -318,7 +416,9 @@ class MotorcycleUnitImporter(AtomicImporter):
             elif status == "reserved":
                 if not customer_name:
                     errors.append("A reserved unit needs a Customer Name")
-            if status not in ("sold",) and (clean.get("date_sold") or charged is not None):
+            elif status == "on_hold" and customer_name:
+                errors.append("An on-hold unit must not have a Customer Name")
+            if status != "sold" and (clean.get("date_sold") or charged is not None):
                 errors.append("Only a sold unit may carry Date Sold / Charged Price")
 
             # branch (never auto-created)
@@ -332,33 +432,72 @@ class MotorcycleUnitImporter(AtomicImporter):
                 if branch_obj is None:
                     errors.append(f"Branch '{branch}' not found - create the branch first")
 
-            # references (collect new; not errors)
-            model = clean.get("model")
-            model_obj = None
-            if model:
-                ml = model.strip().lower()
-                if ml not in model_cache:
-                    model_cache[ml] = await repo.find_model(model)
-                model_obj = model_cache[ml]
-                if model_obj is None:
-                    add_new_ref("model", model)
-            variant = clean.get("variant")
-            if variant and model:
-                if model_obj is not None:
-                    if await repo.find_variant(model_obj.id, variant) is None:
-                        add_new_ref("variant", f"{model} / {variant}")
+            # ---- MODEL: value-map (map to existing + optional consignment split, or
+            # create), else exact match, else default to create-new + surface a split hint.
+            raw_model = clean.get("model")
+            model_name: str | None = None
+            consignment: str | None = None
+            if raw_model:
+                vm = vmaps["model"].get(_norm(raw_model))
+                if vm and vm.action == "map":
+                    tgt = (vm.target or "").strip()
+                    obj = await find_model_cached(tgt) if tgt else None
+                    if obj is None:
+                        errors.append(f"Mapped model '{tgt}' was not found")
+                    else:
+                        model_name = obj.name
+                    consignment = (vm.consignment or "").strip() or None
+                elif vm and vm.action == "new":
+                    model_name = raw_model.strip()
+                    add_new_ref("model", model_name)
                 else:
-                    add_new_ref("variant", f"{model} / {variant}")
-            colour = clean.get("colour")
-            if colour:
-                cl2 = colour.strip().lower()
-                if cl2 not in colour_cache:
-                    colour_cache[cl2] = await repo.find_colour(colour)
-                if colour_cache[cl2] is None:
-                    add_new_ref("colour", colour)
+                    obj = await find_model_cached(raw_model)
+                    if obj is not None:
+                        model_name = obj.name
+                    else:
+                        model_name = raw_model.strip()
+                        add_new_ref("model", model_name)
+                        sp = split_consignment(raw_model, existing_models_lower)
+                        add_value_option(
+                            "model", raw_model,
+                            suggestion=(sp[0] if sp else None),
+                            suggested_consignment=(sp[1] if sp else None), can_create=True,
+                        )
+
+            # variant (scoped to the resolved model)
+            variant = clean.get("variant")
+            if variant and model_name:
+                model_obj = await find_model_cached(model_name)
+                if model_obj is None or await repo.find_variant(model_obj.id, variant) is None:
+                    add_new_ref("variant", f"{model_name} / {variant}")
+
+            # ---- COLOUR: value-map (map/create), else exact match, else create-new. ----
+            raw_colour = clean.get("colour")
+            colour_name: str | None = None
+            if raw_colour:
+                vm = vmaps["colour"].get(_norm(raw_colour))
+                if vm and vm.action == "map":
+                    tgt = (vm.target or "").strip()
+                    obj = await find_colour_cached(tgt) if tgt else None
+                    if obj is None:
+                        errors.append(f"Mapped colour '{tgt}' was not found")
+                    else:
+                        colour_name = obj.name
+                elif vm and vm.action == "new":
+                    colour_name = raw_colour.strip()
+                    add_new_ref("colour", colour_name)
+                else:
+                    obj = await find_colour_cached(raw_colour)
+                    if obj is not None:
+                        colour_name = obj.name
+                    else:
+                        colour_name = raw_colour.strip()
+                        add_new_ref("colour", colour_name)
+                        add_value_option("colour", raw_colour, can_create=True)
+
             supplier = clean.get("supplier")
             if supplier:
-                sl = supplier.strip().lower()
+                sl = _norm(supplier)
                 if sl not in supplier_cache:
                     supplier_cache[sl] = await repo.find_supplier(supplier)
                 if supplier_cache[sl] is None:
@@ -368,17 +507,25 @@ class MotorcycleUnitImporter(AtomicImporter):
             if not errors:
                 data = {
                     "chassis_number": chassis, "engine_number": engine,
-                    "model": model, "make": clean.get("make"), "variant": variant, "colour": colour,
+                    "model": model_name, "make": clean.get("make"), "variant": variant,
+                    "colour": colour_name, "consignment": consignment,
                     "supplier": supplier, "branch_id": branch_obj.id if branch_obj else None,
                     "status": status, "date_received": d_recv, "assembled_date": d_asm, "date_sold": d_sold,
                     "customer_name": customer_name, "customer_phone": clean.get("customer_phone"),
                     "customer_address": clean.get("customer_address"),
                     "registration": clean.get("registration"), "registration_number": clean.get("registration_number"),
                     "unit_price": clean.get("unit_price"), "charged_price": charged,
+                    "hold_reason": (clean.get("hold_reason") or None) if status == "on_hold" else None,
+                    "inspected": clean.get("inspected"),
                 }
             plan.rows.append(RowPlan(row_number=row_number, key=chassis, errors=errors, data=data))
 
         plan.new_refs = list(new_refs.values())
+        plan.value_options = [
+            ValueOption(kind=k[0], value=v[0], count=v[1], suggestion=v[2],
+                        suggested_consignment=v[3], can_create=v[4])
+            for k, v in value_opts.items()
+        ]
         return plan
 
     # ------------------------------ commit ----------------------------- #
@@ -400,10 +547,11 @@ class MotorcycleUnitImporter(AtomicImporter):
             if d.get("supplier"):
                 supplier_id = (await repo.get_or_create_supplier(d["supplier"])).id
 
-            status = _STATUS_MAP[d["status"]]
-            historical = d["status"] in ("sold", "reserved")
-            # Sold/reserved historicals have been through the shop floor -> inspected.
-            inspected = status in ("reserved", "sold")
+            status = d["status"]  # already one of the five (resolved in plan)
+            historical = status in ("sold", "reserved")
+            # Inspection is its own fact: use the sheet value if given, else default sold/
+            # reserved historicals (through the shop floor) to inspected.
+            inspected = d["inspected"] if d.get("inspected") is not None else (status in ("reserved", "sold"))
 
             customer_id = None
             if d.get("customer_name"):
@@ -416,11 +564,14 @@ class MotorcycleUnitImporter(AtomicImporter):
                 tenant_id=tenant_id, chassis_number=d["chassis_number"].strip(),
                 engine_number=d.get("engine_number"), model_id=model.id, variant_id=variant_id,
                 colour_id=colour_id, supplier_id=supplier_id, branch_id=d.get("branch_id"),
+                # A batch token split off the model name lands in the consignment field.
+                container_ref=d.get("consignment"),
                 date_received=d.get("date_received"), assembled_date=d.get("assembled_date"),
-                status=status, inspected=inspected, customer_id=customer_id,
+                status=status, inspected=inspected, hold_reason=d.get("hold_reason"),
+                customer_id=customer_id,
                 selling_price=_dec(d.get("unit_price")),
-                price_charged=_dec(d.get("charged_price")) if d["status"] == "sold" else None,
-                date_sold=d.get("date_sold") if d["status"] == "sold" else None,
+                price_charged=_dec(d.get("charged_price")) if status == "sold" else None,
+                date_sold=d.get("date_sold") if status == "sold" else None,
                 registered=registered,
                 registration_number=d.get("registration_number"),
                 registration_papers_received=registered,

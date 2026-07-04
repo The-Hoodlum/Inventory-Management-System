@@ -4,7 +4,12 @@ from __future__ import annotations
 import datetime as dt
 
 from app.imports.domain.registry import get_importer
-from app.imports.targets.motorcycle_units import _STATUS_MAP, _parse_date
+from app.imports.targets.motorcycle_units import (
+    FIVE_STATUSES,
+    _parse_date,
+    guess_status,
+    split_consignment,
+)
 
 
 def test_parse_date_accepts_common_formats():
@@ -20,11 +25,27 @@ def test_parse_date_rejects_garbage():
     assert value is None and ok is False
 
 
-def test_status_map_covers_the_sheet_vocabulary():
-    assert set(_STATUS_MAP) == {"unassembled", "assembled", "reserved", "sold"}
-    # Maps each sheet value to one of the five sale statuses.
-    assert _STATUS_MAP["unassembled"] == "unassembled"
-    assert _STATUS_MAP["sold"] == "sold"
+def test_five_statuses_are_the_lifecycle_values():
+    assert set(FIVE_STATUSES) == {"unassembled", "assembled", "reserved", "on_hold", "sold"}
+
+
+def test_guess_status_suggests_a_mapping_for_typo_wordings():
+    assert guess_status("Assembly Required") == "unassembled"
+    assert guess_status("On Hold - cracked mudguard") == "on_hold"
+    assert guess_status("Reserved (deposit paid)") == "reserved"
+    assert guess_status("SOLD") == "sold"
+    assert guess_status("Ready for showroom") == "assembled"
+    assert guess_status("") is None
+    assert guess_status("wat") is None
+
+
+def test_split_consignment_peels_a_batch_token_off_a_known_base_model():
+    existing = {"hlx 150", "rtr 180"}
+    assert split_consignment("HLX 150 CONGO", existing) == ("HLX 150", "CONGO")
+    assert split_consignment("RTR 180 KENYA 2026", existing) == ("RTR 180", "KENYA 2026")
+    # An exact model (no trailing token) or an unknown base does not split.
+    assert split_consignment("HLX 150", existing) is None
+    assert split_consignment("APACHE 200 CONGO", existing) is None
 
 
 def test_importer_is_registered_and_atomic():

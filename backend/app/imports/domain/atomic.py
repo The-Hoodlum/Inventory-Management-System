@@ -46,13 +46,28 @@ class RowPlan:
         return not self.errors
 
 
+@dataclass(frozen=True)
+class ValueOption:
+    """A distinct sheet value (status / model / colour) that did not exactly match a
+    system value and needs a map/create decision. ``suggestion`` (+ a model batch
+    ``suggested_consignment``) pre-fills the UI; ``can_create`` is False for statuses."""
+
+    kind: str
+    value: str
+    count: int = 1
+    suggestion: str | None = None
+    suggested_consignment: str | None = None
+    can_create: bool = False
+
+
 @dataclass
 class ImportPlan:
-    """The validated batch: per-row outcomes + the distinct new reference values the
-    batch would create."""
+    """The validated batch: per-row outcomes, the distinct new reference values the batch
+    would create, and the distinct values that still need a map/create decision."""
 
     rows: list[RowPlan] = field(default_factory=list)
     new_refs: list[NewRef] = field(default_factory=list)
+    value_options: list[ValueOption] = field(default_factory=list)
 
     @property
     def ok_count(self) -> int:
@@ -77,14 +92,18 @@ class AtomicImporter(ResourceImporter):
     atomic: bool = True
 
     @abc.abstractmethod
-    async def plan(self, session: Any, *, tenant_id: Any, rows: list[RowInput]) -> ImportPlan:
+    async def plan(
+        self, session: Any, *, tenant_id: Any, rows: list[RowInput], options: Any = None
+    ) -> ImportPlan:
         """Validate the whole batch WITHOUT writing: cross-row + cross-DB uniqueness,
-        consistency, and reference resolution. Return per-row outcomes + the distinct
-        NEW reference values the batch would create. A row that only references a new
-        (yet-to-be-created) value is NOT an error — the new value is surfaced for
-        confirmation and the row commits once it is created; only genuine problems
-        (dupes, unmatched branch, missing required, inconsistent sale fields, bad dates)
-        are row errors."""
+        consistency, and reference resolution. ``options`` carries the user's value-map
+        decisions (see ImportOptions.value_maps). Return per-row outcomes, the distinct
+        NEW reference values the batch would create, and the distinct values still needing
+        a map/create decision. A row that only references a new (yet-to-be-created) value
+        is NOT an error — the new value is surfaced for confirmation and the row commits
+        once it is created; only genuine problems (dupes, unmatched branch, missing
+        required, inconsistent sale fields, bad dates, an unmapped status) are row
+        errors."""
 
     @abc.abstractmethod
     async def commit(

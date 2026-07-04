@@ -1,7 +1,8 @@
 // Motorcycle bulk import — upload a spreadsheet of units, preview (rows ready / rows
-// with errors / new reference values awaiting confirmation), then commit all-or-nothing.
-// Reuses the shared imports API; the motorcycle_units target is atomic, so nothing is
-// half-created and new models/variants/colours/suppliers are only created on confirm.
+// with errors / values needing a map-or-create decision / new reference values), map
+// the unmatched values (status/model/colour, incl. splitting a batch token off a model),
+// then commit all-or-nothing. Reuses the shared imports API; the motorcycle_units target
+// is atomic, so nothing is half-created.
 import { AlertTriangle, CheckCircle2, Download, FileSpreadsheet, Upload } from "lucide-react";
 import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -14,14 +15,22 @@ import {
   DEFAULT_OPTIONS,
   type ImportJob,
   type PreviewResponse,
+  type ValueMap,
+  type ValueResolution,
   importsApi,
 } from "@/lib/imports";
+import { statusLabel, UNIT_STATUSES, useMotoColours, useMotoModels } from "@/lib/motorcycles";
 
 const KEY = "motorcycle_units";
+const NEW = "__new__"; // sentinel select value for "create new"
+
+type Choice = { action: "map" | "new"; target?: string; consignment?: string };
 
 export default function MotorcycleImportPage() {
   const navigate = useNavigate();
   const fileRef = useRef<HTMLInputElement>(null);
+  const models = useMotoModels();
+  const colours = useMotoColours();
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -29,13 +38,52 @@ export default function MotorcycleImportPage() {
   const [filename, setFilename] = useState<string>("");
   const [preview, setPreview] = useState<PreviewResponse | null>(null);
   const [createMissing, setCreateMissing] = useState(false);
+  const [choices, setChoices] = useState<Record<string, Choice>>({});
   const [result, setResult] = useState<ImportJob | null>(null);
 
   const reset = () => {
     setJobId(null); setMapping(null); setPreview(null); setResult(null);
-    setCreateMissing(false); setErr(null); setFilename("");
+    setCreateMissing(false); setChoices({}); setErr(null); setFilename("");
     if (fileRef.current) fileRef.current.value = "";
   };
+
+  const keyOf = (r: { kind: string; value: string }) => `${r.kind}::${r.value}`;
+
+  // Seed a default choice per resolution the first time we see it (from the suggestion).
+  function seed(resolutions: ValueResolution[]) {
+    setChoices((prev) => {
+      const next = { ...prev };
+      for (const r of resolutions) {
+        const k = keyOf(r);
+        if (next[k]) continue;
+        if (r.kind === "status") next[k] = { action: "map", target: r.suggestion ?? "assembled" };
+        else if (r.suggestion) next[k] = { action: "map", target: r.suggestion, consignment: r.suggested_consignment ?? "" };
+        else next[k] = { action: "new" };
+      }
+      return next;
+    });
+  }
+
+  function toValueMaps(): ValueMap[] {
+    return Object.entries(choices).map(([k, v]) => {
+      const i = k.indexOf("::");
+      const kind = k.slice(0, i) as ValueMap["kind"];
+      const value = k.slice(i + 2);
+      return {
+        kind, value, action: v.action,
+        target: v.action === "map" ? v.target : undefined,
+        consignment: kind === "model" && v.action === "map" && v.consignment ? v.consignment : undefined,
+      };
+    });
+  }
+
+  async function runPreview(jid: string, map: ColumnMapping, create: boolean) {
+    const p = await importsApi.preview(KEY, jid, map, {
+      ...DEFAULT_OPTIONS, create_missing_references: create, value_maps: toValueMaps(),
+    });
+    setPreview(p);
+    seed(p.value_resolutions ?? []);
+  }
 
   async function onFile(file: File) {
     reset();
@@ -47,12 +95,22 @@ export default function MotorcycleImportPage() {
       setJobId(up.job_id);
       setMapping(up.detected_mapping);
       setBusy("Validating…");
-      const p = await importsApi.preview(KEY, up.job_id, up.detected_mapping, {
-        ...DEFAULT_OPTIONS, create_missing_references: false,
-      });
-      setPreview(p);
+      await runPreview(up.job_id, up.detected_mapping, false);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "Upload failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function recheck(create = createMissing) {
+    if (!jobId || !mapping) return;
+    setBusy("Re-checking…");
+    setErr(null);
+    try {
+      await runPreview(jobId, mapping, create);
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Re-check failed.");
     } finally {
       setBusy(null);
     }
@@ -64,7 +122,7 @@ export default function MotorcycleImportPage() {
     setErr(null);
     try {
       const job = await importsApi.confirm(KEY, jobId, mapping, {
-        ...DEFAULT_OPTIONS, create_missing_references: createMissing,
+        ...DEFAULT_OPTIONS, create_missing_references: createMissing, value_maps: toValueMaps(),
       });
       setResult(job);
     } catch (e) {
@@ -75,8 +133,12 @@ export default function MotorcycleImportPage() {
   }
 
   const newRefs = preview?.new_references ?? [];
+  const resolutions = preview?.value_resolutions ?? [];
   const hasErrors = (preview?.invalid_count ?? 0) > 0;
   const committable = !!preview && !hasErrors && (newRefs.length === 0 || createMissing);
+
+  const setChoice = (k: string, patch: Partial<Choice>) =>
+    setChoices((c) => ({ ...c, [k]: { ...c[k], ...patch } }));
 
   return (
     <div>
@@ -135,13 +197,76 @@ export default function MotorcycleImportPage() {
             </p>
           )}
 
+          {/* Value mapping — map unmatched status/model/colour values to existing ones */}
+          {resolutions.length > 0 && (
+            <div className="mt-4 rounded-lg border border-line bg-canvas p-3">
+              <div className="text-sm font-medium text-content">
+                {resolutions.length} value{resolutions.length === 1 ? "" : "s"} need a decision
+              </div>
+              <p className="mt-0.5 text-xs text-muted">
+                Map each sheet value to an existing one (or create it). A model can shed a batch token into the unit’s consignment (e.g. “HLX 150 CONGO” → model “HLX 150” + consignment “CONGO”).
+              </p>
+              <div className="mt-3 space-y-2">
+                {resolutions.map((r) => {
+                  const k = keyOf(r);
+                  const ch = choices[k] ?? { action: "new" as const };
+                  return (
+                    <div key={k} className="flex flex-wrap items-center gap-2 text-sm">
+                      <span className="rounded-pill border border-line bg-surface px-2 py-0.5 text-xs text-content-subtle">{r.kind}</span>
+                      <span className="font-mono text-[13px] text-content">{r.value}</span>
+                      {r.count > 1 && <span className="text-xs text-content-subtle">×{r.count}</span>}
+                      <span className="text-content-subtle">→</span>
+                      {r.kind === "status" ? (
+                        <select
+                          className={SELECT}
+                          value={ch.target ?? "assembled"}
+                          onChange={(e) => setChoice(k, { action: "map", target: e.target.value })}
+                        >
+                          {UNIT_STATUSES.map((s) => <option key={s} value={s}>{statusLabel(s)}</option>)}
+                        </select>
+                      ) : (
+                        <>
+                          <select
+                            className={SELECT}
+                            value={ch.action === "new" ? NEW : (ch.target ?? NEW)}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              if (v === NEW) setChoice(k, { action: "new", target: undefined });
+                              else setChoice(k, { action: "map", target: v });
+                            }}
+                          >
+                            {(r.kind === "model" ? (models.data?.items ?? []) : (colours.data?.items ?? [])).map((o) => (
+                              <option key={o.id} value={o.name}>{o.name}</option>
+                            ))}
+                            {r.can_create && <option value={NEW}>➕ Create “{r.value}”</option>}
+                          </select>
+                          {r.kind === "model" && ch.action === "map" && (
+                            <input
+                              className={`${SELECT} w-36`}
+                              placeholder="Consignment (optional)"
+                              value={ch.consignment ?? ""}
+                              onChange={(e) => setChoice(k, { consignment: e.target.value })}
+                            />
+                          )}
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <Button variant="secondary" className="mt-3" disabled={!!busy} onClick={() => void recheck()}>
+                Apply mappings &amp; re-check
+              </Button>
+            </div>
+          )}
+
           {newRefs.length > 0 && (
             <div className="mt-4 rounded-lg border border-line bg-canvas p-3">
               <div className="text-sm font-medium text-content">
-                {newRefs.length} new reference value{newRefs.length === 1 ? "" : "s"} not yet in the system
+                {newRefs.length} new reference value{newRefs.length === 1 ? "" : "s"} would be created
               </div>
               <p className="mt-0.5 text-xs text-muted">
-                These are created only if you confirm — check for typos before enabling.
+                These are created only if you confirm — check for typos, or map them above instead.
               </p>
               <ul className="mt-2 flex flex-wrap gap-1.5">
                 {newRefs.map((n) => (
@@ -152,7 +277,7 @@ export default function MotorcycleImportPage() {
                 ))}
               </ul>
               <label className="mt-3 flex items-center gap-2 text-sm text-content">
-                <input type="checkbox" checked={createMissing} onChange={(e) => setCreateMissing(e.target.checked)} />
+                <input type="checkbox" checked={createMissing} onChange={(e) => { setCreateMissing(e.target.checked); void recheck(e.target.checked); }} />
                 Create these {newRefs.length} new reference value{newRefs.length === 1 ? "" : "s"} on import
               </label>
             </div>
@@ -161,7 +286,7 @@ export default function MotorcycleImportPage() {
           {hasErrors && (
             <div className="mt-4">
               <div className="mb-2 flex items-center gap-2 text-sm font-medium text-red-700">
-                <AlertTriangle className="h-4 w-4" /> Fix these rows and re-upload — nothing imports while any row has an error.
+                <AlertTriangle className="h-4 w-4" /> Resolve these rows — nothing imports while any row has an error. Mapping the values above clears “needs mapping” errors.
               </div>
               <div className="max-h-64 overflow-auto rounded-lg border border-line">
                 <table className="w-full text-sm">
@@ -241,6 +366,9 @@ export default function MotorcycleImportPage() {
     </div>
   );
 }
+
+const SELECT =
+  "rounded-lg border border-line bg-surface px-2 py-1 text-sm text-content focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500";
 
 function Stat({ label, value, tone = "default" }: {
   label: string; value: number; tone?: "default" | "positive" | "danger";

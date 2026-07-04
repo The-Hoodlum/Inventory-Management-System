@@ -19,6 +19,14 @@ export interface ImportTarget {
 
 export type ColumnMapping = Record<string, number | null>;
 
+export interface ValueMap {
+  kind: "status" | "model" | "colour";
+  value: string;                 // the sheet value being resolved
+  action: "map" | "new";
+  target?: string | null;        // canonical value when action === "map"
+  consignment?: string | null;   // model only: batch token -> consignment field
+}
+
 export interface ImportOptions {
   warehouse_mode: "create" | "skip";
   default_warehouse: string;
@@ -26,6 +34,8 @@ export interface ImportOptions {
   // Atomic targets (motorcycle units): authorize creating the new reference values
   // the preview surfaced.
   create_missing_references?: boolean;
+  // Per-value map/create decisions for status / model / colour.
+  value_maps?: ValueMap[];
 }
 
 export const DEFAULT_OPTIONS: ImportOptions = {
@@ -38,6 +48,15 @@ export interface NewReference {
   kind: string; // model | variant | colour | supplier
   value: string;
   count: number;
+}
+
+export interface ValueResolution {
+  kind: "status" | "model" | "colour";
+  value: string;
+  count: number;
+  suggestion: string | null;
+  suggested_consignment: string | null;
+  can_create: boolean;
 }
 
 export interface UploadResponse {
@@ -69,6 +88,7 @@ export interface PreviewResponse {
   // Atomic targets (motorcycle units):
   atomic?: boolean;
   new_references?: NewReference[];
+  value_resolutions?: ValueResolution[];
   can_commit?: boolean;
 }
 

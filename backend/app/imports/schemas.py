@@ -24,6 +24,20 @@ class TargetOut(BaseModel):
     template_levels: list[str] = ["basic", "standard", "advanced"]
 
 
+class ValueMap(BaseModel):
+    """A user decision for one distinct sheet value that didn't exactly match a system
+    value (surfaced by an atomic target's preview as a ``value_resolution``). ``action``
+    is ``map`` (use an existing canonical ``target``) or ``new`` (create it). For a model,
+    ``consignment`` splits a batch token off into the unit's consignment field, e.g.
+    "HLX 150 CONGO" -> target "HLX 150" + consignment "CONGO"."""
+
+    kind: Literal["status", "model", "colour"]
+    value: str = Field(min_length=1, max_length=200)   # the sheet value being resolved
+    action: Literal["map", "new"] = "map"
+    target: str | None = Field(default=None, max_length=200)       # canonical value (action=map)
+    consignment: str | None = Field(default=None, max_length=120)  # model only -> container_ref
+
+
 class ImportOptions(BaseModel):
     """How to handle reference data while importing."""
 
@@ -34,6 +48,9 @@ class ImportOptions(BaseModel):
     # values the preview surfaced. Left False, an unmatched reference blocks its rows
     # (guards typos — nothing is created silently).
     create_missing_references: bool = False
+    # Per-value decisions: map a sheet value to an existing system value (or a split
+    # base + consignment), instead of only exact-match-or-create.
+    value_maps: list[ValueMap] = []
 
 
 class NewReferenceOut(BaseModel):
@@ -43,6 +60,19 @@ class NewReferenceOut(BaseModel):
     kind: str  # model | variant | colour | supplier
     value: str
     count: int = 1
+
+
+class ValueResolutionOut(BaseModel):
+    """A distinct sheet value (status / model / colour) that didn't exactly match a system
+    value and needs a decision — map it to an existing value, or (model/colour) create it.
+    ``suggestion`` (+ ``suggested_consignment`` for a model batch split) pre-fills the UI."""
+
+    kind: str  # status | model | colour
+    value: str
+    count: int = 1
+    suggestion: str | None = None
+    suggested_consignment: str | None = None
+    can_create: bool = False  # model/colour may be created; a status must be mapped
 
 
 class UploadResponse(BaseModel):
@@ -80,6 +110,8 @@ class PreviewResponse(BaseModel):
     # is committable (all rows valid). ``atomic`` marks the confirm-then-commit flow.
     atomic: bool = False
     new_references: list[NewReferenceOut] = []
+    # Distinct sheet values needing a map/create decision (status/model/colour).
+    value_resolutions: list[ValueResolutionOut] = []
     can_commit: bool = True
 
 
