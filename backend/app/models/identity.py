@@ -31,7 +31,9 @@ class Tenant(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     slug: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     base_currency: Mapped[str] = mapped_column(CHAR(3), nullable=False, server_default=text("'USD'"))
-    fx_rate: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False, server_default=text("1"))
+    # USD -> billing-currency (e.g. ZMW) rate; the CURRENT tenant rate, snapshotted onto
+    # each sales document at issue. New tenants default to 20 (migration 0032).
+    fx_rate: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False, server_default=text("20"))
     vat_rate: Mapped[Decimal] = mapped_column(Numeric(6, 4), nullable=False, server_default=text("0"))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     # --- Business-identity settings (migration 0016; industry-agnostic SaaS) ---

@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+from decimal import Decimal
+
 from pydantic import BaseModel, Field
 
 from app.core.feature_flags import merged_flags, sanitize
@@ -15,6 +17,9 @@ class TenantSettingsOut(BaseModel):
     brand_name: str | None = None
     industry: str | None = None
     default_currency: str
+    # Current USD -> billing-currency (e.g. ZMW) rate. Editable; represents the rate in
+    # effect NOW. Snapshotted onto each sales document when issued (never retroactive).
+    fx_rate: Decimal
     country: str | None = None
     timezone: str = "UTC"
     logo_url: str | None = None
@@ -30,6 +35,7 @@ class TenantSettingsOut(BaseModel):
             brand_name=t.brand_name,
             industry=t.industry,
             default_currency=t.base_currency,
+            fx_rate=t.fx_rate,
             country=t.country,
             timezone=t.timezone,
             logo_url=t.logo_url,
@@ -47,6 +53,8 @@ class TenantSettingsUpdate(BaseModel):
     brand_name: str | None = Field(default=None, max_length=200)
     industry: str | None = Field(default=None, max_length=200)
     default_currency: str | None = Field(default=None, min_length=3, max_length=3)
+    # Must be positive; stored at numeric(18,6). Editing affects only FUTURE documents.
+    fx_rate: Decimal | None = Field(default=None, gt=0)
     country: str | None = Field(default=None, max_length=100)
     timezone: str | None = Field(default=None, max_length=64)
     logo_url: str | None = Field(default=None, max_length=1000)

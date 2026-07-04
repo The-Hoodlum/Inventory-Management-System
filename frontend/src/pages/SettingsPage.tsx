@@ -31,6 +31,7 @@ export default function SettingsPage() {
         brand_name: f.brand_name,
         industry: f.industry,
         default_currency: f.default_currency,
+        fx_rate: f.fx_rate,
         country: f.country,
         timezone: f.timezone,
         logo_url: f.logo_url,
@@ -102,6 +103,13 @@ export default function SettingsPage() {
           <Field label="Base currency">
             <input className={`${INPUT} w-full uppercase`} disabled={!canManage} maxLength={3}
               value={form.default_currency} onChange={(e) => set("default_currency", e.target.value.toUpperCase())} />
+          </Field>
+          <Field label="Exchange rate (USD → billing currency)">
+            <input className={`${INPUT} w-full`} type="number" min="0" step="0.000001" disabled={!canManage}
+              value={form.fx_rate} onChange={(e) => set("fx_rate", e.target.value)} />
+            <span className="mt-1 block text-xs text-slate-400">
+              Current rate. Applied to new sales documents when issued; existing documents keep their frozen rate.
+            </span>
           </Field>
           <Field label="Country">
             <input className={`${INPUT} w-full`} disabled={!canManage} value={form.country ?? ""}

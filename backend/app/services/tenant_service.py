@@ -29,6 +29,12 @@ class TenantSettingsService:
         self, tenant_id: uuid.UUID, payload: TenantSettingsUpdate, *, actor_id: uuid.UUID
     ) -> TenantSettingsOut:
         columns = payload.to_columns()
+        # Capture the FX rate before the change so we can record who moved it (old -> new).
+        before = await self.tenants.get(tenant_id)
+        if before is None:
+            raise NotFoundError("Tenant not found")
+        old_fx = before.fx_rate
+
         tenant = await self.tenants.update(tenant_id, columns)
         if tenant is None:
             raise NotFoundError("Tenant not found")
@@ -36,4 +42,12 @@ class TenantSettingsService:
             tenant_id=tenant_id, user_id=actor_id, action="tenant.settings.update",
             entity_type="tenant", entity_id=tenant_id, changes={"fields": sorted(columns)},
         )
+        # Dedicated, queryable audit for exchange-rate moves — the rate is financial and
+        # gets snapshotted onto documents, so its change history matters on its own.
+        if "fx_rate" in columns and tenant.fx_rate != old_fx:
+            await self.audit.add(
+                tenant_id=tenant_id, user_id=actor_id, action="tenant.fx_rate.update",
+                entity_type="tenant", entity_id=tenant_id,
+                changes={"old": str(old_fx), "new": str(tenant.fx_rate)},
+            )
         return TenantSettingsOut.from_tenant(tenant)
