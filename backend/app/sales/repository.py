@@ -28,6 +28,7 @@ from app.models import (
     Quotation,
     Return,
     SalesOrder,
+    Tenant,
     Warehouse,
 )
 from app.repositories.reservation_repo import ReservationRepository
@@ -53,6 +54,12 @@ class SalesRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
         self.reservations = ReservationRepository(session)
+
+    # ------------------------------ fx rate ---------------------------- #
+    async def current_fx_rate(self, tenant_id: uuid.UUID) -> Decimal:
+        """The tenant's CURRENT USD->billing rate, snapshotted onto a document at issue."""
+        rate = await self.session.scalar(select(Tenant.fx_rate).where(Tenant.id == tenant_id))
+        return Decimal(rate) if rate is not None else Decimal("1")
 
     # ------------------------------ numbering -------------------------- #
     async def number(self, tenant_id: uuid.UUID, doc_type: str, prefix: str) -> str:

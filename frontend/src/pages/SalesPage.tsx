@@ -9,7 +9,7 @@ import { Button, Card, Spinner, StatusBadge } from "@/components/ui";
 import { ApiError } from "@/lib/api";
 import { catalogApi } from "@/lib/catalog";
 import { useCustomers } from "@/lib/customers";
-import { formatDate, formatMoney, titleCase } from "@/lib/format";
+import { formatDate, formatMoney, formatNumber, titleCase } from "@/lib/format";
 import { useBranches, useWarehouses } from "@/lib/refdata";
 import type { Invoice } from "@/lib/sales";
 import { PAYMENT_METHODS, type PaymentMethod, RETURN_REASONS, salesApi } from "@/lib/sales";
@@ -72,27 +72,35 @@ export default function SalesPage() {
           )} />
       )}
       {tab === "quotations" && (
-        <DocTable q={quotes} cols={["Quote #", "Customer", "Status", "Total", "Valid until", "Date"]}
+        <DocTable q={quotes} cols={["Quote #", "Customer", "Status", "USD total", "ZMW total", "Valid until", "Date"]}
           row={(o) => (
             <tr key={o.id} className="hover:bg-slate-50">
-              <td className="px-4 py-3 font-mono text-[13px] font-medium">{o.quote_number}</td>
+              <td className="px-4 py-3 font-mono text-[13px] font-medium">
+                {o.quote_number}
+                <div className="text-2xs font-normal text-slate-400">@ {formatNumber(o.fx_rate)}</div>
+              </td>
               <td className="px-4 py-3 text-slate-600">{o.customer_name ?? "—"}</td>
               <td className="px-4 py-3"><StatusBadge status={o.status} /></td>
               <td className="px-4 py-3 text-right font-mono">{formatMoney(o.grand_total)}</td>
+              <td className="px-4 py-3 text-right font-mono font-medium">{formatMoney(o.grand_total_zmw, "ZMW")}</td>
               <td className="px-4 py-3 text-slate-500">{o.valid_until ?? "—"}</td>
               <td className="px-4 py-3 text-slate-500">{formatDate(o.created_at)}</td>
             </tr>
           )} />
       )}
       {tab === "invoices" && (
-        <DocTable q={invoices} cols={["Invoice #", "Customer", "Status", "Total", "Balance", ""]}
+        <DocTable q={invoices} cols={["Invoice #", "Customer", "Status", "USD total", "ZMW payable", "ZMW balance", ""]}
           row={(o) => (
             <tr key={o.id} className="hover:bg-slate-50">
-              <td className="px-4 py-3 font-mono text-[13px] font-medium">{o.invoice_number}</td>
+              <td className="px-4 py-3 font-mono text-[13px] font-medium">
+                {o.invoice_number}
+                <div className="text-2xs font-normal text-slate-400">@ {formatNumber(o.fx_rate)}</div>
+              </td>
               <td className="px-4 py-3 text-slate-600">{o.customer_name ?? "—"}</td>
               <td className="px-4 py-3"><StatusBadge status={o.status} /></td>
               <td className="px-4 py-3 text-right font-mono">{formatMoney(o.grand_total)}</td>
-              <td className="px-4 py-3 text-right font-mono">{formatMoney(o.balance)}</td>
+              <td className="px-4 py-3 text-right font-mono font-medium">{formatMoney(o.grand_total_zmw, "ZMW")}</td>
+              <td className="px-4 py-3 text-right font-mono">{formatMoney(o.balance, "ZMW")}</td>
               <td className="px-4 py-3 text-right">
                 <div className="flex justify-end gap-2">
                   {canReturn && o.lines.length > 0 && (
@@ -345,8 +353,18 @@ function PaymentModal({ invoiceId, onClose }: { invoiceId: string; onClose: () =
     }>
       <div className="space-y-3">
         {err && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
-        <div className="flex justify-between text-sm"><span className="text-slate-500">Outstanding balance</span>
-          <span className="font-mono font-semibold">{formatMoney(balance)}</span></div>
+        {inv && (
+          <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm">
+            <div className="flex justify-between text-slate-500">
+              <span>USD total</span><span className="font-mono">{formatMoney(inv.grand_total)}</span></div>
+            <div className="flex justify-between text-slate-500">
+              <span>Rate</span><span className="font-mono">{formatNumber(inv.fx_rate)}</span></div>
+            <div className="flex justify-between font-medium text-slate-700">
+              <span>ZMW payable</span><span className="font-mono">{formatMoney(inv.grand_total_zmw, "ZMW")}</span></div>
+          </div>
+        )}
+        <div className="flex justify-between text-sm"><span className="text-slate-500">Outstanding balance (ZMW)</span>
+          <span className="font-mono font-semibold">{formatMoney(balance, "ZMW")}</span></div>
         {rows.map((r, i) => (
           <div key={i} className="grid grid-cols-2 gap-2">
             <select value={r.method} onChange={(e) => setRows((rs) => rs.map((x, j) => j === i ? { ...x, method: e.target.value as PaymentMethod } : x))} className={INPUT}>

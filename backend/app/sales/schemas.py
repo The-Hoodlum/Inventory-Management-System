@@ -25,10 +25,11 @@ class PricedLineOut(BaseModel):
     name: str | None = None
     description: str | None = None
     qty: float
-    unit_price: float
+    unit_price: float          # in USD (source of truth)
     discount_pct: float
     tax_pct: float
-    line_total: float
+    line_total: float          # in USD
+    line_total_zmw: float = 0.0  # billed ZMW at the document's frozen rate (0 where N/A)
 
 
 class SalesOrderLineOut(PricedLineOut):
@@ -77,6 +78,8 @@ class QuotationOut(_DocOut):
     salesperson_id: uuid.UUID | None = None
     valid_until: dt.date | None = None
     notes: str | None = None
+    fx_rate: float = 1.0             # USD -> ZMW rate frozen at quote creation
+    grand_total_zmw: float = 0.0     # billed ZMW total at the frozen rate
     lines: list[PricedLineOut] = []
 
 
@@ -170,9 +173,11 @@ class InvoiceOut(_DocOut):
     invoice_date: dt.date
     due_date: dt.date | None = None
     payment_terms: str | None = None
-    amount_paid: float = 0.0
-    credit_total: float = 0.0
-    balance: float = 0.0
+    fx_rate: float = 1.0             # USD -> ZMW rate frozen when the invoice is issued
+    grand_total_zmw: float = 0.0     # the PAYABLE (ZMW); payments settle against this
+    amount_paid: float = 0.0         # in ZMW
+    credit_total: float = 0.0        # applied credit notes (USD)
+    balance: float = 0.0             # in ZMW: grand_total_zmw - amount_paid - credit(ZMW)
     lines: list[PricedLineOut] = []
 
 

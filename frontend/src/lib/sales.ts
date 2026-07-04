@@ -30,10 +30,11 @@ export interface PricedLineOut {
   name: string | null;
   description: string | null;
   qty: number;
-  unit_price: number;
+  unit_price: number;      // USD (source of truth)
   discount_pct: number;
   tax_pct: number;
-  line_total: number;
+  line_total: number;      // USD
+  line_total_zmw: number;  // billed ZMW at the document's frozen rate
 }
 
 export interface SalesOrderLine extends PricedLineOut {
@@ -60,6 +61,8 @@ export interface Quotation extends DocBase {
   quote_number: string;
   valid_until: string | null;
   notes: string | null;
+  fx_rate: number;           // USD -> ZMW rate frozen at quote creation
+  grand_total_zmw: number;   // billed ZMW total
   lines: PricedLineOut[];
 }
 
@@ -98,8 +101,10 @@ export interface Invoice extends DocBase {
   invoice_date: string;
   due_date: string | null;
   payment_terms: string | null;
-  amount_paid: number;
-  balance: number;
+  fx_rate: number;           // USD -> ZMW rate frozen at issue
+  grand_total_zmw: number;   // the PAYABLE (ZMW)
+  amount_paid: number;       // ZMW
+  balance: number;           // ZMW
   lines: PricedLineOut[];
 }
 
