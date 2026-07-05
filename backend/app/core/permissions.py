@@ -64,3 +64,7 @@ class P:
     MOTORCYCLE_READ = "motorcycle.read"      # view units + reference catalog
     MOTORCYCLE_MANAGE = "motorcycle.manage"  # create/update units + drive lifecycle (reserve/sell/transfer)
     MOTORCYCLE_CONFIG = "motorcycle.config"  # manage reference catalog (models/variants/colours)
+    # Delivery / dispatch notes (typed) — paper that documents a stock movement.
+    DELIVERY_NOTE_READ = "delivery_note.read"
+    DELIVERY_NOTE_DISPATCH = "delivery_note.dispatch"  # create + dispatch (send in transit)
+    DELIVERY_NOTE_RECEIVE = "delivery_note.receive"    # confirm receipt (with discrepancies)

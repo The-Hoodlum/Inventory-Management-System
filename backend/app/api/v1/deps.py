@@ -230,6 +230,15 @@ def get_sales_service(db: AsyncSession = Depends(get_db)) -> SalesService:
     )
 
 
+def get_dispatch_service(db: AsyncSession = Depends(get_db)):
+    # Delivery notes never write stock: parts move via the inventory service (single
+    # write path), bikes via the serialized registry — all on the request session.
+    from app.dispatch.repository import DispatchRepository
+    from app.dispatch.service import DispatchService
+
+    return DispatchService(DispatchRepository(db), get_inventory_service(db), AuditRepository(db))
+
+
 def get_reorder_service(db: AsyncSession = Depends(get_db)) -> ReorderService:
     # PO creation is delegated to the single procurement path, so the reorder
     # service is wired with a ProcurementService (not its own PO repository).
