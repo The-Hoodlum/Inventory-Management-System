@@ -72,7 +72,15 @@ async def _unit(client, h, wh, branch) -> dict:
         "chassis_number": _rand("CH"), "model_id": model, "warehouse_id": wh, "branch_id": branch})).json()
 
 
+async def _enable_sales(client, h) -> None:
+    r = await client.get("/api/v1/tenant/settings", headers=h)
+    flags = dict(r.json().get("feature_flags", {}))
+    flags.update({"sales_orders": True, "pos": True})
+    await client.put("/api/v1/tenant/settings", headers=h, json={"feature_flags": flags})
+
+
 async def _customer(client, h) -> str:
+    await _enable_sales(client, h)  # the customers endpoint is gated on the sales feature
     return (await client.post("/api/v1/customers", headers=h, json={"name": "Buyer"})).json()["id"]
 
 
