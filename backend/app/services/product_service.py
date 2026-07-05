@@ -13,7 +13,7 @@ from app.repositories.product_repo import ProductRepository
 from app.schemas.product import ProductCreate, ProductUpdate
 
 _AUDITED_FIELDS = (
-    "sku", "barcode", "name", "status", "cost_price", "selling_price",
+    "sku", "barcode", "name", "status", "cost_price", "selling_price", "wholesale_price",
     "units_per_carton", "moq", "lead_time_days", "category_id", "brand_id",
     "primary_supplier_id", "reorder_point", "safety_stock",
     # Product Intelligence Profile

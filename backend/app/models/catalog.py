@@ -77,6 +77,7 @@ class Product(Base):
     primary_supplier_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("suppliers.id", ondelete="SET NULL"), nullable=True)
     cost_price: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, server_default=text("0"))
     selling_price: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, server_default=text("0"))
+    wholesale_price: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, server_default=text("0"))
     units_per_carton: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     moq: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     lead_time_days: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("30"))

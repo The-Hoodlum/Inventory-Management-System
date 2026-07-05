@@ -101,7 +101,8 @@ jobs:
             database/sql/dispatch_notes.sql \
             database/sql/issuances.sql \
             database/sql/customer_deliveries.sql \
-            database/sql/reconstruction.sql ; do
+            database/sql/reconstruction.sql \
+            database/sql/product_wholesale_price.sql ; do
             echo "applying $f"
             psql -v ON_ERROR_STOP=1 -f "$f"
           done

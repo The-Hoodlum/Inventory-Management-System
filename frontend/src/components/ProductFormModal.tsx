@@ -23,6 +23,7 @@ interface FormState {
   primary_supplier_id: string;
   cost_price: string;
   selling_price: string;
+  wholesale_price: string;
   currency: string;
   unit_of_measure: string;
   units_per_carton: string;
@@ -50,6 +51,7 @@ function initialState(p?: Product | null): FormState {
     primary_supplier_id: p?.primary_supplier_id ?? "",
     cost_price: p?.cost_price ?? "0",
     selling_price: p?.selling_price ?? "0",
+    wholesale_price: p?.wholesale_price ?? "0",
     currency: p?.currency ?? "",
     unit_of_measure: p?.unit_of_measure ?? "",
     units_per_carton: String(p?.units_per_carton ?? 1),
@@ -108,6 +110,7 @@ export function ProductFormModal({
         primary_supplier_id: form.primary_supplier_id || null,
         cost_price: form.cost_price.trim() || "0",
         selling_price: form.selling_price.trim() || "0",
+        wholesale_price: form.wholesale_price.trim() || "0",
         currency: form.currency || null,
         unit_of_measure: emptyToNull(form.unit_of_measure),
         units_per_carton: Math.max(1, toInt(form.units_per_carton, 1)),
@@ -152,6 +155,7 @@ export function ProductFormModal({
     if (!form.name.trim()) return setErr("Name is required.");
     if (!isNonNegNumber(form.cost_price)) return setErr("Cost must be a number ≥ 0.");
     if (!isNonNegNumber(form.selling_price)) return setErr("Price must be a number ≥ 0.");
+    if (!isNonNegNumber(form.wholesale_price)) return setErr("Wholesale price must be a number ≥ 0.");
     save.mutate();
   };
 
@@ -240,8 +244,11 @@ export function ProductFormModal({
         <Field label="Cost price">
           <input type="number" min={0} step="any" className={inputClass} value={form.cost_price} onChange={(e) => set("cost_price", e.target.value)} />
         </Field>
-        <Field label="Selling price">
+        <Field label="Selling price" hint="Retail">
           <input type="number" min={0} step="any" className={inputClass} value={form.selling_price} onChange={(e) => set("selling_price", e.target.value)} />
+        </Field>
+        <Field label="Wholesale price" hint="Trade / bulk">
+          <input type="number" min={0} step="any" className={inputClass} value={form.wholesale_price} onChange={(e) => set("wholesale_price", e.target.value)} />
         </Field>
         <Field label="Currency" hint="Blank = tenant default">
           <select className={inputClass} value={form.currency} onChange={(e) => set("currency", e.target.value)}>
