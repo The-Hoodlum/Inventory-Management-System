@@ -97,3 +97,5 @@ class MovementOut(BaseModel):
     reason: str | None
     user_id: uuid.UUID | None
     created_at: dt.datetime
+    occurred_at: dt.datetime | None = None
+    imported_historical: bool = False
