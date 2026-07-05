@@ -44,7 +44,7 @@ def coerce(spec: FieldSpec, raw: Any) -> tuple[Any, str | None]:
             d = Decimal(s.replace(",", ""))  # tolerate thousands separators
         except (InvalidOperation, ValueError):
             return None, f"{spec.label} '{s}' is not a valid number"
-        if d < 0:
+        if d < 0 and not spec.signed:
             return None, f"{spec.label} cannot be negative"
         if spec.kind is FieldKind.INTEGER:
             if d != d.to_integral_value():
