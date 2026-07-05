@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import abc
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
 
 from app.imports.domain.base import ResourceImporter
@@ -47,6 +48,20 @@ class RowPlan:
 
 
 @dataclass(frozen=True)
+class ReconLine:
+    """One product+location reconciliation outcome: the system's COMPUTED on-hand (after a
+    reconstruction's opening balances + replay) versus the user's ACTUAL physical count, and
+    the signed delta (actual - computed). A non-zero delta blocks commit unless explicitly
+    accepted; a clean run is all-zero. Purely informational — never a row error itself."""
+
+    product: str
+    warehouse: str
+    computed: Decimal
+    actual: Decimal
+    delta: Decimal
+
+
+@dataclass(frozen=True)
 class ValueOption:
     """A distinct sheet value (status / model / colour) that did not exactly match a
     system value and needs a map/create decision. ``suggestion`` (+ a model batch
@@ -68,6 +83,13 @@ class ImportPlan:
     rows: list[RowPlan] = field(default_factory=list)
     new_refs: list[NewRef] = field(default_factory=list)
     value_options: list[ValueOption] = field(default_factory=list)
+    # Reconciliation report (populated only by a reconciliation target): computed vs actual
+    # per product+location. Non-zero deltas gate commit unless the user accepts them.
+    reconciliation: list[ReconLine] = field(default_factory=list)
+
+    @property
+    def has_deltas(self) -> bool:
+        return any(line.delta != 0 for line in self.reconciliation)
 
     @property
     def ok_count(self) -> int:

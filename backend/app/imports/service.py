@@ -31,6 +31,7 @@ from app.imports.schemas import (
     ImportOptions,
     NewReferenceOut,
     PreviewResponse,
+    ReconciliationLineOut,
     RowErrorOut,
     TargetOut,
     UploadResponse,
@@ -362,12 +363,22 @@ class ImportService:
             )
             for v in plan.value_options
         ]
-        can_commit = not plan.has_errors and (options.create_missing_references or not plan.new_refs)
+        reconciliation = [
+            ReconciliationLineOut(product=r.product, warehouse=r.warehouse, computed=r.computed,
+                                  actual=r.actual, delta=r.delta)
+            for r in plan.reconciliation
+        ]
+        can_commit = (
+            not plan.has_errors
+            and (options.create_missing_references or not plan.new_refs)
+            and (options.accept_deltas or not plan.has_deltas)
+        )
         return PreviewResponse(
             total_rows=len(parsed.rows), valid_count=plan.ok_count, invalid_count=plan.error_count,
             sample_errors=sample_errors, headers=parsed.headers,
             sample_rows=self._sample(parsed.headers, parsed.rows),
-            atomic=True, new_references=new_refs, value_resolutions=resolutions, can_commit=can_commit,
+            atomic=True, new_references=new_refs, value_resolutions=resolutions,
+            reconciliation=reconciliation, has_deltas=plan.has_deltas, can_commit=can_commit,
         )
 
     async def _atomic_confirm(self, *, job, imp, mapping, options, tenant_id, user_id) -> ImportJobOut:
@@ -387,6 +398,8 @@ class ImportService:
             blockers.append("row_errors")
         if plan.new_refs and not options.create_missing_references:
             blockers.append("unconfirmed_references")
+        if plan.has_deltas and not options.accept_deltas:
+            blockers.append("unaccepted_deltas")
         if blockers:
             for r in plan.rows:
                 for e in r.errors:
@@ -401,8 +414,19 @@ class ImportService:
                         "(enable 'create missing references')."
                     ),
                 )
+            if "unaccepted_deltas" in blockers:
+                deltas = sum(1 for line in plan.reconciliation if line.delta != 0)
+                await self.repo.add_error(
+                    tenant_id=tenant_id, job_id=job.id, row_number=1, sku=None,
+                    message=(
+                        f"{deltas} product/location(s) do not reconcile (computed vs actual differ). "
+                        "Fix the data, or enable 'accept deltas' to post correcting adjustments."
+                    ),
+                )
             job.imported_rows = 0
-            job.error_count = plan.error_count + (1 if "unconfirmed_references" in blockers else 0)
+            job.error_count = plan.error_count + sum(
+                1 for b in ("unconfirmed_references", "unaccepted_deltas") if b in blockers
+            )
             job.status = "failed"
             job.completed_at = _now()
             await self.repo.session.flush()

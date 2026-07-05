@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -51,6 +52,10 @@ class ImportOptions(BaseModel):
     # Per-value decisions: map a sheet value to an existing system value (or a split
     # base + consignment), instead of only exact-match-or-create.
     value_maps: list[ValueMap] = []
+    # Reconciliation target: authorize committing when computed-vs-actual deltas exist
+    # (the correcting adjustments are recorded). Left False, any non-zero delta blocks
+    # commit so the user must reconcile the data first. A clean run has no deltas.
+    accept_deltas: bool = False
 
 
 class NewReferenceOut(BaseModel):
@@ -73,6 +78,17 @@ class ValueResolutionOut(BaseModel):
     suggestion: str | None = None
     suggested_consignment: str | None = None
     can_create: bool = False  # model/colour may be created; a status must be mapped
+
+
+class ReconciliationLineOut(BaseModel):
+    """One product+location reconciliation row surfaced in the preview: the system's
+    COMPUTED on-hand vs the user's ACTUAL count, and the signed delta (actual - computed)."""
+
+    product: str
+    warehouse: str
+    computed: Decimal
+    actual: Decimal
+    delta: Decimal
 
 
 class UploadResponse(BaseModel):
@@ -112,6 +128,10 @@ class PreviewResponse(BaseModel):
     new_references: list[NewReferenceOut] = []
     # Distinct sheet values needing a map/create decision (status/model/colour).
     value_resolutions: list[ValueResolutionOut] = []
+    # Reconciliation report (computed vs actual + delta), populated by a reconciliation
+    # target. ``has_deltas`` flags that a non-zero delta exists (commit needs accept_deltas).
+    reconciliation: list[ReconciliationLineOut] = []
+    has_deltas: bool = False
     can_commit: bool = True
 
 
