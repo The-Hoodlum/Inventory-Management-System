@@ -92,6 +92,9 @@ class StockMovement(Base):
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     user_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    # Reconstruction: the business moment (back-dated) + a reconstructed-not-live marker.
+    occurred_at: Mapped[dt.datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    imported_historical: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
 
 
 class InventoryReservation(Base):

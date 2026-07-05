@@ -9,6 +9,7 @@ the logic is unit-testable without a database.
 """
 from __future__ import annotations
 
+import datetime as dt
 import uuid
 from decimal import Decimal
 from typing import Any
@@ -104,6 +105,8 @@ class InventoryService:
         tenant_id: uuid.UUID,
         user_id: uuid.UUID,
         req: ReceiveStockRequest,
+        occurred_at: dt.datetime | None = None,
+        historical: bool = False,
         ip: str | None = None,
     ) -> list[Inventory]:
         await self._require_warehouse(req.warehouse_id)
@@ -124,6 +127,8 @@ class InventoryService:
                 reference_id=req.reference_id,
                 unit_cost=line.unit_cost,
                 user_id=user_id,
+                occurred_at=occurred_at,
+                imported_historical=historical,
             )
             await self._audit_movement(
                 tenant_id=tenant_id,
@@ -137,6 +142,60 @@ class InventoryService:
             affected.append(inv)
         return affected
 
+    # ------------------------- opening balance ------------------------- #
+    async def opening_balance(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        user_id: uuid.UUID,
+        product_id: uuid.UUID,
+        warehouse_id: uuid.UUID,
+        quantity: Decimal,
+        as_of: dt.datetime,
+        reference_id: uuid.UUID | None = None,
+        unit_cost: Decimal | None = None,
+        ip: str | None = None,
+    ) -> Inventory:
+        """Seed reconstructed opening stock as of a period start.
+
+        The same locked-row + single-ledger-write path as :meth:`receive`, but recorded as
+        the reconstruction's initial entry: a back-dated ``opening_balance`` inflow flagged
+        ``imported_historical``. Additive to whatever is on hand (reconstruction runs from a
+        clean/known base). Raises on a negative opening quantity.
+        """
+        if quantity < 0:
+            raise BusinessRuleError("Opening balance cannot be negative", details={"quantity": str(quantity)})
+        await self._require_warehouse(warehouse_id)
+        await self._require_product(product_id)
+        inv = await self._get_or_create_locked(tenant_id, product_id, warehouse_id)
+        before = inv.qty_on_hand
+        inv.qty_on_hand = before + quantity
+        inv.version += 1
+        movement = await self.inventory.add_movement(
+            tenant_id=tenant_id,
+            product_id=product_id,
+            warehouse_id=warehouse_id,
+            movement_type="opening_balance",
+            quantity=quantity,
+            reference_type="opening_balance",
+            reference_id=reference_id,
+            unit_cost=unit_cost,
+            reason="Reconstruction opening balance",
+            user_id=user_id,
+            occurred_at=as_of,
+            imported_historical=True,
+        )
+        await self._audit_movement(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            action="stock.opening_balance",
+            inv=inv,
+            movement=movement,
+            before_on_hand=before,
+            extra={"as_of": as_of.isoformat(), "reference_type": "opening_balance", "ip": ip},
+        )
+        return inv
+
     # ------------------------------ issue ------------------------------ #
     async def issue(
         self,
@@ -144,6 +203,8 @@ class InventoryService:
         tenant_id: uuid.UUID,
         user_id: uuid.UUID,
         req: IssueStockRequest,
+        occurred_at: dt.datetime | None = None,
+        historical: bool = False,
         ip: str | None = None,
     ) -> list[Inventory]:
         await self._require_warehouse(req.warehouse_id)
@@ -175,6 +236,8 @@ class InventoryService:
                 reference_id=req.reference_id,
                 reason=req.reason,
                 user_id=user_id,
+                occurred_at=occurred_at,
+                imported_historical=historical,
             )
             await self._audit_movement(
                 tenant_id=tenant_id,
@@ -203,6 +266,8 @@ class InventoryService:
         reservation_ref: uuid.UUID | None = None,
         reservation_ref_type: str | None = None,
         demand_source: str | None = None,
+        occurred_at: dt.datetime | None = None,
+        historical: bool = False,
         ip: str | None = None,
     ) -> Inventory:
         """Issue stock for a demand line, drawing on the line's OWN reservation first.
@@ -263,6 +328,8 @@ class InventoryService:
             reference_id=reference_id,
             reason=reason,
             user_id=user_id,
+            occurred_at=occurred_at,
+            imported_historical=historical,
         )
         extra: dict[str, Any] = {"reason": reason, "reference_type": reference_type, "ip": ip}
         if demand_source is not None:
@@ -290,6 +357,8 @@ class InventoryService:
         tenant_id: uuid.UUID,
         user_id: uuid.UUID,
         req: AdjustStockRequest,
+        occurred_at: dt.datetime | None = None,
+        historical: bool = False,
         ip: str | None = None,
     ) -> Inventory:
         await self._require_warehouse(req.warehouse_id)
@@ -313,6 +382,8 @@ class InventoryService:
             reference_type="manual",
             reason=req.reason,
             user_id=user_id,
+            occurred_at=occurred_at,
+            imported_historical=historical,
         )
         await self._audit_movement(
             tenant_id=tenant_id,
@@ -332,6 +403,8 @@ class InventoryService:
         tenant_id: uuid.UUID,
         user_id: uuid.UUID,
         req: TransferStockRequest,
+        occurred_at: dt.datetime | None = None,
+        historical: bool = False,
         ip: str | None = None,
     ) -> list[Inventory]:
         if req.from_warehouse_id == req.to_warehouse_id:
@@ -381,6 +454,8 @@ class InventoryService:
             to_warehouse_id=req.to_warehouse_id,
             reason=req.reason,
             user_id=user_id,
+            occurred_at=occurred_at,
+            imported_historical=historical,
         )
         in_mv = await self.inventory.add_movement(
             tenant_id=tenant_id,
@@ -393,6 +468,8 @@ class InventoryService:
             to_warehouse_id=req.to_warehouse_id,
             reason=req.reason,
             user_id=user_id,
+            occurred_at=occurred_at,
+            imported_historical=historical,
         )
         await self._audit_movement(
             tenant_id=tenant_id,

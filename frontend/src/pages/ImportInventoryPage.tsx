@@ -23,6 +23,7 @@ type Step = "upload" | "map" | "done";
 // Where "view imported records" should land, per target.
 const VIEW: Record<string, { path: string; label: string }> = {
   inventory: { path: "/products", label: "View products" },
+  opening_balances: { path: "/inventory", label: "View stock" },
   suppliers: { path: "/suppliers", label: "View suppliers" },
   warehouses: { path: "/warehouses", label: "View warehouses" },
 };
