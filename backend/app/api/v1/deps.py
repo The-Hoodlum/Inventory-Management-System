@@ -239,6 +239,14 @@ def get_dispatch_service(db: AsyncSession = Depends(get_db)):
     return DispatchService(DispatchRepository(db), get_inventory_service(db), AuditRepository(db))
 
 
+def get_customer_delivery_service(db: AsyncSession = Depends(get_db)):
+    # Branch -> customer/reseller delivery (sale | consignment). Never writes stock.
+    from app.customer_delivery.repository import CustomerDeliveryRepository
+    from app.customer_delivery.service import CustomerDeliveryService
+
+    return CustomerDeliveryService(CustomerDeliveryRepository(db), get_inventory_service(db), AuditRepository(db))
+
+
 def get_issuance_service(db: AsyncSession = Depends(get_db)):
     # Internal issuance / handover: fungible loans go through the reservation mechanism +
     # inventory service; bikes through the serialized registry. Never writes stock.

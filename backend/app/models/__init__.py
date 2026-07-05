@@ -15,6 +15,8 @@ from app.models.catalog import (
 )
 from app.models.customer import Customer, CustomerAddress
 from app.models.dispatch import (
+    CustomerDelivery,
+    CustomerDeliveryLine,
     DispatchNote,
     DispatchNoteLine,
     Issuance,
@@ -96,4 +98,5 @@ __all__ = [
     "MotorcycleUnit", "MotorcycleUnitEvent",
     "DispatchNote", "DispatchNoteLine",
     "Issuance", "IssuanceLine",
+    "CustomerDelivery", "CustomerDeliveryLine",
 ]

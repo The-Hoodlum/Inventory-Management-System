@@ -119,3 +119,50 @@ class IssuanceLine(Base):
     return_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     returned_at: Mapped[dt.datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+# --------------------------------------------------------------------------- #
+# Branch -> customer / reseller delivery (sale | consignment) — Type 3
+# --------------------------------------------------------------------------- #
+class CustomerDelivery(Base):
+    __tablename__ = "customer_deliveries"
+
+    id: Mapped[uuid.UUID] = mapped_column(_UUID, primary_key=True, server_default=text("gen_random_uuid()"))
+    tenant_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    delivery_number: Mapped[str] = mapped_column(Text, nullable=False)
+    delivery_mode: Mapped[str] = mapped_column(Text, nullable=False)  # 'sale' | 'consignment'
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'draft'"))
+    branch_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("branches.id", ondelete="SET NULL"))
+    from_warehouse_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("warehouses.id", ondelete="RESTRICT"), nullable=False)
+    customer_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("customers.id", ondelete="RESTRICT"), nullable=False)
+    invoice_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("invoices.id", ondelete="SET NULL"))
+    remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
+    dispatched_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"))
+    dispatched_at: Mapped[dt.datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    received_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    received_at: Mapped[dt.datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+    lines: Mapped[list[CustomerDeliveryLine]] = relationship(
+        "CustomerDeliveryLine", cascade="all, delete-orphan", lazy="selectin", order_by="CustomerDeliveryLine.id"
+    )
+
+
+class CustomerDeliveryLine(Base):
+    __tablename__ = "customer_delivery_lines"
+
+    id: Mapped[uuid.UUID] = mapped_column(_UUID, primary_key=True, server_default=text("gen_random_uuid()"))
+    tenant_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    delivery_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("customer_deliveries.id", ondelete="CASCADE"), nullable=False)
+    line_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    product_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("products.id", ondelete="RESTRICT"))
+    unit_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("motorcycle_units.id", ondelete="RESTRICT"))
+    chassis_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    engine_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    qty: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, server_default=text("1"))
+    settled_qty: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, server_default=text("0"))
+    returned_qty: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, server_default=text("0"))
+    sold_invoice_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("invoices.id", ondelete="SET NULL"))
+    remarks: Mapped[str | None] = mapped_column(Text, nullable=True)

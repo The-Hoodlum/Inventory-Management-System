@@ -6,6 +6,8 @@ import AdvisorPage from "@/pages/AdvisorPage";
 import AppLauncherPage from "@/pages/AppLauncherPage";
 import BranchesPage from "@/pages/BranchesPage";
 import ContainerPage from "@/pages/ContainerPage";
+import CustomerDeliveriesPage from "@/pages/CustomerDeliveriesPage";
+import CustomerDeliveryDetailPage from "@/pages/CustomerDeliveryDetailPage";
 import CustomersPage from "@/pages/CustomersPage";
 import DashboardPage from "@/pages/DashboardPage";
 import DeliveryNoteDetailPage from "@/pages/DeliveryNoteDetailPage";
@@ -87,6 +89,8 @@ export default function App() {
         <Route path="/delivery-notes/:id" element={<DeliveryNoteDetailPage />} />
         <Route path="/issuances" element={<IssuancesPage />} />
         <Route path="/issuances/:id" element={<IssuanceDetailPage />} />
+        <Route path="/customer-deliveries" element={<CustomerDeliveriesPage />} />
+        <Route path="/customer-deliveries/:id" element={<CustomerDeliveryDetailPage />} />
         <Route path="/users" element={<UsersPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>

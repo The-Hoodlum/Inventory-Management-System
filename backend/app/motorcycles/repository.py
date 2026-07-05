@@ -13,6 +13,8 @@ from app.models import (
     Brand,
     Category,
     Customer,
+    CustomerDelivery,
+    CustomerDeliveryLine,
     Invoice,
     Issuance,
     IssuanceLine,
@@ -158,6 +160,23 @@ class MotorcycleRepository:
                 IssuanceLine.returnable.is_(True),
                 IssuanceLine.returned_at.is_(None),
                 Issuance.status.in_(("out_on_loan", "partially_returned")),
+            )
+        )
+        return await self.session.scalar(stmt.limit(1)) is not None
+
+    async def unit_on_open_consignment(self, unit_id: uuid.UUID) -> bool:
+        """Is this unit out on an open consignment (not yet settled/returned)? A consigned
+        unit is at the reseller and not sellable through the normal path (it settles via
+        the consignment)."""
+        stmt = (
+            select(CustomerDeliveryLine.id)
+            .join(CustomerDelivery, CustomerDelivery.id == CustomerDeliveryLine.delivery_id)
+            .where(
+                CustomerDeliveryLine.unit_id == unit_id,
+                CustomerDeliveryLine.line_kind == "motorcycle",
+                CustomerDeliveryLine.settled_qty <= 0,
+                CustomerDeliveryLine.returned_qty <= 0,
+                CustomerDelivery.status.in_(("out_at_reseller", "partially_settled")),
             )
         )
         return await self.session.scalar(stmt.limit(1)) is not None

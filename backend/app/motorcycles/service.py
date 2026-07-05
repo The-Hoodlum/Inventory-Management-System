@@ -277,6 +277,8 @@ class MotorcycleService:
             raise BusinessRuleError(f"A unit in status {unit.status} cannot be reserved.")
         if await self.repo.unit_out_on_loan(unit.id):
             raise BusinessRuleError("This unit is out on loan and cannot be reserved until it is returned.")
+        if await self.repo.unit_on_open_consignment(unit.id):
+            raise BusinessRuleError("This unit is out on consignment and cannot be reserved until it is settled.")
         if not await self.repo.customer_exists(payload.customer_id):
             raise NotFoundError("Customer not found")
         if payload.sales_order_id and await self.repo.get_sales_order(payload.sales_order_id) is None:
@@ -304,6 +306,8 @@ class MotorcycleService:
             raise BusinessRuleError(f"A unit in status {unit.status} cannot be sold.")
         if await self.repo.unit_out_on_loan(unit.id):
             raise BusinessRuleError("This unit is out on loan and cannot be sold until it is returned.")
+        if await self.repo.unit_on_open_consignment(unit.id):
+            raise BusinessRuleError("This unit is out on consignment and cannot be sold via the normal path; settle the consignment instead.")
         invoice = await self.repo.get_invoice(payload.invoice_id)
         if invoice is None:
             raise NotFoundError("Invoice not found")
