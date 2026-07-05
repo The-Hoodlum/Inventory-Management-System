@@ -130,7 +130,7 @@ def build_dispatch_note_pdf(note: DispatchNoteOut) -> bytes:
             sub = _s(ln_.sku or "")
             kind = "Spare part"
         if len(label) > 46:
-            label = label[:45] + "…"
+            label = label[:45] + "..."
         short = float(ln_.missing_qty) + float(ln_.damaged_qty)
         for text_value, width, align in (
             (label, 78, "L"), (kind, 24, "L"), (_qty(ln_.dispatched_qty), 22, "R"),

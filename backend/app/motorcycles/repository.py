@@ -14,6 +14,8 @@ from app.models import (
     Category,
     Customer,
     Invoice,
+    Issuance,
+    IssuanceLine,
     MotorcycleColour,
     MotorcycleModel,
     MotorcycleUnit,
@@ -143,6 +145,22 @@ class MotorcycleRepository:
 
     async def get_invoice(self, invoice_id: uuid.UUID) -> Invoice | None:
         return await self.session.scalar(select(Invoice).where(Invoice.id == invoice_id))
+
+    async def unit_out_on_loan(self, unit_id: uuid.UUID) -> bool:
+        """Is this unit currently out on an OPEN internal issuance? A unit on loan is not
+        sellable (derived from the issuance record — not a sale-status, not on_hold)."""
+        stmt = (
+            select(IssuanceLine.id)
+            .join(Issuance, Issuance.id == IssuanceLine.issuance_id)
+            .where(
+                IssuanceLine.unit_id == unit_id,
+                IssuanceLine.line_kind == "motorcycle",
+                IssuanceLine.returnable.is_(True),
+                IssuanceLine.returned_at.is_(None),
+                Issuance.status.in_(("out_on_loan", "partially_returned")),
+            )
+        )
+        return await self.session.scalar(stmt.limit(1)) is not None
 
     # =============================== units ============================== #
     async def get_unit(self, unit_id: uuid.UUID, *, lock: bool = False) -> MotorcycleUnit | None:

@@ -15,6 +15,8 @@ import ImportHistoryPage from "@/pages/ImportHistoryPage";
 import ImportInventoryPage from "@/pages/ImportInventoryPage";
 import IntelligencePage from "@/pages/IntelligencePage";
 import InventoryPage from "@/pages/InventoryPage";
+import IssuanceDetailPage from "@/pages/IssuanceDetailPage";
+import IssuancesPage from "@/pages/IssuancesPage";
 import LoginPage from "@/pages/LoginPage";
 import MotorcycleDetailPage from "@/pages/MotorcycleDetailPage";
 import MotorcycleImportPage from "@/pages/MotorcycleImportPage";
@@ -83,6 +85,8 @@ export default function App() {
         <Route path="/warehouses" element={<WarehousesPage />} />
         <Route path="/delivery-notes" element={<DeliveryNotesPage />} />
         <Route path="/delivery-notes/:id" element={<DeliveryNoteDetailPage />} />
+        <Route path="/issuances" element={<IssuancesPage />} />
+        <Route path="/issuances/:id" element={<IssuanceDetailPage />} />
         <Route path="/users" element={<UsersPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>

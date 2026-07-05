@@ -98,7 +98,8 @@ jobs:
             database/sql/sales_returns.sql \
             database/sql/motorcycle_units.sql \
             database/sql/motorcycle_import.sql \
-            database/sql/dispatch_notes.sql ; do
+            database/sql/dispatch_notes.sql \
+            database/sql/issuances.sql ; do
             echo "applying $f"
             psql -v ON_ERROR_STOP=1 -f "$f"
           done
