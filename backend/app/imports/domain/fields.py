@@ -33,6 +33,8 @@ class FieldSpec:
     aliases: tuple[str, ...] = ()
     choices: tuple[str, ...] = ()
     levels: tuple[str, ...] = (LEVEL_ADVANCED,)
+    # Allow a negative INTEGER/DECIMAL (e.g. a signed stock adjustment). Default: >= 0.
+    signed: bool = False
 
 
 # Per-row outcome statuses.
