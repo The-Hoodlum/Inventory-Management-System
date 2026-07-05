@@ -29,6 +29,7 @@ class ProductBase(BaseModel):
     primary_supplier_id: uuid.UUID | None = None
     cost_price: NonNegDecimal = Decimal("0")
     selling_price: NonNegDecimal = Decimal("0")
+    wholesale_price: NonNegDecimal = Decimal("0")
     units_per_carton: int = Field(default=1, ge=1)
     moq: int = Field(default=0, ge=0)
     lead_time_days: int = Field(default=30, ge=0)
@@ -74,6 +75,7 @@ class ProductUpdate(BaseModel):
     primary_supplier_id: uuid.UUID | None = None
     cost_price: NonNegDecimal | None = None
     selling_price: NonNegDecimal | None = None
+    wholesale_price: NonNegDecimal | None = None
     units_per_carton: int | None = Field(default=None, ge=1)
     moq: int | None = Field(default=None, ge=0)
     lead_time_days: int | None = Field(default=None, ge=0)

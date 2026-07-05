@@ -214,6 +214,7 @@ export interface Product {
   primary_supplier_id: string | null;
   cost_price: string;
   selling_price: string;
+  wholesale_price: string;
   units_per_carton: number;
   moq: number;
   lead_time_days: number;
