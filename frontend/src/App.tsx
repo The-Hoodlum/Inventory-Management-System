@@ -32,6 +32,7 @@ import PosPage from "@/pages/PosPage";
 import ProductsPage from "@/pages/ProductsPage";
 import PurchaseOrderDetailPage from "@/pages/PurchaseOrderDetailPage";
 import PurchaseOrdersPage from "@/pages/PurchaseOrdersPage";
+import ReconstructionPage from "@/pages/ReconstructionPage";
 import ReorderPage from "@/pages/ReorderPage";
 import ReportsPage from "@/pages/ReportsPage";
 import SalesLogPage from "@/pages/SalesLogPage";
@@ -78,6 +79,7 @@ export default function App() {
         <Route path="/parts-sales" element={<SparePartsSalesPage />} />
         <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/import/inventory" element={<ImportInventoryPage />} />
+        <Route path="/reconstruction" element={<ReconstructionPage />} />
         <Route path="/imports" element={<ImportHistoryPage />} />
         <Route path="/movements" element={<MovementsPage />} />
         <Route path="/reports" element={<ReportsPage />} />

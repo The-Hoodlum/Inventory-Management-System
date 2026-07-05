@@ -23,6 +23,7 @@ import {
   PackageCheck,
   Receipt,
   RefreshCcw,
+  Rewind,
   Send,
   Settings,
   ShieldAlert,
@@ -106,6 +107,7 @@ const GROUPS: NavGroup[] = [
     label: "Administration",
     items: [
       { to: "/import/inventory", label: "Import Data", icon: Upload, permission: "data.import" },
+      { to: "/reconstruction", label: "Reconstruct History", icon: Rewind, permission: "data.import" },
       { to: "/imports", label: "Import History", icon: History, permission: "data.import" },
       { to: "/users", label: "Users", icon: Users, permission: "user.manage" },
       { to: "/settings", label: "Settings", icon: Settings, permission: "settings.manage" },

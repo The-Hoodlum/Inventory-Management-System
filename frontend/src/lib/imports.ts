@@ -36,6 +36,9 @@ export interface ImportOptions {
   create_missing_references?: boolean;
   // Per-value map/create decisions for status / model / colour.
   value_maps?: ValueMap[];
+  // Reconciliation target: authorize committing correcting adjustments when computed-vs-
+  // actual deltas exist. Left false, any non-zero delta blocks the commit.
+  accept_deltas?: boolean;
 }
 
 export const DEFAULT_OPTIONS: ImportOptions = {
@@ -77,6 +80,14 @@ export interface RowError {
   errors: string[];
 }
 
+export interface ReconciliationLine {
+  product: string;
+  warehouse: string;
+  computed: number;
+  actual: number;
+  delta: number;
+}
+
 export interface PreviewResponse {
   total_rows: number;
   valid_count: number;
@@ -89,6 +100,9 @@ export interface PreviewResponse {
   atomic?: boolean;
   new_references?: NewReference[];
   value_resolutions?: ValueResolution[];
+  // Reconciliation target: computed-vs-actual report + whether a non-zero delta exists.
+  reconciliation?: ReconciliationLine[];
+  has_deltas?: boolean;
   can_commit?: boolean;
 }
 
