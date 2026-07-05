@@ -24,6 +24,7 @@ from app.forecast.api import router as forecast_router
 from app.imports.api import router as imports_router
 from app.integrations.whatsapp.router import router as whatsapp_router
 from app.intelligence.api import router as intelligence_router
+from app.issuance.api import router as issuance_router
 from app.motorcycles.api import router as motorcycles_router
 from app.order_requests.api import router as order_requests_router
 from app.procurement.api import router as procurement_router
@@ -61,4 +62,5 @@ api_router.include_router(order_requests_router, prefix="/order-requests", tags=
 api_router.include_router(sales_router, prefix="/sales", tags=["sales"])
 api_router.include_router(motorcycles_router, prefix="/motorcycles", tags=["motorcycles"])
 api_router.include_router(dispatch_router, prefix="/delivery-notes", tags=["delivery-notes"])
+api_router.include_router(issuance_router, prefix="/issuances", tags=["issuances"])
 api_router.include_router(search_router, prefix="/search", tags=["search"])

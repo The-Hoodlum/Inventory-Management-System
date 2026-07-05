@@ -239,6 +239,15 @@ def get_dispatch_service(db: AsyncSession = Depends(get_db)):
     return DispatchService(DispatchRepository(db), get_inventory_service(db), AuditRepository(db))
 
 
+def get_issuance_service(db: AsyncSession = Depends(get_db)):
+    # Internal issuance / handover: fungible loans go through the reservation mechanism +
+    # inventory service; bikes through the serialized registry. Never writes stock.
+    from app.issuance.repository import IssuanceRepository
+    from app.issuance.service import IssuanceService
+
+    return IssuanceService(IssuanceRepository(db), get_inventory_service(db), AuditRepository(db))
+
+
 def get_reorder_service(db: AsyncSession = Depends(get_db)) -> ReorderService:
     # PO creation is delegated to the single procurement path, so the reorder
     # service is wired with a ProcurementService (not its own PO repository).

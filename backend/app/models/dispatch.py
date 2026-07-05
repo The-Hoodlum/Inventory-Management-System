@@ -11,7 +11,7 @@ import datetime as dt
 import uuid
 from decimal import Decimal
 
-from sqlalchemy import ForeignKey, Numeric, Text, text
+from sqlalchemy import Boolean, Date, ForeignKey, Numeric, Text, text
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -63,4 +63,59 @@ class DispatchNoteLine(Base):
     received_qty: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, server_default=text("0"))
     missing_qty: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, server_default=text("0"))
     damaged_qty: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, server_default=text("0"))
+    remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+# --------------------------------------------------------------------------- #
+# Internal issuance / handover (out-and-back loan) — delivery-note Type 4
+# --------------------------------------------------------------------------- #
+class Issuance(Base):
+    __tablename__ = "issuances"
+
+    id: Mapped[uuid.UUID] = mapped_column(_UUID, primary_key=True, server_default=text("gen_random_uuid()"))
+    tenant_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    issuance_number: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'draft'"))
+    branch_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("branches.id", ondelete="SET NULL"))
+    warehouse_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("warehouses.id", ondelete="RESTRICT"), nullable=False)
+    requestor: Mapped[str | None] = mapped_column(Text, nullable=True)
+    department: Mapped[str | None] = mapped_column(Text, nullable=True)
+    purpose: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expected_return_date: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    remarks: Mapped[str | None] = mapped_column(Text, nullable=True)
+    issued_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"))
+    issued_at: Mapped[dt.datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    closed_at: Mapped[dt.datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+    lines: Mapped[list[IssuanceLine]] = relationship(
+        "IssuanceLine", cascade="all, delete-orphan", lazy="selectin", order_by="IssuanceLine.id"
+    )
+
+
+class IssuanceLine(Base):
+    __tablename__ = "issuance_lines"
+
+    id: Mapped[uuid.UUID] = mapped_column(_UUID, primary_key=True, server_default=text("gen_random_uuid()"))
+    tenant_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    issuance_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("issuances.id", ondelete="CASCADE"), nullable=False)
+    line_kind: Mapped[str] = mapped_column(Text, nullable=False)  # 'motorcycle' | 'part'
+    product_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("products.id", ondelete="RESTRICT"))
+    unit_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("motorcycle_units.id", ondelete="RESTRICT"))
+    chassis_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    engine_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    qty: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, server_default=text("1"))
+    returnable: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    consumable: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    odometer_out: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    fuel_out: Mapped[str | None] = mapped_column(Text, nullable=True)
+    accessories: Mapped[str | None] = mapped_column(Text, nullable=True)
+    returned_qty: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, server_default=text("0"))
+    missing_qty: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False, server_default=text("0"))
+    condition: Mapped[str | None] = mapped_column(Text, nullable=True)  # good | fair | needs_attention
+    odometer_in: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    return_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    returned_at: Mapped[dt.datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
     remarks: Mapped[str | None] = mapped_column(Text, nullable=True)

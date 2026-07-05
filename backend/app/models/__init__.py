@@ -14,7 +14,12 @@ from app.models.catalog import (
     SupplierProduct,
 )
 from app.models.customer import Customer, CustomerAddress
-from app.models.dispatch import DispatchNote, DispatchNoteLine
+from app.models.dispatch import (
+    DispatchNote,
+    DispatchNoteLine,
+    Issuance,
+    IssuanceLine,
+)
 from app.models.identity import (
     AuditLog,
     Permission,
@@ -90,4 +95,5 @@ __all__ = [
     "MotorcycleModel", "MotorcycleVariant", "MotorcycleColour",
     "MotorcycleUnit", "MotorcycleUnitEvent",
     "DispatchNote", "DispatchNoteLine",
+    "Issuance", "IssuanceLine",
 ]
