@@ -32,4 +32,7 @@ class MeResponse(BaseModel):
     full_name: str
     roles: list[str]
     permissions: list[str]
-    accessible_warehouse_ids: list[uuid.UUID] = []  # explicit branch grants; empty = all branches
+    accessible_warehouse_ids: list[uuid.UUID] = []  # legacy warehouse grants (assistant); empty = all
+    # Branches this user is scoped to; empty = unrestricted (all branches). Drives the
+    # branch switcher + server-side branch isolation.
+    accessible_branch_ids: list[uuid.UUID] = []

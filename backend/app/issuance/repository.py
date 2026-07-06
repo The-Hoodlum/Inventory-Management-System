@@ -63,11 +63,15 @@ class IssuanceRepository:
         return await self.session.scalar(stmt.limit(1)) is not None
 
     async def list_issuances(
-        self, *, branch_id: uuid.UUID | None, status: str | None, open_only: bool, limit: int = 100,
+        self, *, branch_id: uuid.UUID | None = None, status: str | None = None,
+        open_only: bool = False,
+        branch_ids: Sequence[uuid.UUID] | None = None, limit: int = 100,
     ) -> list[Issuance]:
         stmt = select(Issuance)
         if branch_id is not None:
             stmt = stmt.where(Issuance.branch_id == branch_id)
+        if branch_ids is not None:
+            stmt = stmt.where(Issuance.branch_id.in_(list(branch_ids)))
         if status:
             stmt = stmt.where(Issuance.status == status)
         if open_only:

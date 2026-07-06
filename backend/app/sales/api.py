@@ -11,6 +11,7 @@ from app.api.v1.deps import (
     get_sales_service,
     require_feature,
     require_permission,
+    resolve_branch_scope,
 )
 from app.core.exceptions import BusinessRuleError
 from app.core.permissions import P
@@ -255,14 +256,14 @@ async def list_parts_sales(
     date_from: dt.date | None = Query(default=None),
     date_to: dt.date | None = Query(default=None),
     limit: int = Query(default=200, ge=1, le=1000),
-    _: CurrentUser = Depends(require_permission(P.SALES_READ)),
+    user: CurrentUser = Depends(require_permission(P.SALES_READ)),
     svc: SalesService = Depends(get_sales_service),
 ) -> list[PartsSaleLineOut]:
     # Line-grain spare-part sales (fungible products), newest first; excludes
     # motorcycle-linked invoices so a serialized-unit sale never appears here.
     return await svc.list_parts_sales(
-        branch_id=branch_id, product_id=product_id, date_from=date_from,
-        date_to=date_to, limit=limit,
+        branch_ids=resolve_branch_scope(user, branch_id), product_id=product_id,
+        date_from=date_from, date_to=date_to, limit=limit,
     )
 
 

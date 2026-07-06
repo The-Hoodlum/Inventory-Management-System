@@ -21,17 +21,20 @@ class UserCreate(BaseModel):
     full_name: str = Field(min_length=1, max_length=256)
     password: str = Field(min_length=1)
     role_ids: list[uuid.UUID] = Field(default_factory=list)
+    # Branches this user may see/act on. Empty = unrestricted (all branches; owners/admins).
+    branch_ids: list[uuid.UUID] = Field(default_factory=list)
     is_active: bool = True
 
 
 class UserUpdate(BaseModel):
-    """Partial update. ``password`` resets the password; ``role_ids`` replaces
-    the full set of assigned roles."""
+    """Partial update. ``password`` resets the password; ``role_ids`` / ``branch_ids``
+    each REPLACE the full assigned set when provided (None = leave unchanged)."""
 
     full_name: str | None = Field(default=None, min_length=1, max_length=256)
     is_active: bool | None = None
     password: str | None = Field(default=None, min_length=1)
     role_ids: list[uuid.UUID] | None = None
+    branch_ids: list[uuid.UUID] | None = None
 
 
 class UserOut(BaseModel):
@@ -44,3 +47,4 @@ class UserOut(BaseModel):
     created_at: dt.datetime
     roles: list[str]          # role names, for display
     role_ids: list[uuid.UUID]  # for editing
+    branch_ids: list[uuid.UUID] = []  # assigned branches; empty = all branches

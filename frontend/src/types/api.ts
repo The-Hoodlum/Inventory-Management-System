@@ -14,7 +14,9 @@ export interface CurrentUser {
   full_name: string;
   roles: string[];
   permissions: string[];
-  accessible_warehouse_ids: string[]; // explicit branch grants; empty = all branches
+  accessible_warehouse_ids: string[]; // legacy warehouse grants (assistant); empty = all
+  // Branches this user is scoped to; empty = unrestricted (all branches).
+  accessible_branch_ids: string[];
 }
 
 export interface Page<T> {
@@ -420,6 +422,7 @@ export interface AppUser {
   created_at: string;
   roles: string[];      // role names, for display
   role_ids: string[];   // for editing
+  branch_ids: string[]; // assigned branches; empty = all branches
 }
 
 export interface Role {

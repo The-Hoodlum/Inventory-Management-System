@@ -71,6 +71,7 @@ services:
       - ./database/sql/customer_deliveries.sql:/docker-entrypoint-initdb.d/38_customer_deliveries.sql:ro
       - ./database/sql/reconstruction.sql:/docker-entrypoint-initdb.d/39_reconstruction.sql:ro
       - ./database/sql/product_wholesale_price.sql:/docker-entrypoint-initdb.d/40_product_wholesale_price.sql:ro
+      - ./database/sql/user_branch_access.sql:/docker-entrypoint-initdb.d/41_user_branch_access.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-inventory}"]
       interval: 5s

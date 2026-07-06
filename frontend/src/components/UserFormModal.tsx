@@ -5,6 +5,7 @@ import { useAuth } from "@/auth/AuthContext";
 import { Modal } from "@/components/Modal";
 import { Field, inputClass } from "@/components/form";
 import { Button, Spinner } from "@/components/ui";
+import { useBranches } from "@/lib/refdata";
 import { usersApi, type UserUpdateInput } from "@/lib/users";
 import type { AppUser } from "@/types/api";
 
@@ -22,16 +23,20 @@ export function UserFormModal({ user, onClose }: { user?: AppUser | null; onClos
   const { user: me } = useAuth();
 
   const rolesQuery = useQuery({ queryKey: ["users", "roles"], queryFn: usersApi.roles });
+  const branches = useBranches();
 
   const [email, setEmail] = useState(user?.email ?? "");
   const [fullName, setFullName] = useState(user?.full_name ?? "");
   const [password, setPassword] = useState("");
   const [isActive, setIsActive] = useState(user?.is_active ?? true);
   const [roleIds, setRoleIds] = useState<string[]>(user?.role_ids ?? []);
+  const [branchIds, setBranchIds] = useState<string[]>(user?.branch_ids ?? []);
   const [err, setErr] = useState<string | null>(null);
 
   const toggleRole = (id: string) =>
     setRoleIds((ids) => (ids.includes(id) ? ids.filter((r) => r !== id) : [...ids, id]));
+  const toggleBranch = (id: string) =>
+    setBranchIds((ids) => (ids.includes(id) ? ids.filter((b) => b !== id) : [...ids, id]));
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["users"] });
 
@@ -42,6 +47,7 @@ export function UserFormModal({ user, onClose }: { user?: AppUser | null; onClos
           full_name: fullName.trim(),
           is_active: isActive,
           role_ids: roleIds,
+          branch_ids: branchIds,
         };
         if (password.trim()) body.password = password;
         return usersApi.update(user.id, body);
@@ -51,6 +57,7 @@ export function UserFormModal({ user, onClose }: { user?: AppUser | null; onClos
         full_name: fullName.trim(),
         password,
         role_ids: roleIds,
+        branch_ids: branchIds,
         is_active: isActive,
       });
     },
@@ -171,6 +178,27 @@ export function UserFormModal({ user, onClose }: { user?: AppUser | null; onClos
                     {r.is_system && <span className="ml-1 text-xs text-slate-400">(system)</span>}
                     {r.description && <span className="block text-xs text-slate-400">{r.description}</span>}
                   </span>
+                </label>
+              ))}
+            </div>
+          )}
+        </Field>
+
+        <Field label="Branches" hint="Leave all unticked = access to every branch (owner/admin)">
+          {branches.isLoading ? (
+            <Spinner />
+          ) : branches.list.length === 0 ? (
+            <div className="text-sm text-slate-400">No branches defined yet.</div>
+          ) : (
+            <div className="max-h-40 space-y-1.5 overflow-y-auto rounded-lg border border-slate-200 p-2">
+              {branches.list.map((b) => (
+                <label key={b.id} className="flex cursor-pointer items-center gap-2 rounded p-1 hover:bg-slate-50">
+                  <input
+                    type="checkbox"
+                    checked={branchIds.includes(b.id)}
+                    onChange={() => toggleBranch(b.id)}
+                  />
+                  <span className="text-sm font-medium text-slate-800">{b.name}</span>
                 </label>
               ))}
             </div>

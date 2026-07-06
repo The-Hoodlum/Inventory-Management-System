@@ -30,6 +30,7 @@ from app.models.identity import (
     RolePermission,
     Tenant,
     User,
+    UserBranchAccess,
     UserRole,
 )
 from app.models.imports import ImportError, ImportFile, ImportJob, ImportMapping
@@ -81,7 +82,7 @@ from app.models.sales import (
 )
 
 __all__ = [
-    "Tenant", "User", "Role", "Permission", "RolePermission", "UserRole",
+    "Tenant", "User", "UserBranchAccess", "Role", "Permission", "RolePermission", "UserRole",
     "AuditLog", "RefreshSession", "Category", "Brand", "Supplier", "Product", "SupplierProduct",
     "Branch", "Warehouse", "Inventory", "InventoryReservation", "StockMovement",
     "SalesDaily", "PurchaseOrder", "PurchaseOrderLine", "ReorderRecommendation",

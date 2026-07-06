@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from collections.abc import Sequence
 from decimal import Decimal
 
 from sqlalchemy import column, select, table, text
@@ -202,7 +203,8 @@ class SalesRepository:
 
     # --------------------------- parts sales log ----------------------------- #
     async def list_parts_sales(
-        self, *, branch_id: uuid.UUID | None = None, product_id: uuid.UUID | None = None,
+        self, *, branch_id: uuid.UUID | None = None, branch_ids: Sequence[uuid.UUID] | None = None,
+        product_id: uuid.UUID | None = None,
         date_from: dt.date | None = None, date_to: dt.date | None = None, limit: int = 200,
     ) -> list:
         """Line-grain spare-part sales from invoices (the sale's money document), newest
@@ -224,6 +226,8 @@ class SalesRepository:
         )
         if branch_id is not None:
             stmt = stmt.where(Invoice.branch_id == branch_id)
+        if branch_ids is not None:
+            stmt = stmt.where(Invoice.branch_id.in_(list(branch_ids)))
         if product_id is not None:
             stmt = stmt.where(InvoiceLine.product_id == product_id)
         if date_from is not None:

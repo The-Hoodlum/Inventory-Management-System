@@ -14,6 +14,7 @@ import {
   type ReactNode,
 } from "react";
 
+import { useAuth } from "@/auth/AuthContext";
 import { useBranches } from "@/lib/refdata";
 import type { Branch } from "@/types/api";
 
@@ -30,12 +31,24 @@ interface BranchContextValue {
 const BranchContext = createContext<BranchContextValue | undefined>(undefined);
 
 export function BranchProvider({ children }: { children: ReactNode }) {
-  const { list, map, isLoading } = useBranches();
+  const { list: allList, isLoading } = useBranches();
+  const { user } = useAuth();
+
+  // The switcher may only offer branches the user is allowed to see. An empty grant set
+  // (owners/admins) = all branches. The server enforces this too — this just avoids
+  // offering a branch that would be rejected.
+  const allowed = user?.accessible_branch_ids ?? [];
+  const list = useMemo(
+    () => (allowed.length ? allList.filter((b) => allowed.includes(b.id)) : allList),
+    [allList, allowed]
+  );
+  const map = useMemo(() => new Map(list.map((b) => [b.id, b])), [list]);
+
   const [branchId, setBranchIdState] = useState<string | null>(
     () => localStorage.getItem(KEY) || null
   );
 
-  // Drop a stale selection if the branch no longer exists once branches load.
+  // Drop a selection the user can no longer see (stale, or now outside their scope).
   useEffect(() => {
     if (!isLoading && branchId && !map.has(branchId)) {
       setBranchIdState(null);

@@ -11,7 +11,12 @@ import uuid
 
 from fastapi import APIRouter, Depends, Query, status
 
-from app.api.v1.deps import CurrentUser, get_motorcycle_service, require_permission
+from app.api.v1.deps import (
+    CurrentUser,
+    get_motorcycle_service,
+    require_permission,
+    resolve_branch_scope,
+)
 from app.core.permissions import P
 from app.motorcycles.schemas import (
     ColourCreate,
@@ -147,10 +152,10 @@ async def update_colour(
 @router.get("/metrics", response_model=MetricsOut)
 async def metrics(
     branch_id: uuid.UUID | None = Query(default=None),
-    _: CurrentUser = Depends(require_permission(P.MOTORCYCLE_READ)),
+    user: CurrentUser = Depends(require_permission(P.MOTORCYCLE_READ)),
     svc: MotorcycleService = Depends(get_motorcycle_service),
 ) -> MetricsOut:
-    return await svc.metrics(branch_id=branch_id)
+    return await svc.metrics(branch_ids=resolve_branch_scope(user, branch_id))
 
 
 # ================================= units ================================ #
@@ -176,11 +181,12 @@ async def list_units(
     registered: bool | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
-    _: CurrentUser = Depends(require_permission(P.MOTORCYCLE_READ)),
+    user: CurrentUser = Depends(require_permission(P.MOTORCYCLE_READ)),
     svc: MotorcycleService = Depends(get_motorcycle_service),
 ) -> Page[UnitOut]:
     items, total = await svc.list_units(
-        search=search, status=status_filter, branch_id=branch_id, model_id=model_id,
+        search=search, status=status_filter,
+        branch_ids=resolve_branch_scope(user, branch_id), model_id=model_id,
         variant_id=variant_id, colour_id=colour_id, sold=sold, inspected=inspected,
         registered=registered, page=page, page_size=page_size,
     )

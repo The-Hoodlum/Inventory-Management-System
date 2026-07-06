@@ -16,6 +16,7 @@ Two responsibilities:
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from decimal import Decimal
 
 from app.core.exceptions import BusinessRuleError, ConflictError, NotFoundError
@@ -359,8 +360,10 @@ class MotorcycleService:
             await self._require(await self.repo.get_unit(unit_id), "Motorcycle unit"), with_events=True
         )
 
-    async def metrics(self, *, branch_id: uuid.UUID | None = None) -> MetricsOut:
-        counts = await self.repo.status_counts(branch_id=branch_id)
+    async def metrics(
+        self, *, branch_id: uuid.UUID | None = None, branch_ids: Sequence[uuid.UUID] | None = None
+    ) -> MetricsOut:
+        counts = await self.repo.status_counts(branch_id=branch_id, branch_ids=branch_ids)
         in_stock = sum(n for s, n in counts.items() if s in L.IN_STOCK)
         sold = sum(n for s, n in counts.items() if s in L.POST_SALE)
         return MetricsOut(

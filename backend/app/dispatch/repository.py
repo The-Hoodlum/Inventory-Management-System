@@ -63,12 +63,17 @@ class DispatchRepository:
         return await self.session.scalar(stmt.limit(1)) is not None
 
     async def list_notes(
-        self, *, branch_id: uuid.UUID | None, status: str | None, dispatch_type: str | None,
-        limit: int = 100,
+        self, *, branch_id: uuid.UUID | None = None, status: str | None = None,
+        dispatch_type: str | None = None,
+        branch_ids: Sequence[uuid.UUID] | None = None, limit: int = 100,
     ) -> list[DispatchNote]:
         stmt = select(DispatchNote)
         if branch_id is not None:
             stmt = stmt.where(or_(DispatchNote.from_branch_id == branch_id, DispatchNote.to_branch_id == branch_id))
+        # Server-side branch scope: a note is visible if EITHER end is an allowed branch.
+        if branch_ids is not None:
+            ids = list(branch_ids)
+            stmt = stmt.where(or_(DispatchNote.from_branch_id.in_(ids), DispatchNote.to_branch_id.in_(ids)))
         if status:
             stmt = stmt.where(DispatchNote.status == status)
         if dispatch_type:

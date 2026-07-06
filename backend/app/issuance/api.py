@@ -5,7 +5,12 @@ import uuid
 
 from fastapi import APIRouter, Depends, Query, Response
 
-from app.api.v1.deps import CurrentUser, get_issuance_service, require_permission
+from app.api.v1.deps import (
+    CurrentUser,
+    get_issuance_service,
+    require_permission,
+    resolve_branch_scope,
+)
 from app.core.permissions import P
 from app.issuance.schemas import (
     CancelBody,
@@ -33,10 +38,13 @@ async def list_issuances(
     status_filter: str | None = Query(default=None, alias="status"),
     open_only: bool = Query(default=False, alias="open"),
     limit: int = Query(default=100, ge=1, le=500),
-    _: CurrentUser = Depends(require_permission(P.DELIVERY_NOTE_READ)),
+    user: CurrentUser = Depends(require_permission(P.DELIVERY_NOTE_READ)),
     svc: IssuanceService = Depends(get_issuance_service),
 ) -> list[IssuanceOut]:
-    return await svc.list_issuances(branch_id=branch_id, status=status_filter, open_only=open_only, limit=limit)
+    return await svc.list_issuances(
+        branch_ids=resolve_branch_scope(user, branch_id),
+        status=status_filter, open_only=open_only, limit=limit,
+    )
 
 
 @router.get("/{issuance_id}", response_model=IssuanceOut)

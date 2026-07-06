@@ -89,4 +89,5 @@ async def me(
         roles=user.roles,
         permissions=sorted(user.permissions),
         accessible_warehouse_ids=[wid for (wid,) in grants.all()],
+        accessible_branch_ids=sorted(user.branch_ids),
     )
