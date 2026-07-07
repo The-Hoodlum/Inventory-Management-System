@@ -14,6 +14,7 @@ import {
   Container,
   Contact,
   HandHelping,
+  Hammer,
   FileText,
   History,
   LayoutDashboard,
@@ -70,6 +71,7 @@ const GROUPS: NavGroup[] = [
       { to: "/customers", label: "Customers", icon: Contact, permission: "customer.read" },
       { to: "/motorcycles", label: "Motorcycles", icon: Bike, permission: "motorcycle.read" },
       { to: "/bike-issues", label: "Bike Issues", icon: Wrench, permission: "bike_issue.read" },
+      { to: "/assembly-planner", label: "Assembly Planner", icon: Hammer, permission: "motorcycle.read" },
     ],
   },
   {
