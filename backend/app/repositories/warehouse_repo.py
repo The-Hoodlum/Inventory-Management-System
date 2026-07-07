@@ -21,6 +21,17 @@ class WarehouseRepository(BaseRepository[Warehouse]):
         )
         return res.scalar_one_or_none()
 
+    async def ids_in_branches(self, branch_ids) -> set[uuid.UUID]:
+        """Warehouse ids that belong to any of the given branches (for branch-scoped
+        inventory reads). Empty ``branch_ids`` -> empty set."""
+        ids = list(branch_ids)
+        if not ids:
+            return set()
+        res = await self.session.execute(
+            select(Warehouse.id).where(Warehouse.branch_id.in_(ids))
+        )
+        return {row[0] for row in res.all()}
+
     async def list(
         self,
         *,

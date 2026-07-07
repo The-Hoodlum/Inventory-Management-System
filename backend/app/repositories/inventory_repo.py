@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from decimal import Decimal
 
 from sqlalchemy import Select, func, select, text
@@ -97,6 +98,7 @@ class InventoryRepository:
         self,
         *,
         warehouse_id: uuid.UUID | None = None,
+        warehouse_ids: Sequence[uuid.UUID] | None = None,
         product_id: uuid.UUID | None = None,
         page: int = 1,
         page_size: int = 50,
@@ -104,6 +106,9 @@ class InventoryRepository:
         base: Select = select(Inventory)
         if warehouse_id:
             base = base.where(Inventory.warehouse_id == warehouse_id)
+        # Server-side branch scope: restrict to the caller's allowed warehouses. None = all.
+        if warehouse_ids is not None:
+            base = base.where(Inventory.warehouse_id.in_(list(warehouse_ids)))
         if product_id:
             base = base.where(Inventory.product_id == product_id)
         total = await self.session.scalar(
@@ -118,6 +123,7 @@ class InventoryRepository:
         *,
         product_id: uuid.UUID | None = None,
         warehouse_id: uuid.UUID | None = None,
+        warehouse_ids: Sequence[uuid.UUID] | None = None,
         page: int = 1,
         page_size: int = 50,
     ) -> tuple[list[StockMovement], int]:
@@ -126,6 +132,8 @@ class InventoryRepository:
             base = base.where(StockMovement.product_id == product_id)
         if warehouse_id:
             base = base.where(StockMovement.warehouse_id == warehouse_id)
+        if warehouse_ids is not None:
+            base = base.where(StockMovement.warehouse_id.in_(list(warehouse_ids)))
         total = await self.session.scalar(
             select(func.count()).select_from(base.subquery())
         )
