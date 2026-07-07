@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from collections.abc import Sequence
 from decimal import Decimal
 
 from sqlalchemy import Date, cast, func, select
@@ -74,10 +75,11 @@ class ReportsRepository:
 
     # --------------------------- stock position --------------------------- #
     async def stock_position(
-        self, *, branch_id: uuid.UUID | None, warehouse_id: uuid.UUID | None
+        self, *, branch_id: uuid.UUID | None, warehouse_id: uuid.UUID | None,
+        branch_ids: Sequence[uuid.UUID] | None = None,
     ) -> list[dict]:
         """Per (location, product): on_hand / reserved / available, joined to the branch.
-        Optionally filtered to one branch and/or location."""
+        Optionally filtered to one branch and/or location, and/or the caller's branch scope."""
         stmt = (
             select(
                 Warehouse.branch_id, Branch.name, Inventory.warehouse_id, Warehouse.name,
@@ -92,6 +94,8 @@ class ReportsRepository:
             stmt = stmt.where(Inventory.warehouse_id == warehouse_id)
         if branch_id is not None:
             stmt = stmt.where(Warehouse.branch_id == branch_id)
+        if branch_ids is not None:
+            stmt = stmt.where(Warehouse.branch_id.in_(list(branch_ids)))
         rows = (await self.session.execute(stmt)).all()
         return [
             {
@@ -143,6 +147,7 @@ class ReportsRepository:
     # ---------------------------- sales log ------------------------------- #
     async def parts_sale_events(
         self, *, branch_id: uuid.UUID | None, date_from: dt.date | None, date_to: dt.date | None,
+        branch_ids: Sequence[uuid.UUID] | None = None,
     ) -> list[tuple[dt.date, uuid.UUID | None, Decimal, Decimal]]:
         """Spare-part sale contributions: (sale_date, branch_id, units, revenue) from
         ``invoice_lines`` (every line is a fungible product). Excludes motorcycle-linked
@@ -154,6 +159,8 @@ class ReportsRepository:
         )
         if branch_id is not None:
             stmt = stmt.where(Invoice.branch_id == branch_id)
+        if branch_ids is not None:
+            stmt = stmt.where(Invoice.branch_id.in_(list(branch_ids)))
         if date_from is not None:
             stmt = stmt.where(Invoice.invoice_date >= date_from)
         if date_to is not None:
@@ -163,6 +170,7 @@ class ReportsRepository:
 
     async def motorcycle_sale_events(
         self, *, branch_id: uuid.UUID | None, date_from: dt.date | None, date_to: dt.date | None,
+        branch_ids: Sequence[uuid.UUID] | None = None,
     ) -> list[tuple[dt.date, uuid.UUID | None, Decimal, bool]]:
         """Motorcycle sale contributions: (sale_date, branch_id, revenue, historical) for
         every SOLD unit (``status`` in POST_SALE — covers live sales and imported
@@ -181,6 +189,8 @@ class ReportsRepository:
         )
         if branch_id is not None:
             stmt = stmt.where(MotorcycleUnit.branch_id == branch_id)
+        if branch_ids is not None:
+            stmt = stmt.where(MotorcycleUnit.branch_id.in_(list(branch_ids)))
         if date_from is not None:
             stmt = stmt.where(sale_date >= date_from)
         if date_to is not None:

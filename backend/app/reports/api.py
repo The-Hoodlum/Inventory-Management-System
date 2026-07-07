@@ -9,9 +9,9 @@ from fastapi import APIRouter, Depends, Query
 
 from app.api.v1.deps import (
     CurrentUser,
-    effective_branch_id,
     get_reports_service,
     require_permission,
+    resolve_branch_scope,
 )
 from app.core.exceptions import BusinessRuleError
 from app.core.permissions import P
@@ -50,9 +50,11 @@ async def sales_log_report(
     date_from = date_from or (date_to - dt.timedelta(days=84))
     if date_from > date_to:
         raise BusinessRuleError("date_from must not be after date_to.")
+    # Scope to the caller's branch(es) — a multi-branch user sees ALL of theirs, a specific
+    # (allowed) branch when asked, 403 on a disallowed one, all branches when unrestricted.
     return await svc.get_sales_log(
-        granularity=granularity, type_filter=type,
-        branch_id=effective_branch_id(user, branch_id),
+        granularity=granularity, type_filter=type, branch_id=None,
+        branch_ids=resolve_branch_scope(user, branch_id),
         date_from=date_from, date_to=date_to,
     )
 
@@ -64,9 +66,10 @@ async def stock_position(
     user: CurrentUser = Depends(require_permission(P.REPORT_READ)),
     svc: ReportsService = Depends(get_reports_service),
 ) -> StockPositionReport:
-    # On-hand / reserved / available / in-transit per branch + location + product.
+    # On-hand / reserved / available / in-transit per branch + location + product,
+    # scoped to the caller's branch(es).
     return await svc.get_stock_position(
-        branch_id=effective_branch_id(user, branch_id), warehouse_id=warehouse_id
+        branch_ids=resolve_branch_scope(user, branch_id), warehouse_id=warehouse_id
     )
 
 
