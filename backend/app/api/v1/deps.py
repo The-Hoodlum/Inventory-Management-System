@@ -218,16 +218,6 @@ async def resolve_warehouse_scope(
     return sorted(allowed)
 
 
-def effective_branch_id(user: CurrentUser, requested: uuid.UUID | None) -> uuid.UUID | None:
-    """Single-branch variant of the boundary, for endpoints/aggregations that filter by ONE
-    branch id. Rejects a branch the user isn't scoped to; a scoped user with no explicit pick
-    is defaulted to (one of) their own branch — never left unfiltered/all-branches."""
-    scope = resolve_branch_scope(user, requested)  # raises on a disallowed branch
-    if scope is None:
-        return requested  # unrestricted: honour the request (None = all)
-    return requested if requested is not None else scope[0]
-
-
 def require_feature(key: str):
     """Dependency factory that 403s when a tenant has the given module disabled."""
 

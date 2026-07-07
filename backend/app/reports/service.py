@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from collections.abc import Sequence
 from decimal import Decimal
 
 from app.reports import compute, sales_log
@@ -65,11 +66,15 @@ class ReportsService:
         return InventoryAgingReport(as_of=as_of, buckets=buckets, items=items)
 
     async def get_stock_position(
-        self, *, branch_id: uuid.UUID | None = None, warehouse_id: uuid.UUID | None = None
+        self, *, branch_id: uuid.UUID | None = None, warehouse_id: uuid.UUID | None = None,
+        branch_ids: Sequence[uuid.UUID] | None = None,
     ) -> StockPositionReport:
         as_of = dt.datetime.now(dt.UTC)
-        rows = await self.repo.stock_position(branch_id=branch_id, warehouse_id=warehouse_id)
+        rows = await self.repo.stock_position(
+            branch_id=branch_id, warehouse_id=warehouse_id, branch_ids=branch_ids
+        )
         in_transit = await self.repo.in_transit_by_location(branch_id=branch_id, warehouse_id=warehouse_id)
+        allowed = set(branch_ids) if branch_ids is not None else None
 
         merged: dict[tuple[uuid.UUID, uuid.UUID], StockPositionRow] = {}
         for r in rows:
@@ -90,6 +95,8 @@ class ReportsService:
                 bid, loc_name, bname = locations.get(loc_id, (None, None, None))
                 if branch_id is not None and bid != branch_id:
                     continue
+                if allowed is not None and bid not in allowed:
+                    continue
                 sku, name, _cost = products.get(prod_id, (None, None, None))
                 merged[(loc_id, prod_id)] = StockPositionRow(
                     branch_id=bid, branch_name=bname, location_id=loc_id, location_name=loc_name,
@@ -104,7 +111,7 @@ class ReportsService:
 
     async def get_sales_log(
         self, *, granularity: str, type_filter: str, branch_id: uuid.UUID | None,
-        date_from: dt.date, date_to: dt.date,
+        date_from: dt.date, date_to: dt.date, branch_ids: Sequence[uuid.UUID] | None = None,
     ) -> SalesLogReport:
         """THE shared sales aggregation (reused by any dashboard sales KPI): fetch parts
         + motorcycle sale events, bucket them by period with the pure no-double-count
@@ -113,13 +120,13 @@ class ReportsService:
         # Parts events are needed for 'all' and 'parts'.
         if type_filter in (sales_log.TYPE_ALL, sales_log.TYPE_PARTS):
             for day, _branch, units, revenue in await self.repo.parts_sale_events(
-                branch_id=branch_id, date_from=date_from, date_to=date_to
+                branch_id=branch_id, date_from=date_from, date_to=date_to, branch_ids=branch_ids
             ):
                 events.append(sales_log.SaleEvent(day=day, kind=sales_log.PARTS, units=units, revenue=revenue))
         # Motorcycle events for 'all' and 'motorcycles'.
         if type_filter in (sales_log.TYPE_ALL, sales_log.TYPE_MOTORCYCLES):
             for day, _branch, revenue, historical in await self.repo.motorcycle_sale_events(
-                branch_id=branch_id, date_from=date_from, date_to=date_to
+                branch_id=branch_id, date_from=date_from, date_to=date_to, branch_ids=branch_ids
             ):
                 kind = sales_log.MOTO_HISTORICAL if historical else sales_log.MOTO_NEW
                 events.append(sales_log.SaleEvent(day=day, kind=kind, units=Decimal("1"), revenue=revenue))
