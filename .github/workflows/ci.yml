@@ -103,7 +103,8 @@ jobs:
             database/sql/customer_deliveries.sql \
             database/sql/reconstruction.sql \
             database/sql/product_wholesale_price.sql \
-            database/sql/user_branch_access.sql ; do
+            database/sql/user_branch_access.sql \
+            database/sql/order_request_transfer_permission.sql ; do
             echo "applying $f"
             psql -v ON_ERROR_STOP=1 -f "$f"
           done

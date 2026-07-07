@@ -49,6 +49,10 @@ PURPOSES = frozenset({
     "for_sale", "shelf_replenishment", "internal_transfer", "branch_transfer",
     "workshop_use", "damaged_replacement", "office_use", "stock_adjustment", "other",
 })
+# Managed inter-location transfers (a stock manager decides source + destination). Raising
+# one needs order_request.transfer; the rest are restock/sales requests a branch user raises
+# for their OWN location (order_request.create), pulling from a source depot.
+TRANSFER_TYPES = frozenset({BRANCH_TRANSFER, INTERNAL_TRANSFER})
 
 _ALLOWED: dict[str, set[str]] = {
     DRAFT: {PENDING, CANCELLED},

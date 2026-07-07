@@ -24,30 +24,38 @@ interface DraftLine {
 
 export function NewOrderRequestModal({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const warehouses = useWarehouses();
 
-  // Branch users only request for the branch(es) they're scoped to (empty grants = all).
-  const grants = user?.accessible_warehouse_ids ?? [];
-  const branches = grants.length
-    ? warehouses.list.filter((w) => grants.includes(w.id))
-    : warehouses.list;
+  // A stock manager may transfer between any locations; a branch user (restock only) may
+  // send stock only to a location within their branch(es) (empty grants = all branches).
+  const canTransfer = hasPermission("order_request.transfer");
+  const allowedBranches = user?.accessible_branch_ids ?? [];
+  const destLocations =
+    canTransfer || allowedBranches.length === 0
+      ? warehouses.list
+      : warehouses.list.filter((w) => w.branch_id && allowedBranches.includes(w.branch_id));
+  const purposes = canTransfer
+    ? PURPOSES
+    : PURPOSES.filter((p) => p.value !== "branch_transfer" && p.value !== "internal_transfer");
 
-  const [branchId, setBranchId] = useState("");
-  const [destinationId, setDestinationId] = useState("");
-  const [purpose, setPurpose] = useState(PURPOSES[0].value);
+  const [sourceId, setSourceId] = useState("");        // fulfil from
+  const [destinationId, setDestinationId] = useState(""); // where stock is needed
+  const [purpose, setPurpose] = useState(purposes[0].value);
   const [comments, setComments] = useState("");
   const [search, setSearch] = useState("");
   const [lines, setLines] = useState<DraftLine[]>([]);
   const [err, setErr] = useState<string | null>(null);
 
-  // Default to the first accessible branch once warehouses load.
-  const effectiveBranch = branchId || branches[0]?.id || "";
+  // Destination defaults to the user's own (first allowed) location; source is the depot to
+  // pull from (any location). Availability is shown for the SOURCE (what can be fulfilled).
+  const effectiveDest = destinationId || destLocations[0]?.id || "";
+  const effectiveSource = sourceId;
 
   const avail = useQuery({
-    queryKey: ["branch-availability", effectiveBranch],
-    queryFn: () => branchAvailability(effectiveBranch),
-    enabled: !!effectiveBranch,
+    queryKey: ["branch-availability", effectiveSource],
+    queryFn: () => branchAvailability(effectiveSource),
+    enabled: !!effectiveSource,
     staleTime: 30_000,
   });
 
@@ -65,8 +73,8 @@ export function NewOrderRequestModal({ onClose }: { onClose: () => void }) {
   const create = useMutation({
     mutationFn: () =>
       orderRequestsApi.create({
-        branch_id: effectiveBranch,
-        destination_branch_id: purpose === "branch_transfer" ? destinationId || null : null,
+        source_location_id: effectiveSource,
+        destination_location_id: effectiveDest || null,
         purpose,
         comments: comments.trim() || null,
         lines: lines.map((l) => ({
@@ -87,12 +95,12 @@ export function NewOrderRequestModal({ onClose }: { onClose: () => void }) {
     setSearch("");
   }
 
-  const isTransfer = purpose === "branch_transfer";
   const valid =
-    !!effectiveBranch &&
+    !!effectiveSource &&
+    !!effectiveDest &&
+    effectiveSource !== effectiveDest &&
     lines.length > 0 &&
-    lines.every((l) => Number(l.qty) > 0) &&
-    (!isTransfer || (!!destinationId && destinationId !== effectiveBranch));
+    lines.every((l) => Number(l.qty) > 0);
 
   return (
     <Modal
@@ -115,13 +123,15 @@ export function NewOrderRequestModal({ onClose }: { onClose: () => void }) {
 
         <div className="grid grid-cols-2 gap-3">
           <label className="block text-sm">
-            <span className="mb-1 block font-medium text-slate-700">Branch</span>
+            <span className="mb-1 block font-medium text-slate-700">Source location</span>
+            <span className="mb-1 block text-xs font-normal text-slate-400">Fulfil from (depot / warehouse)</span>
             <select
-              value={effectiveBranch}
-              onChange={(e) => setBranchId(e.target.value)}
+              value={effectiveSource}
+              onChange={(e) => setSourceId(e.target.value)}
               className={`${INPUT} w-full`}
             >
-              {branches.map((w) => (
+              <option value="">— choose source —</option>
+              {warehouses.list.map((w) => (
                 <option key={w.id} value={w.id}>
                   {w.name}
                 </option>
@@ -129,28 +139,15 @@ export function NewOrderRequestModal({ onClose }: { onClose: () => void }) {
             </select>
           </label>
           <label className="block text-sm">
-            <span className="mb-1 block font-medium text-slate-700">Purpose</span>
-            <select value={purpose} onChange={(e) => setPurpose(e.target.value)} className={`${INPUT} w-full`}>
-              {PURPOSES.map((p) => (
-                <option key={p.value} value={p.value}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        {isTransfer && (
-          <label className="block text-sm">
             <span className="mb-1 block font-medium text-slate-700">Destination location</span>
+            <span className="mb-1 block text-xs font-normal text-slate-400">Where stock is needed</span>
             <select
-              value={destinationId}
+              value={effectiveDest}
               onChange={(e) => setDestinationId(e.target.value)}
               className={`${INPUT} w-full`}
             >
-              <option value="">— choose destination —</option>
-              {warehouses.list
-                .filter((w) => w.id !== effectiveBranch)
+              {destLocations
+                .filter((w) => w.id !== effectiveSource)
                 .map((w) => (
                   <option key={w.id} value={w.id}>
                     {w.name}
@@ -158,7 +155,18 @@ export function NewOrderRequestModal({ onClose }: { onClose: () => void }) {
                 ))}
             </select>
           </label>
-        )}
+        </div>
+
+        <label className="block text-sm">
+          <span className="mb-1 block font-medium text-slate-700">Purpose</span>
+          <select value={purpose} onChange={(e) => setPurpose(e.target.value)} className={`${INPUT} w-full`}>
+            {purposes.map((p) => (
+              <option key={p.value} value={p.value}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <div>
           <span className="mb-1 block text-sm font-medium text-slate-700">Search inventory</span>

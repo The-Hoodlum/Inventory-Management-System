@@ -9,7 +9,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.core.exceptions import BusinessRuleError, NotFoundError
+from app.core.exceptions import BusinessRuleError, NotFoundError, PermissionDeniedError
 from app.order_requests.domain import status as S
 from app.order_requests.schemas import (
     ApproveRequest,
@@ -181,18 +181,33 @@ async def _make_pending(svc):
     return await svc.create(tenant_id=TENANT, user_id=CASHIER, payload=_create_payload())
 
 
-async def test_create_blocked_for_unassigned_branch():
-    other_branch = uuid.uuid4()
-    repo = FakeRepo(branch_ids={other_branch})  # user scoped to a different branch than BRANCH
-    svc = OrderRequestService(repo, FakeAudit())
-    with pytest.raises(BusinessRuleError):
-        await svc.create(tenant_id=TENANT, user_id=CASHIER, payload=_create_payload())  # payload.branch_id == BRANCH
+async def test_restock_to_a_branch_outside_scope_needs_transfer_permission():
+    # location_index maps every location to branch BRANCH; the user is scoped elsewhere, so
+    # sending stock to BRANCH is "outside" and (without order_request.transfer) is denied.
+    dest = uuid.uuid4()
+    svc, _ = _svc()
+    with pytest.raises(PermissionDeniedError):
+        await svc.create(
+            tenant_id=TENANT, user_id=CASHIER,
+            payload=OrderRequestCreate(
+                branch_id=uuid.uuid4(), destination_branch_id=dest, purpose="shelf_replenishment",
+                lines=[OrderRequestLineCreate(product_id=P1, requested_qty=1)],
+            ),
+            user_branch_ids={uuid.uuid4()},  # a different branch than the destination's (BRANCH)
+        )
 
 
-async def test_create_allowed_for_assigned_branch():
-    repo = FakeRepo(branch_ids={BRANCH})  # scoped to the request's branch
-    svc = OrderRequestService(repo, FakeAudit())
-    out = await svc.create(tenant_id=TENANT, user_id=CASHIER, payload=_create_payload())
+async def test_restock_to_own_branch_is_allowed_without_transfer_permission():
+    dest = uuid.uuid4()
+    svc, _ = _svc()
+    out = await svc.create(
+        tenant_id=TENANT, user_id=CASHIER,
+        payload=OrderRequestCreate(
+            branch_id=uuid.uuid4(), destination_branch_id=dest, purpose="shelf_replenishment",
+            lines=[OrderRequestLineCreate(product_id=P1, requested_qty=1)],
+        ),
+        user_branch_ids={BRANCH},  # scoped to the destination's branch
+    )
     assert out.status == S.PENDING
 
 
@@ -433,7 +448,7 @@ async def test_branch_transfer_issue_goes_in_transit():
     out = await svc.create(tenant_id=TENANT, user_id=CASHIER, payload=OrderRequestCreate(
         branch_id=BRANCH, destination_branch_id=dest, purpose="branch_transfer", comments="move it",
         lines=[OrderRequestLineCreate(product_id=P1, requested_qty=4)],
-    ))
+    ), user_permissions={"order_request.transfer"})  # a managed transfer needs this permission
     assert out.destination_branch_id == dest
     line_id = out.lines[0].id
     await svc.approve(tenant_id=TENANT, actor_id=ADMIN, request_id=out.id,
@@ -458,7 +473,7 @@ async def test_branch_transfer_receive_credits_destination():
     out = await svc.create(tenant_id=TENANT, user_id=CASHIER, payload=OrderRequestCreate(
         branch_id=BRANCH, destination_branch_id=dest, purpose="branch_transfer", comments="move it",
         lines=[OrderRequestLineCreate(product_id=P1, requested_qty=4)],
-    ))
+    ), user_permissions={"order_request.transfer"})  # a managed transfer needs this permission
     line_id = out.lines[0].id
     await svc.approve(tenant_id=TENANT, actor_id=ADMIN, request_id=out.id,
                       payload=ApproveRequest(lines=[LineApproval(line_id=line_id, approved_qty=4)]))
