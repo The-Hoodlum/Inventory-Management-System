@@ -39,4 +39,6 @@ export const inventoryApi = {
   transfer: (body: TransferInput) => api.post<InventoryRow[]>("/inventory/transfer", body),
   movements: (params: MovementListParams = {}) =>
     api.get<Page<Movement>>(`/inventory/movements${qs(params)}`),
+  list: (params: { warehouse_id?: string; product_id?: string; page?: number; page_size?: number } = {}) =>
+    api.get<Page<InventoryRow>>(`/inventory${qs(params)}`),
 };

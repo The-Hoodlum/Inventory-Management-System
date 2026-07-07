@@ -3,6 +3,7 @@
 // dashboard primitives (KpiCard / Grid / ChartCard) wired to the existing /dashboard data.
 import { useQuery } from "@tanstack/react-query";
 import {
+  AlertTriangle,
   BarChart3,
   Bike,
   Boxes,
@@ -44,6 +45,7 @@ const MODULES: ModuleCard[] = [
   { title: "Delivery Notes", description: "Transfers & dispatch notes", icon: Send, to: "/delivery-notes", permission: "delivery_note.read" },
   { title: "Customers", description: "Accounts & balances", icon: Contact, to: "/customers", permission: "customer.read" },
   { title: "Motorcycles", description: "Serialized-unit registry", icon: Bike, to: "/motorcycles", permission: "motorcycle.read" },
+  { title: "Bike Issues", description: "Internal repairs & parts used", icon: AlertTriangle, to: "/bike-issues", permission: "bike_issue.read" },
   { title: "Finance", description: "Ledgers, payments, tax", icon: CircleDollarSign, soon: true },
   { title: "CRM", description: "Leads & opportunities", icon: Building2, soon: true },
   { title: "Human Resources", description: "People & payroll", icon: Users, soon: true },

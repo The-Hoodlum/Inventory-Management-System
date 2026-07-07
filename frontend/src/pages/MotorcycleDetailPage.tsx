@@ -12,6 +12,7 @@ import { Modal } from "@/components/Modal";
 import { DetailScaffold, FormLayout, Timeline } from "@/components/ds";
 import { Button } from "@/components/ui";
 import { ApiError } from "@/lib/api";
+import { bikeIssuesApi, issueStatusLabel } from "@/lib/bikeIssues";
 import { useCustomers } from "@/lib/customers";
 import { formatDate } from "@/lib/format";
 import { type MotoUnit, motorcyclesApi, statusLabel } from "@/lib/motorcycles";
@@ -62,6 +63,7 @@ export default function MotorcycleDetailPage() {
               { key: "sale", label: "Sale", content: <SaleTab unit={data} /> },
               { key: "registration", label: "Registration", content: <RegistrationTab unit={data} canManage={canManage} onSaved={invalidate} /> },
               { key: "warranty", label: "Warranty", content: <WarrantyTab unit={data} /> },
+              { key: "repairs", label: "Repairs", content: <RepairsTab unitId={data.id} /> },
               { key: "history", label: "History", content: <HistoryTab unit={data} /> },
             ]}
             activity={<Timeline items={data.events.slice().reverse().map((e) => ({
@@ -225,6 +227,41 @@ function HistoryTab({ unit }: { unit: MotoUnit }) {
         ))}
       </tbody>
     </table>
+  );
+}
+
+// Repair history for this chassis: which parts were consumed, and when. Read-only here —
+// repairs are opened/resolved from the Bike Issues module.
+function RepairsTab({ unitId }: { unitId: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["bike-issues", "unit", unitId],
+    queryFn: () => bikeIssuesApi.list({ unit_id: unitId, page_size: 100 }),
+  });
+  if (isLoading) return <p className="text-sm text-content-subtle">Loading repairs…</p>;
+  const issues = data?.items ?? [];
+  if (issues.length === 0) return <p className="text-sm text-content-subtle">No repair issues for this bike.</p>;
+  return (
+    <div className="space-y-4">
+      {issues.map((i) => (
+        <div key={i.id} className="rounded-card border border-line p-3">
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <Link to={`/bike-issues/${i.id}`} className="font-mono text-[13px] font-medium text-brand-600 hover:underline">{i.issue_number}</Link>
+            <span className="text-xs text-muted">{issueStatusLabel(i.status)} · {formatDate(i.reported_at)}</span>
+          </div>
+          <div className="text-sm text-content-muted">{i.problem_description}</div>
+          {i.lines.length > 0 && (
+            <ul className="mt-2 space-y-0.5 text-xs text-muted">
+              {i.lines.map((l) => (
+                <li key={l.id} className="flex justify-between">
+                  <span>{l.name ?? "—"} <span className="font-mono text-content-subtle">{l.sku}</span></span>
+                  <span>{l.quantity}× {l.consumed ? "consumed" : "planned"}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ))}
+    </div>
   );
 }
 

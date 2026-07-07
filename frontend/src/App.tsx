@@ -4,6 +4,8 @@ import { ProtectedRoute } from "@/auth/ProtectedRoute";
 import { AppShell } from "@/components/AppShell";
 import AdvisorPage from "@/pages/AdvisorPage";
 import AppLauncherPage from "@/pages/AppLauncherPage";
+import BikeIssueDetailPage from "@/pages/BikeIssueDetailPage";
+import BikeIssuesPage from "@/pages/BikeIssuesPage";
 import BranchesPage from "@/pages/BranchesPage";
 import ContainerPage from "@/pages/ContainerPage";
 import CustomerDeliveriesPage from "@/pages/CustomerDeliveriesPage";
@@ -75,6 +77,8 @@ export default function App() {
         <Route path="/motorcycles/setup" element={<MotorcycleSetupPage />} />
         <Route path="/motorcycles/import" element={<MotorcycleImportPage />} />
         <Route path="/motorcycles/:id" element={<MotorcycleDetailPage />} />
+        <Route path="/bike-issues" element={<BikeIssuesPage />} />
+        <Route path="/bike-issues/:id" element={<BikeIssueDetailPage />} />
         <Route path="/pos" element={<PosPage />} />
         <Route path="/parts-sales" element={<SparePartsSalesPage />} />
         <Route path="/inventory" element={<InventoryPage />} />
