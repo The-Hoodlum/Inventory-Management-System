@@ -1,12 +1,12 @@
 """Re-export all ORM models so they register on ``Base.metadata`` and can be
 imported from a single place (e.g. ``from app.models import Product``)."""
+from app.models.assembly import AssemblyTarget
 from app.models.assistant import (
     AssistantConversation,
     AssistantMessage,
     UserWarehouseAccess,
     WhatsAppIdentity,
 )
-from app.models.assembly import AssemblyTarget
 from app.models.bike_issue import BikeIssue, BikeIssueLine
 from app.models.catalog import (
     Brand,

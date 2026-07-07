@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 
 from app.api.v1.deps import (
     CurrentUser,
@@ -51,10 +51,11 @@ async def upsert_target(
     return await svc.upsert_target(tenant_id=user.tenant_id, user_id=user.id, payload=payload)
 
 
-@router.delete("/targets/{target_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/targets/{target_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
 async def delete_target(
     target_id: uuid.UUID,
     user: CurrentUser = Depends(require_permission(P.MOTORCYCLE_CONFIG)),
     svc: AssemblyPlannerService = Depends(get_assembly_service),
-) -> None:
+) -> Response:
     await svc.delete_target(tenant_id=user.tenant_id, user_id=user.id, target_id=target_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
