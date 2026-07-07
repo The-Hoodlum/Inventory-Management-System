@@ -264,12 +264,21 @@ async def test_request_user_cannot_approve_or_issue(client):
     product_id, source = await _find_stocked(client, admin_h, min_qty=2)
     dest = await _other_location(client, admin_h, exclude=source)
 
-    r = await client.post("/api/v1/order-requests", headers=cashier_h, json={
-        "branch_id": source, "destination_branch_id": dest, "purpose": "branch_transfer",
+    # A branch_transfer is a managed move — the admin (stock manager) raises it; the cashier
+    # lacks order_request.transfer so cannot create one (verified separately below).
+    r = await client.post("/api/v1/order-requests", headers=admin_h, json={
+        "source_location_id": source, "destination_location_id": dest, "purpose": "branch_transfer",
         "comments": "Please move", "lines": [{"product_id": product_id, "requested_qty": 1}],
     })
     assert r.status_code == 201, r.text
     rid, line_id = r.json()["id"], r.json()["lines"][0]["id"]
+
+    # A cashier cannot even raise a managed transfer (needs order_request.transfer).
+    denied = await client.post("/api/v1/order-requests", headers=cashier_h, json={
+        "source_location_id": source, "destination_location_id": dest, "purpose": "branch_transfer",
+        "comments": "nope", "lines": [{"product_id": product_id, "requested_qty": 1}],
+    })
+    assert denied.status_code == 403, denied.text
 
     # cashier (request user) cannot approve / issue / receive
     for path, body in [

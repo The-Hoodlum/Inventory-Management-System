@@ -72,6 +72,7 @@ services:
       - ./database/sql/reconstruction.sql:/docker-entrypoint-initdb.d/39_reconstruction.sql:ro
       - ./database/sql/product_wholesale_price.sql:/docker-entrypoint-initdb.d/40_product_wholesale_price.sql:ro
       - ./database/sql/user_branch_access.sql:/docker-entrypoint-initdb.d/41_user_branch_access.sql:ro
+      - ./database/sql/order_request_transfer_permission.sql:/docker-entrypoint-initdb.d/42_order_request_transfer_permission.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-inventory}"]
       interval: 5s

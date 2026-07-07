@@ -12,7 +12,7 @@ import uuid
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.order_requests.domain.status import PURPOSES
+from app.order_requests.domain.status import PURPOSES, TRANSFER_TYPES
 
 
 class OrderRequestLineCreate(BaseModel):
@@ -22,8 +22,16 @@ class OrderRequestLineCreate(BaseModel):
 
 
 class OrderRequestCreate(BaseModel):
-    branch_id: uuid.UUID  # SOURCE location (warehouse)
-    destination_branch_id: uuid.UUID | None = None  # DESTINATION location (warehouse); required for transfers
+    """Explicit from -> to. ``source_location_id`` (fulfil from) + ``destination_location_id``
+    (where stock is needed) are the LOCATION (warehouse) ids the request moves stock between.
+    The legacy ``branch_id`` / ``destination_branch_id`` names are still accepted (they carry
+    the same location ids) and normalized onto the explicit fields."""
+
+    source_location_id: uuid.UUID | None = None       # fulfil-from location
+    destination_location_id: uuid.UUID | None = None  # where stock is needed
+    # Deprecated aliases (same LOCATION ids); kept for back-compat with older callers.
+    branch_id: uuid.UUID | None = None
+    destination_branch_id: uuid.UUID | None = None
     purpose: str  # transfer type
     comments: str | None = Field(default=None, max_length=1000)  # reason
     submit: bool = True  # False => save as draft (not yet submitted for approval)
@@ -37,13 +45,20 @@ class OrderRequestCreate(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def _transfer_needs_reason(self) -> OrderRequestCreate:
-        # A transfer (has a destination location) must record a reason and cannot be
-        # a no-op move onto itself.
-        if self.destination_branch_id is not None:
-            if self.destination_branch_id == self.branch_id:
+    def _normalize_and_validate(self) -> OrderRequestCreate:
+        # Normalize the explicit fields <-> the legacy alias columns (either may be used).
+        self.source_location_id = self.source_location_id or self.branch_id
+        self.destination_location_id = self.destination_location_id or self.destination_branch_id
+        self.branch_id = self.source_location_id
+        self.destination_branch_id = self.destination_location_id
+        if self.source_location_id is None:
+            raise ValueError("A source location is required.")
+        # A move with a destination must be to a different location; a managed transfer
+        # additionally records a reason (a routine restock does not need one).
+        if self.destination_location_id is not None:
+            if self.destination_location_id == self.source_location_id:
                 raise ValueError("Source and destination locations must differ.")
-            if not (self.comments and self.comments.strip()):
+            if self.purpose in TRANSFER_TYPES and not (self.comments and self.comments.strip()):
                 raise ValueError("A reason is required for a transfer.")
         return self
 

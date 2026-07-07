@@ -159,10 +159,10 @@ export interface LineCreateInput {
 }
 
 export interface CreateInput {
-  branch_id: string; // source location
-  destination_branch_id?: string | null; // destination location (required for transfers)
+  source_location_id: string; // fulfil-from location
+  destination_location_id?: string | null; // where stock is needed
   purpose: string; // transfer type
-  comments?: string | null; // reason (required for transfers)
+  comments?: string | null; // reason (required when a destination is set)
   submit?: boolean; // false => save as draft
   lines: LineCreateInput[];
 }

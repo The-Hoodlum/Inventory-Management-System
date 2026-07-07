@@ -42,7 +42,8 @@ class P:
     # Conversational assistant (WhatsApp / API)
     ASSISTANT_USE = "assistant.use"
     # Branch order requests (requisitions)
-    ORDER_REQUEST_CREATE = "order_request.create"   # branch user/cashier raises a request
+    ORDER_REQUEST_CREATE = "order_request.create"   # branch user/cashier raises a restock/sales request
+    ORDER_REQUEST_TRANSFER = "order_request.transfer"  # stock manager raises an inter-location transfer
     ORDER_REQUEST_READ = "order_request.read"       # view requests (own branch or, for admin, all)
     ORDER_REQUEST_APPROVE = "order_request.approve"  # approve / partially approve / reject
     ORDER_REQUEST_ISSUE = "order_request.issue"     # issue stock (deducts inventory)

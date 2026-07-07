@@ -45,7 +45,10 @@ async def create_request(
     user: CurrentUser = Depends(require_permission(P.ORDER_REQUEST_CREATE)),
     svc: OrderRequestService = Depends(get_order_request_service),
 ) -> OrderRequestOut:
-    return await svc.create(tenant_id=user.tenant_id, user_id=user.id, payload=payload)
+    return await svc.create(
+        tenant_id=user.tenant_id, user_id=user.id, payload=payload,
+        user_permissions=user.permissions, user_branch_ids=set(user.branch_ids),
+    )
 
 
 @router.get("", response_model=list[OrderRequestOut])

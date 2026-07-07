@@ -14,7 +14,8 @@ import datetime as dt
 import uuid
 from decimal import Decimal
 
-from app.core.exceptions import BusinessRuleError, NotFoundError
+from app.core.exceptions import BusinessRuleError, NotFoundError, PermissionDeniedError
+from app.core.permissions import P
 from app.order_requests.domain import status as S
 from app.order_requests.repository import OrderRequestRepository
 from app.order_requests.schemas import (
@@ -54,15 +55,13 @@ class OrderRequestService:
 
     # ------------------------------- create ---------------------------- #
     async def create(
-        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, payload: OrderRequestCreate
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, payload: OrderRequestCreate,
+        user_permissions: set[str] | None = None, user_branch_ids: set[uuid.UUID] | None = None,
     ) -> OrderRequestOut:
-        # Branch users may only raise requests for a branch they're scoped to
-        # (no grants = unrestricted). Covers both the web API and the assistant path.
-        branch_ids = await self.repo.user_branch_ids(user_id)
-        if branch_ids and payload.branch_id not in branch_ids:
-            raise BusinessRuleError("You can only raise requests for your assigned location.")
+        user_permissions = user_permissions or set()
+        user_branch_ids = user_branch_ids or set()
         # The explicit inter-location move types must name a destination.
-        if payload.purpose in (S.BRANCH_TRANSFER, S.INTERNAL_TRANSFER) and payload.destination_branch_id is None:
+        if payload.purpose in S.TRANSFER_TYPES and payload.destination_branch_id is None:
             raise BusinessRuleError("A transfer needs a destination location.")
         # Validate that the chosen locations exist (a transfer also needs a destination).
         loc_ids = [payload.branch_id]
@@ -73,6 +72,18 @@ class OrderRequestService:
             raise NotFoundError("Source location not found")
         if payload.destination_branch_id is not None and payload.destination_branch_id not in locs:
             raise NotFoundError("Destination location not found")
+
+        # Role/branch gate (FIX 4): a restock/sales request goes to the user's OWN branch and
+        # needs only order_request.create. A managed inter-location transfer, or a request
+        # sending stock to a branch the user isn't scoped to, needs order_request.transfer.
+        dest_branch = locs[payload.destination_branch_id][1] if payload.destination_branch_id else None
+        sends_outside = bool(user_branch_ids) and dest_branch is not None and dest_branch not in user_branch_ids
+        if payload.purpose in S.TRANSFER_TYPES or sends_outside:
+            if P.ORDER_REQUEST_TRANSFER not in user_permissions:
+                raise PermissionDeniedError(
+                    "You need the stock-transfer permission to raise an inter-location transfer; "
+                    "a restock request must be for your own location."
+                )
 
         new_status = S.PENDING if payload.submit else S.DRAFT
         number = await self.repo.next_request_number(tenant_id)

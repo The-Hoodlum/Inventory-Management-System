@@ -87,8 +87,8 @@ export function NewTransferModal({ onClose }: { onClose: () => void }) {
   const create = useMutation({
     mutationFn: () =>
       orderRequestsApi.create({
-        branch_id: srcLoc,
-        destination_branch_id: dstLoc,
+        source_location_id: srcLoc,
+        destination_location_id: dstLoc,
         purpose: transferType,
         comments: reason.trim(),
         submit: true,
