@@ -305,6 +305,16 @@ def get_issuance_service(db: AsyncSession = Depends(get_db)):
     return IssuanceService(IssuanceRepository(db), get_inventory_service(db), AuditRepository(db))
 
 
+def get_assembly_service(db: AsyncSession = Depends(get_db)):
+    # Assembly Planner: deterministic recommendation from CURRENT unit counts (assembled
+    # vs unassembled). Reads no sales/demand; recommends only (assembling is the existing
+    # unassembled->assembled lifecycle transition in the Motorcycle module).
+    from app.assembly.repository import AssemblyRepository
+    from app.assembly.service import AssemblyPlannerService
+
+    return AssemblyPlannerService(AssemblyRepository(db), AuditRepository(db))
+
+
 def get_bike_issue_service(db: AsyncSession = Depends(get_db)):
     # Internal bike repairs: parts are CONSUMED through the inventory service (single write
     # path); the serialized unit is held/released via its own registry event. Never writes
