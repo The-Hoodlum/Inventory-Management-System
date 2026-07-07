@@ -104,6 +104,12 @@ class CurrentUser:
     full_name: str
     permissions: set[str] = field(default_factory=set)
     roles: list[str] = field(default_factory=list)
+    # Branches this user is scoped to. Empty = unrestricted (all branches; owners/admins).
+    branch_ids: frozenset[uuid.UUID] = field(default_factory=frozenset)
+
+    @property
+    def all_branches(self) -> bool:
+        return not self.branch_ids
 
 
 async def get_current_user(
@@ -139,6 +145,8 @@ async def get_current_user(
         text("SELECT set_config('app.current_tenant', :tenant, true)"),
         {"tenant": str(user.tenant_id)},
     )
+    # Branch scope (reads RLS-protected user_branch_access — must follow the tenant GUC).
+    branch_ids = await users.get_branch_ids(user_id)
 
     return CurrentUser(
         id=user.id,
@@ -147,6 +155,7 @@ async def get_current_user(
         full_name=user.full_name,
         permissions=permissions,
         roles=roles,
+        branch_ids=frozenset(branch_ids),
     )
 
 
@@ -167,6 +176,36 @@ def require_permission(code: str):
         return user
 
     return _checker
+
+
+def resolve_branch_scope(
+    user: CurrentUser, requested: uuid.UUID | None = None
+) -> list[uuid.UUID] | None:
+    """Server-side branch boundary. Returns the branch id(s) a query may span:
+
+    - unrestricted user (no grants): the requested branch if given, else ``None`` (= all).
+    - scoped user: the requested branch (403 if it isn't one of theirs), else ALL of theirs.
+
+    ``None`` means "no branch filter" and is only ever returned for an unrestricted user.
+    A scoped user always gets a concrete, non-empty list — never all-branches.
+    """
+    if user.all_branches:
+        return [requested] if requested is not None else None
+    if requested is not None:
+        if requested not in user.branch_ids:
+            raise PermissionDeniedError("You are not assigned to that branch.")
+        return [requested]
+    return sorted(user.branch_ids)
+
+
+def effective_branch_id(user: CurrentUser, requested: uuid.UUID | None) -> uuid.UUID | None:
+    """Single-branch variant of the boundary, for endpoints/aggregations that filter by ONE
+    branch id. Rejects a branch the user isn't scoped to; a scoped user with no explicit pick
+    is defaulted to (one of) their own branch — never left unfiltered/all-branches."""
+    scope = resolve_branch_scope(user, requested)  # raises on a disallowed branch
+    if scope is None:
+        return requested  # unrestricted: honour the request (None = all)
+    return requested if requested is not None else scope[0]
 
 
 def require_feature(key: str):

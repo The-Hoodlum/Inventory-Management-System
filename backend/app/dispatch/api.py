@@ -5,7 +5,12 @@ import uuid
 
 from fastapi import APIRouter, Depends, Query, Response
 
-from app.api.v1.deps import CurrentUser, get_dispatch_service, require_permission
+from app.api.v1.deps import (
+    CurrentUser,
+    get_dispatch_service,
+    require_permission,
+    resolve_branch_scope,
+)
 from app.core.permissions import P
 from app.dispatch.schemas import (
     CancelBody,
@@ -33,10 +38,13 @@ async def list_notes(
     status_filter: str | None = Query(default=None, alias="status"),
     type_filter: str | None = Query(default=None, alias="type"),
     limit: int = Query(default=100, ge=1, le=500),
-    _: CurrentUser = Depends(require_permission(P.DELIVERY_NOTE_READ)),
+    user: CurrentUser = Depends(require_permission(P.DELIVERY_NOTE_READ)),
     svc: DispatchService = Depends(get_dispatch_service),
 ) -> list[DispatchNoteOut]:
-    return await svc.list_notes(branch_id=branch_id, status=status_filter, dispatch_type=type_filter, limit=limit)
+    return await svc.list_notes(
+        branch_ids=resolve_branch_scope(user, branch_id),
+        status=status_filter, dispatch_type=type_filter, limit=limit,
+    )
 
 
 @router.get("/{note_id}", response_model=DispatchNoteOut)

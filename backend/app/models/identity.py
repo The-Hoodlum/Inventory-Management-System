@@ -69,6 +69,17 @@ class User(Base):
     updated_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
 
 
+class UserBranchAccess(Base):
+    """User -> branch grant. A user with NO rows is unrestricted (all branches)."""
+
+    __tablename__ = "user_branch_access"
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    branch_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("branches.id", ondelete="CASCADE"), primary_key=True)
+    created_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
 class Role(Base):
     __tablename__ = "roles"
 

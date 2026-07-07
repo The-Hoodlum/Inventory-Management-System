@@ -24,11 +24,14 @@ class UserAdminService:
 
     # ------------------------------ helpers ------------------------------ #
     async def _to_out(
-        self, user: User, role_pairs: list[tuple[uuid.UUID, str]] | None = None
+        self, user: User, role_pairs: list[tuple[uuid.UUID, str]] | None = None,
+        branch_ids: list[uuid.UUID] | None = None,
     ) -> UserOut:
         if role_pairs is None:
             mapping = await self.users.roles_for_users([user.id])
             role_pairs = mapping.get(user.id, [])
+        if branch_ids is None:
+            branch_ids = (await self.users.branches_for_users([user.id])).get(user.id, [])
         names = sorted(name for _id, name in role_pairs)
         ids = [rid for rid, _name in role_pairs]
         return UserOut(
@@ -41,7 +44,22 @@ class UserAdminService:
             created_at=user.created_at,
             roles=names,
             role_ids=ids,
+            branch_ids=branch_ids,
         )
+
+    async def _validate_branches(
+        self, tenant_id: uuid.UUID, branch_ids: list[uuid.UUID]
+    ) -> list[uuid.UUID]:
+        desired = user_rules.dedupe_preserving_order(branch_ids)
+        if desired:
+            valid = await self.users.valid_branch_ids(tenant_id)
+            invalid = [b for b in desired if b not in valid]
+            if invalid:
+                raise BusinessRuleError(
+                    "One or more branches do not exist in this tenant",
+                    details={"branch_ids": sorted(str(b) for b in invalid)},
+                )
+        return desired
 
     async def _validate_roles(self, tenant_id: uuid.UUID, role_ids: list[uuid.UUID]) -> list[uuid.UUID]:
         desired = user_rules.dedupe_preserving_order(role_ids)
@@ -84,7 +102,11 @@ class UserAdminService:
             tenant_id=tenant_id, search=search, is_active=is_active, offset=offset, limit=page_size
         )
         role_map = await self.users.roles_for_users([u.id for u in users])
-        out = [await self._to_out(u, role_map.get(u.id, [])) for u in users]
+        branch_map = await self.users.branches_for_users([u.id for u in users])
+        out = [
+            await self._to_out(u, role_map.get(u.id, []), branch_map.get(u.id, []))
+            for u in users
+        ]
         return out, total
 
     async def get(self, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> UserOut:
@@ -111,6 +133,7 @@ class UserAdminService:
         if await self.users.email_exists(tenant_id, email):
             raise ConflictError(f"A user with email '{email}' already exists")
         desired = await self._validate_roles(tenant_id, data.role_ids)
+        branches = await self._validate_branches(tenant_id, data.branch_ids)
 
         user = User(
             tenant_id=tenant_id,
@@ -122,6 +145,8 @@ class UserAdminService:
         await self.users.add(user)
         if desired:
             await self.users.set_roles(user.id, desired)
+        if branches:
+            await self.users.set_branches(user.id, branches, tenant_id)
 
         await self.audit.add(
             tenant_id=tenant_id,
@@ -134,10 +159,11 @@ class UserAdminService:
                 "full_name": data.full_name,
                 "is_active": data.is_active,
                 "role_ids": [str(r) for r in desired],
+                "branch_ids": [str(b) for b in branches],
             },
             ip_address=ip,
         )
-        return await self._to_out(user)
+        return await self._to_out(user, branch_ids=branches)
 
     async def update(
         self,
@@ -172,6 +198,11 @@ class UserAdminService:
             desired = await self._validate_roles(tenant_id, data.role_ids)
             await self.users.set_roles(user_id, desired)
             changes["role_ids"] = [str(r) for r in desired]
+
+        if data.branch_ids is not None:
+            branches = await self._validate_branches(tenant_id, data.branch_ids)
+            await self.users.set_branches(user_id, branches, tenant_id)
+            changes["branch_ids"] = [str(b) for b in branches]
 
         await self.users.session.flush()
         if changes:

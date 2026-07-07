@@ -7,7 +7,12 @@ import uuid
 
 from fastapi import APIRouter, Depends, Query
 
-from app.api.v1.deps import CurrentUser, get_reports_service, require_permission
+from app.api.v1.deps import (
+    CurrentUser,
+    effective_branch_id,
+    get_reports_service,
+    require_permission,
+)
 from app.core.exceptions import BusinessRuleError
 from app.core.permissions import P
 from app.reports import sales_log
@@ -29,7 +34,7 @@ async def sales_log_report(
     branch_id: uuid.UUID | None = Query(default=None),
     date_from: dt.date | None = Query(default=None),
     date_to: dt.date | None = Query(default=None),
-    _: CurrentUser = Depends(require_permission(P.REPORT_READ)),
+    user: CurrentUser = Depends(require_permission(P.REPORT_READ)),
     svc: ReportsService = Depends(get_reports_service),
 ) -> SalesLogReport:
     """Unified sales log: parts + motorcycle revenue bucketed daily / weekly / monthly,
@@ -46,7 +51,8 @@ async def sales_log_report(
     if date_from > date_to:
         raise BusinessRuleError("date_from must not be after date_to.")
     return await svc.get_sales_log(
-        granularity=granularity, type_filter=type, branch_id=branch_id,
+        granularity=granularity, type_filter=type,
+        branch_id=effective_branch_id(user, branch_id),
         date_from=date_from, date_to=date_to,
     )
 
@@ -55,11 +61,13 @@ async def sales_log_report(
 async def stock_position(
     branch_id: uuid.UUID | None = Query(default=None),
     warehouse_id: uuid.UUID | None = Query(default=None),
-    _: CurrentUser = Depends(require_permission(P.REPORT_READ)),
+    user: CurrentUser = Depends(require_permission(P.REPORT_READ)),
     svc: ReportsService = Depends(get_reports_service),
 ) -> StockPositionReport:
     # On-hand / reserved / available / in-transit per branch + location + product.
-    return await svc.get_stock_position(branch_id=branch_id, warehouse_id=warehouse_id)
+    return await svc.get_stock_position(
+        branch_id=effective_branch_id(user, branch_id), warehouse_id=warehouse_id
+    )
 
 
 @router.get("/inventory-aging", response_model=InventoryAgingReport)

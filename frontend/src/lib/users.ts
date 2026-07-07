@@ -23,6 +23,7 @@ export interface UserCreateInput {
   full_name: string;
   password: string;
   role_ids: string[];
+  branch_ids: string[];
   is_active: boolean;
 }
 
@@ -31,6 +32,7 @@ export interface UserUpdateInput {
   is_active?: boolean;
   password?: string;
   role_ids?: string[];
+  branch_ids?: string[];
 }
 
 export const usersApi = {

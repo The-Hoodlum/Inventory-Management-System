@@ -11,7 +11,7 @@ import uuid
 from sqlalchemy import delete, func, insert, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Role, User, UserRole
+from app.models import Branch, Role, User, UserBranchAccess, UserRole
 
 
 class UserAdminRepository:
@@ -80,6 +80,35 @@ class UserAdminRepository:
         for uid, rid, rname in (await self.session.execute(stmt)).all():
             out.setdefault(uid, []).append((rid, rname))
         return out
+
+    # ------------------------------ branches ----------------------------- #
+    async def branches_for_users(
+        self, user_ids: list[uuid.UUID]
+    ) -> dict[uuid.UUID, list[uuid.UUID]]:
+        if not user_ids:
+            return {}
+        rows = await self.session.execute(
+            select(UserBranchAccess.user_id, UserBranchAccess.branch_id)
+            .where(UserBranchAccess.user_id.in_(user_ids))
+        )
+        out: dict[uuid.UUID, list[uuid.UUID]] = {}
+        for uid, bid in rows.all():
+            out.setdefault(uid, []).append(bid)
+        return out
+
+    async def valid_branch_ids(self, tenant_id: uuid.UUID) -> set[uuid.UUID]:
+        rows = await self.session.execute(select(Branch.id).where(Branch.tenant_id == tenant_id))
+        return {r[0] for r in rows.all()}
+
+    async def set_branches(
+        self, user_id: uuid.UUID, branch_ids: list[uuid.UUID], tenant_id: uuid.UUID
+    ) -> None:
+        await self.session.execute(delete(UserBranchAccess).where(UserBranchAccess.user_id == user_id))
+        for bid in branch_ids:
+            await self.session.execute(
+                insert(UserBranchAccess).values(user_id=user_id, branch_id=bid, tenant_id=tenant_id)
+            )
+        await self.session.flush()
 
     async def set_roles(self, user_id: uuid.UUID, role_ids: list[uuid.UUID]) -> None:
         await self.session.execute(delete(UserRole).where(UserRole.user_id == user_id))

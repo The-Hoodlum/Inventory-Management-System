@@ -11,7 +11,15 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Permission, Role, RolePermission, Tenant, User, UserRole
+from app.models import (
+    Permission,
+    Role,
+    RolePermission,
+    Tenant,
+    User,
+    UserBranchAccess,
+    UserRole,
+)
 
 
 class UserRepository:
@@ -53,6 +61,16 @@ class UserRepository:
         )
         res = await self.session.execute(stmt)
         return [row[0] for row in res.all()]
+
+    async def get_branch_ids(self, user_id: uuid.UUID) -> set[uuid.UUID]:
+        """Branches a user is scoped to. Empty set = unrestricted (all branches).
+
+        Reads the RLS-protected user_branch_access, so the tenant GUC must already be set.
+        """
+        res = await self.session.execute(
+            select(UserBranchAccess.branch_id).where(UserBranchAccess.user_id == user_id)
+        )
+        return {row[0] for row in res.all()}
 
     async def touch_last_login(self, user: User) -> None:
         from sqlalchemy import func

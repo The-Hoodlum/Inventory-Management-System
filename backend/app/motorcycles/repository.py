@@ -195,7 +195,8 @@ class MotorcycleRepository:
 
     async def list_units(
         self, *, search: str | None = None, status: str | None = None,
-        branch_id: uuid.UUID | None = None, model_id: uuid.UUID | None = None,
+        branch_id: uuid.UUID | None = None, branch_ids: Sequence[uuid.UUID] | None = None,
+        model_id: uuid.UUID | None = None,
         variant_id: uuid.UUID | None = None, colour_id: uuid.UUID | None = None,
         sold: bool | None = None, inspected: bool | None = None,
         registered: bool | None = None, page: int = 1, page_size: int = 50,
@@ -209,6 +210,9 @@ class MotorcycleRepository:
             base = base.where(MotorcycleUnit.registered.is_(registered))
         if branch_id is not None:
             base = base.where(MotorcycleUnit.branch_id == branch_id)
+        # Server-side branch scope (user restricted to certain branches). None = all.
+        if branch_ids is not None:
+            base = base.where(MotorcycleUnit.branch_id.in_(list(branch_ids)))
         if model_id is not None:
             base = base.where(MotorcycleUnit.model_id == model_id)
         if variant_id is not None:
@@ -232,12 +236,16 @@ class MotorcycleRepository:
         )
         return list(rows), int(total or 0)
 
-    async def status_counts(self, *, branch_id: uuid.UUID | None = None) -> dict[str, int]:
+    async def status_counts(
+        self, *, branch_id: uuid.UUID | None = None, branch_ids: Sequence[uuid.UUID] | None = None
+    ) -> dict[str, int]:
         """Count units grouped by lifecycle status (tenant-scoped by RLS; optionally
-        narrowed to one branch). Powers the dashboard KPI."""
+        narrowed to a branch or the caller's allowed branch set). Powers the dashboard KPI."""
         stmt = select(MotorcycleUnit.status, func.count()).group_by(MotorcycleUnit.status)
         if branch_id is not None:
             stmt = stmt.where(MotorcycleUnit.branch_id == branch_id)
+        if branch_ids is not None:
+            stmt = stmt.where(MotorcycleUnit.branch_id.in_(list(branch_ids)))
         rows = await self.session.execute(stmt)
         return {status: int(count) for status, count in rows.all()}
 
