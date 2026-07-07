@@ -198,6 +198,26 @@ def resolve_branch_scope(
     return sorted(user.branch_ids)
 
 
+async def resolve_warehouse_scope(
+    user: CurrentUser, requested: uuid.UUID | None, warehouses: WarehouseRepository
+) -> list[uuid.UUID] | None:
+    """Branch boundary for WAREHOUSE-keyed reads (inventory, movements). A scoped user only
+    sees warehouses inside their branch(es); a requested warehouse outside that is rejected.
+
+    Returns the warehouse id(s) a query may span: ``None`` (no filter) only for an
+    unrestricted user; a scoped user always gets a concrete list (possibly empty when their
+    branches hold no warehouses, which correctly yields no rows).
+    """
+    if user.all_branches:
+        return [requested] if requested is not None else None
+    allowed = await warehouses.ids_in_branches(user.branch_ids)
+    if requested is not None:
+        if requested not in allowed:
+            raise PermissionDeniedError("You are not assigned to that location's branch.")
+        return [requested]
+    return sorted(allowed)
+
+
 def effective_branch_id(user: CurrentUser, requested: uuid.UUID | None) -> uuid.UUID | None:
     """Single-branch variant of the boundary, for endpoints/aggregations that filter by ONE
     branch id. Rejects a branch the user isn't scoped to; a scoped user with no explicit pick

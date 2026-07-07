@@ -10,7 +10,12 @@ import uuid
 
 from fastapi import APIRouter, Depends, Query, Request, status
 
-from app.api.v1.deps import CurrentUser, get_inventory_service, require_permission
+from app.api.v1.deps import (
+    CurrentUser,
+    get_inventory_service,
+    require_permission,
+    resolve_warehouse_scope,
+)
 from app.core.permissions import P
 from app.models import Inventory
 from app.schemas.common import Page
@@ -105,11 +110,12 @@ async def list_inventory(
     product_id: uuid.UUID | None = None,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
-    _: CurrentUser = Depends(require_permission(P.INVENTORY_READ)),
+    user: CurrentUser = Depends(require_permission(P.INVENTORY_READ)),
     svc: InventoryService = Depends(get_inventory_service),
 ) -> Page[InventoryOut]:
+    scope = await resolve_warehouse_scope(user, warehouse_id, svc.warehouses)
     items, total = await svc.list_inventory(
-        warehouse_id=warehouse_id, product_id=product_id, page=page, page_size=page_size
+        warehouse_ids=scope, product_id=product_id, page=page, page_size=page_size
     )
     return Page[InventoryOut](
         items=[_inv_out(i) for i in items],
@@ -126,11 +132,12 @@ async def list_movements(
     warehouse_id: uuid.UUID | None = None,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
-    _: CurrentUser = Depends(require_permission(P.INVENTORY_READ)),
+    user: CurrentUser = Depends(require_permission(P.INVENTORY_READ)),
     svc: InventoryService = Depends(get_inventory_service),
 ) -> Page[MovementOut]:
+    scope = await resolve_warehouse_scope(user, warehouse_id, svc.warehouses)
     items, total = await svc.list_movements(
-        product_id=product_id, warehouse_id=warehouse_id, page=page, page_size=page_size
+        product_id=product_id, warehouse_ids=scope, page=page, page_size=page_size
     )
     return Page[MovementOut](
         items=[MovementOut.model_validate(m) for m in items],
