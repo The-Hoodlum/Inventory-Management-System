@@ -65,6 +65,9 @@ class P:
     MOTORCYCLE_READ = "motorcycle.read"      # view units + reference catalog
     MOTORCYCLE_MANAGE = "motorcycle.manage"  # create/update units + drive lifecycle (reserve/sell/transfer)
     MOTORCYCLE_CONFIG = "motorcycle.config"  # manage reference catalog (models/variants/colours)
+    # Bike issues (internal repairs on owned bikes that consume spare parts from stock)
+    BIKE_ISSUE_READ = "bike_issue.read"      # view repair issues + their consumed parts
+    BIKE_ISSUE_MANAGE = "bike_issue.manage"  # open issues, add repair parts, resolve (consumes stock)
     # Delivery / dispatch notes (typed) — paper that documents a stock movement.
     DELIVERY_NOTE_READ = "delivery_note.read"
     DELIVERY_NOTE_DISPATCH = "delivery_note.dispatch"  # create + dispatch (send in transit)

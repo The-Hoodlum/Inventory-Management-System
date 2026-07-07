@@ -6,6 +6,7 @@ from app.models.assistant import (
     UserWarehouseAccess,
     WhatsAppIdentity,
 )
+from app.models.bike_issue import BikeIssue, BikeIssueLine
 from app.models.catalog import (
     Brand,
     Category,
@@ -100,4 +101,5 @@ __all__ = [
     "DispatchNote", "DispatchNoteLine",
     "Issuance", "IssuanceLine",
     "CustomerDelivery", "CustomerDeliveryLine",
+    "BikeIssue", "BikeIssueLine",
 ]

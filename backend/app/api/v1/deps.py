@@ -305,6 +305,16 @@ def get_issuance_service(db: AsyncSession = Depends(get_db)):
     return IssuanceService(IssuanceRepository(db), get_inventory_service(db), AuditRepository(db))
 
 
+def get_bike_issue_service(db: AsyncSession = Depends(get_db)):
+    # Internal bike repairs: parts are CONSUMED through the inventory service (single write
+    # path); the serialized unit is held/released via its own registry event. Never writes
+    # qty_on_hand directly, and never creates a customer sale.
+    from app.bike_issues.repository import BikeIssueRepository
+    from app.bike_issues.service import BikeIssueService
+
+    return BikeIssueService(BikeIssueRepository(db), get_inventory_service(db), AuditRepository(db))
+
+
 def get_reorder_service(db: AsyncSession = Depends(get_db)) -> ReorderService:
     # PO creation is delegated to the single procurement path, so the reorder
     # service is wired with a ProcurementService (not its own PO repository).
