@@ -15,6 +15,7 @@ from app.api.v1.endpoints import (
     users,
     warehouses,
 )
+from app.assembly.api import router as assembly_router
 from app.assistant.api import router as assistant_router
 from app.bike_issues.api import router as bike_issues_router
 from app.container.api import router as container_router
@@ -64,6 +65,7 @@ api_router.include_router(order_requests_router, prefix="/order-requests", tags=
 api_router.include_router(sales_router, prefix="/sales", tags=["sales"])
 api_router.include_router(motorcycles_router, prefix="/motorcycles", tags=["motorcycles"])
 api_router.include_router(bike_issues_router, prefix="/bike-issues", tags=["bike-issues"])
+api_router.include_router(assembly_router, prefix="/assembly", tags=["assembly"])
 api_router.include_router(dispatch_router, prefix="/delivery-notes", tags=["delivery-notes"])
 api_router.include_router(issuance_router, prefix="/issuances", tags=["issuances"])
 api_router.include_router(customer_delivery_router, prefix="/customer-deliveries", tags=["customer-deliveries"])

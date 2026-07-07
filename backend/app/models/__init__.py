@@ -6,6 +6,7 @@ from app.models.assistant import (
     UserWarehouseAccess,
     WhatsAppIdentity,
 )
+from app.models.assembly import AssemblyTarget
 from app.models.bike_issue import BikeIssue, BikeIssueLine
 from app.models.catalog import (
     Brand,
@@ -102,4 +103,5 @@ __all__ = [
     "Issuance", "IssuanceLine",
     "CustomerDelivery", "CustomerDeliveryLine",
     "BikeIssue", "BikeIssueLine",
+    "AssemblyTarget",
 ]
