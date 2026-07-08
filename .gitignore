@@ -5,6 +5,8 @@
 .env
 backend/.env
 frontend/.env
+# Production secrets file (the .example template IS committed).
+.env.prod
 *.key
 *.pem
 
