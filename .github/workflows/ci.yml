@@ -104,7 +104,9 @@ jobs:
             database/sql/reconstruction.sql \
             database/sql/product_wholesale_price.sql \
             database/sql/user_branch_access.sql \
-            database/sql/order_request_transfer_permission.sql ; do
+            database/sql/order_request_transfer_permission.sql \
+            database/sql/bike_issues.sql \
+            database/sql/assembly_targets.sql ; do
             echo "applying $f"
             psql -v ON_ERROR_STOP=1 -f "$f"
           done
