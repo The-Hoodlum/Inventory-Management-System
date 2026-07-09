@@ -10,7 +10,7 @@ from typing import Any
 
 from fpdf import FPDF
 
-from app.core.pdf_branding import place_logo
+from app.core.pdf_branding import draw_company_block, place_logo
 
 # A4 content width: 210mm - 2 x 15mm margins.
 _CONTENT_W = 180.0
@@ -81,10 +81,10 @@ def build_purchase_order_pdf(
     pdf.cell(95, 5, "From", ln=1)
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(*_MUTED)
-    for part in (company.get("name"), company.get("address"), company.get("email"), company.get("phone")):
-        if part:
-            pdf.multi_cell(95, 5, _s(part))
-    company_bottom = pdf.get_y()
+    company_bottom = draw_company_block(
+        pdf, 15, pdf.get_y(), 90,
+        (company.get("name"), company.get("address"), company.get("email"), company.get("phone")),
+    )
 
     # PO meta block on the right
     pdf.set_xy(115, top_y)

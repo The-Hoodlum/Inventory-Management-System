@@ -13,7 +13,7 @@ from typing import Any
 from fpdf import FPDF
 
 from app.core.config import settings
-from app.core.pdf_branding import place_logo
+from app.core.pdf_branding import draw_company_block, place_logo
 from app.customer_delivery.schemas import CustomerDeliveryOut
 
 _CONTENT_W = 180.0
@@ -79,10 +79,10 @@ def build_customer_delivery_pdf(note: CustomerDeliveryOut) -> bytes:
     pdf.cell(95, 5, "From (company)", ln=1)
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(*_MUTED)
-    for part in (settings.company_name, settings.company_address, settings.company_email, settings.company_phone):
-        if part:
-            pdf.multi_cell(95, 5, _s(part))
-    company_bottom = pdf.get_y()
+    company_bottom = draw_company_block(
+        pdf, 15, pdf.get_y(), 90,
+        (settings.company_name, settings.company_address, settings.company_email, settings.company_phone),
+    )
 
     pdf.set_xy(115, top_y)
     for label, value in (
