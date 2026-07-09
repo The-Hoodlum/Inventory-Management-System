@@ -39,3 +39,6 @@ Thumbs.db
 
 # --- Misc ---
 *.log
+
+# Local-only compose overrides (e.g. pointing the API at a specific DB).
+docker-compose.override.yml
