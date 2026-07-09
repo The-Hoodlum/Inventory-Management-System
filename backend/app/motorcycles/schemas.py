@@ -116,6 +116,7 @@ class UnitCreate(BaseModel):
     branch_id: uuid.UUID | None = None
     warehouse_id: uuid.UUID | None = None
     internal_location: str | None = Field(default=None, max_length=200)
+    country_of_origin: str | None = Field(default=None, max_length=120)
     selling_price: float | None = Field(default=None, ge=0)
     assembly_required: bool = False
     notes: str | None = Field(default=None, max_length=2000)
@@ -134,6 +135,7 @@ class UnitUpdate(BaseModel):
     date_received: dt.date | None = None
     warehouse_id: uuid.UUID | None = None
     internal_location: str | None = None
+    country_of_origin: str | None = Field(default=None, max_length=120)
     selling_price: float | None = Field(default=None, ge=0)
     # Inspection + registration are INDEPENDENT facts, edited here (not via the lifecycle).
     inspected: bool | None = None
@@ -221,6 +223,7 @@ class UnitOut(BaseModel):
     warehouse_id: uuid.UUID | None = None
     warehouse_name: str | None = None
     internal_location: str | None = None
+    country_of_origin: str | None = None
     status: str                      # one of the five sale statuses
     inspected: bool                  # independent of status
     hold_reason: str | None = None   # set while on_hold; kept for history after

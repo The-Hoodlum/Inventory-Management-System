@@ -81,6 +81,9 @@ class MotorcycleUnit(Base):
     branch_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("branches.id", ondelete="SET NULL"), nullable=True)
     warehouse_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("warehouses.id", ondelete="SET NULL"), nullable=True)
     internal_location: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Country this specific unit was sourced from (e.g. India / Congo / Kenya). Lets one
+    # model cover units of different origin without duplicating the catalog entry.
+    country_of_origin: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Sale status: ONE of five (unassembled/assembled/reserved/on_hold/sold). State
     # machine in app/motorcycles/domain/lifecycle.py.
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'unassembled'"))

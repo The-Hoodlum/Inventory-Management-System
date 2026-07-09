@@ -84,6 +84,35 @@ async def _unit(client, admin_h, *, model_id, chassis=None, **extra) -> dict:
 
 
 # ------------------------------------------------------------------------- #
+# Country of origin (per-unit; distinguishes same-model units of different origin)
+# ------------------------------------------------------------------------- #
+async def test_unit_country_of_origin_roundtrips_edits_and_filters(client):
+    admin_h = await _headers(client, ADMIN_EMAIL, ADMIN_PASSWORD)
+    model = await _model(client, admin_h)
+
+    # Same model, different origins.
+    india = await _unit(client, admin_h, model_id=model["id"], country_of_origin="India")
+    congo = await _unit(client, admin_h, model_id=model["id"], country_of_origin="Congo")
+    assert india["country_of_origin"] == "India"
+    assert congo["country_of_origin"] == "Congo"
+
+    # It is returned on GET and editable via PATCH.
+    got = (await client.get(f"/api/v1/motorcycles/units/{india['id']}", headers=admin_h)).json()
+    assert got["country_of_origin"] == "India"
+    r = await client.patch(f"/api/v1/motorcycles/units/{congo['id']}", headers=admin_h,
+                           json={"country_of_origin": "Kenya"})
+    assert r.status_code == 200 and r.json()["country_of_origin"] == "Kenya"
+
+    # The list filter narrows by origin.
+    listed = (await client.get("/api/v1/motorcycles/units", headers=admin_h,
+                               params={"country_of_origin": "India", "model_id": model["id"]})).json()
+    origins = {u["country_of_origin"] for u in listed["items"]}
+    ids = {u["id"] for u in listed["items"]}
+    assert origins == {"India"}
+    assert india["id"] in ids and congo["id"] not in ids
+
+
+# ------------------------------------------------------------------------- #
 # Dashboard metrics
 # ------------------------------------------------------------------------- #
 async def test_metrics_rolls_up_by_lifecycle_bucket(client):

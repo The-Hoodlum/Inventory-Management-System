@@ -75,6 +75,7 @@ services:
       - ./database/sql/order_request_transfer_permission.sql:/docker-entrypoint-initdb.d/42_order_request_transfer_permission.sql:ro
       - ./database/sql/bike_issues.sql:/docker-entrypoint-initdb.d/43_bike_issues.sql:ro
       - ./database/sql/assembly_targets.sql:/docker-entrypoint-initdb.d/44_assembly_targets.sql:ro
+      - ./database/sql/motorcycle_country_of_origin.sql:/docker-entrypoint-initdb.d/45_motorcycle_country_of_origin.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-inventory}"]
       interval: 5s

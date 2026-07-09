@@ -70,6 +70,7 @@ export default function MotorcyclesPage() {
     { key: "model", header: "Model", accessor: (u) => u.model_name ?? "—" },
     { key: "variant", header: "Variant", accessor: (u) => u.variant_name ?? "—", defaultHidden: true },
     { key: "colour", header: "Colour", accessor: (u) => u.colour_name ?? "—" },
+    { key: "origin", header: "Origin", accessor: (u) => u.country_of_origin ?? "—" },
     { key: "branch", header: "Branch", accessor: (u) => u.branch_name ?? "—" },
     { key: "customer", header: "Customer", accessor: (u) => u.customer_name ?? "—", defaultHidden: true },
     { key: "registration", header: "Reg. no.", accessor: (u) => u.registration_number ?? "—", defaultHidden: true },
@@ -177,7 +178,7 @@ function NewUnitModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
         model_id: form.model_id,
         assembly_required: Boolean(form.assembly_required),
       };
-      for (const k of ["engine_number", "variant_id", "colour_id", "branch_id", "warehouse_id", "internal_location"]) {
+      for (const k of ["engine_number", "variant_id", "colour_id", "branch_id", "warehouse_id", "internal_location", "country_of_origin"]) {
         if (form[k]) body[k] = form[k];
       }
       if (form.year) body.year = Number(form.year);
@@ -209,6 +210,10 @@ function NewUnitModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
               <option value="">Select a model…</option>
               {(models.data?.items ?? []).map((m) => <option key={m.id} value={m.id}>{m.name}{m.brand_name ? ` · ${m.brand_name}` : ""}</option>)}
             </select>
+          </Field>
+          <Field label="Country of origin">
+            <input className={INPUT} list="unit-origin-suggestions" placeholder="e.g. India, Congo, Kenya" value={String(form.country_of_origin ?? "")} onChange={(e) => set("country_of_origin", e.target.value)} />
+            <datalist id="unit-origin-suggestions"><option value="India" /><option value="Congo" /><option value="Kenya" /></datalist>
           </Field>
           <Field label="Colour">
             <select className={INPUT} value={String(form.colour_id ?? "")} onChange={(e) => set("colour_id", e.target.value)}>

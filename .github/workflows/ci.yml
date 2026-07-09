@@ -106,7 +106,8 @@ jobs:
             database/sql/user_branch_access.sql \
             database/sql/order_request_transfer_permission.sql \
             database/sql/bike_issues.sql \
-            database/sql/assembly_targets.sql ; do
+            database/sql/assembly_targets.sql \
+            database/sql/motorcycle_country_of_origin.sql ; do
             echo "applying $f"
             psql -v ON_ERROR_STOP=1 -f "$f"
           done
