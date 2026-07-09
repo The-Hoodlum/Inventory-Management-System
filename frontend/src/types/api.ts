@@ -227,6 +227,7 @@ export interface Product {
   cartons_per_pallet: number | null;
   reorder_point: number | null;
   safety_stock: number | null;
+  location: string | null;
   // Product intelligence profile
   commodity_tags: string[];
   country_of_origin: string | null;

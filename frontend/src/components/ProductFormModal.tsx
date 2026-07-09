@@ -31,6 +31,7 @@ interface FormState {
   lead_time_days: string;
   reorder_point: string;
   safety_stock: string;
+  location: string;
   status: ProductStatus;
   // Intelligence profile
   commodity_tags: string; // comma-separated in the form
@@ -59,6 +60,7 @@ function initialState(p?: Product | null): FormState {
     lead_time_days: String(p?.lead_time_days ?? 30),
     reorder_point: p?.reorder_point != null ? String(p.reorder_point) : "",
     safety_stock: p?.safety_stock != null ? String(p.safety_stock) : "",
+    location: p?.location ?? "",
     status: p?.status ?? "active",
     commodity_tags: (p?.commodity_tags ?? []).join(", "),
     country_of_origin: p?.country_of_origin ?? "",
@@ -118,6 +120,7 @@ export function ProductFormModal({
         lead_time_days: Math.max(0, toInt(form.lead_time_days, 0)),
         reorder_point: toIntOrNull(form.reorder_point),
         safety_stock: toIntOrNull(form.safety_stock),
+        location: emptyToNull(form.location),
         status: form.status,
         commodity_tags: form.commodity_tags
           .split(",")
@@ -294,6 +297,9 @@ export function ProductFormModal({
         </Field>
         <Field label="Safety stock" hint="Leave blank to auto-calculate">
           <input type="number" min={0} className={inputClass} value={form.safety_stock} onChange={(e) => set("safety_stock", e.target.value)} />
+        </Field>
+        <Field label="Location" hint="Bin / shelf / aisle">
+          <input className={inputClass} value={form.location} placeholder="e.g. A-12, Shelf 3" onChange={(e) => set("location", e.target.value)} />
         </Field>
 
         {/* Intelligence profile */}

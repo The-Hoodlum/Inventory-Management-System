@@ -108,6 +108,7 @@ async def transfer_stock(
 async def list_inventory(
     warehouse_id: uuid.UUID | None = None,
     product_id: uuid.UUID | None = None,
+    search: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
     user: CurrentUser = Depends(require_permission(P.INVENTORY_READ)),
@@ -115,7 +116,7 @@ async def list_inventory(
 ) -> Page[InventoryOut]:
     scope = await resolve_warehouse_scope(user, warehouse_id, svc.warehouses)
     items, total = await svc.list_inventory(
-        warehouse_ids=scope, product_id=product_id, page=page, page_size=page_size
+        warehouse_ids=scope, product_id=product_id, search=search, page=page, page_size=page_size
     )
     return Page[InventoryOut](
         items=[_inv_out(i) for i in items],

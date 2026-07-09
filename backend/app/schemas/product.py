@@ -40,6 +40,7 @@ class ProductBase(BaseModel):
     cartons_per_pallet: int | None = Field(default=None, gt=0)
     reorder_point: int | None = Field(default=None, ge=0)
     safety_stock: int | None = Field(default=None, ge=0)
+    location: str | None = Field(default=None, max_length=120)
     # --- Product Intelligence Profile ---
     commodity_tags: list[str] = Field(default_factory=list)
     country_of_origin: str | None = Field(default=None, max_length=64)
@@ -86,6 +87,7 @@ class ProductUpdate(BaseModel):
     cartons_per_pallet: int | None = Field(default=None, gt=0)
     reorder_point: int | None = Field(default=None, ge=0)
     safety_stock: int | None = Field(default=None, ge=0)
+    location: str | None = Field(default=None, max_length=120)
     commodity_tags: list[str] | None = None
     country_of_origin: str | None = Field(default=None, max_length=64)
     transport_mode: TransportMode | None = None
