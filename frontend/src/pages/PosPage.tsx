@@ -2,7 +2,9 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Check, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { useAuth } from "@/auth/AuthContext";
 import { PageHeader } from "@/components/PageHeader";
+import { SellBikeModal } from "@/components/SellBikeModal";
 import { Button, Card, Spinner } from "@/components/ui";
 import { ApiError } from "@/lib/api";
 import { catalogApi } from "@/lib/catalog";
@@ -35,6 +37,8 @@ export default function PosPage() {
   const [tendered, setTendered] = useState("");
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const { hasPermission } = useAuth();
+  const [showSellBike, setShowSellBike] = useState(false);
 
   const location = locationId || warehouses.list[0]?.id || "";
 
@@ -80,7 +84,14 @@ export default function PosPage() {
 
   return (
     <div>
-      <PageHeader title="Point of Sale" description="Fast cash sale — deducts stock from the selected location immediately." />
+      <PageHeader
+        title="Point of Sale"
+        description="Fast cash sale — deducts stock from the selected location immediately."
+        actions={hasPermission("motorcycle.manage") ? (
+          <Button variant="secondary" onClick={() => setShowSellBike(true)}>Sell a bike</Button>
+        ) : undefined}
+      />
+      {showSellBike && <SellBikeModal onClose={() => setShowSellBike(false)} />}
 
       <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
         {/* Catalog / search */}

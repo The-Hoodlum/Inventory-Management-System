@@ -134,6 +134,14 @@ export interface PosResult {
   receipt: Receipt;
 }
 
+export interface BikeSaleResult {
+  unit_id: string;
+  chassis_number: string;
+  model_name: string | null;
+  invoice: Invoice;
+  receipt: Receipt | null;
+}
+
 export const RETURN_REASONS: { value: string; label: string }[] = [
   { value: "damaged", label: "Damaged" },
   { value: "wrong_item", label: "Wrong Item" },
@@ -234,6 +242,16 @@ export const salesApi = {
   // POS
   posCheckout: (body: { location_id: string; customer_id?: string | null; lines: PricedLineIn[]; payments: PaymentLineIn[] }) =>
     api.post<PosResult>("/sales/pos/checkout", body),
+
+  // sell a serialized bike (POS or Sales): bike invoice + mark sold + optional payment
+  sellBike: (body: {
+    unit_id: string;
+    customer_id?: string | null;
+    branch_id?: string | null;
+    price?: number | null;
+    payments?: PaymentLineIn[];
+    note?: string | null;
+  }) => api.post<BikeSaleResult>("/sales/bike-sale", body),
 
   // parts sales log (line-grain; fungible products only)
   listPartsSales: (params: PartsSalesParams = {}) => {
