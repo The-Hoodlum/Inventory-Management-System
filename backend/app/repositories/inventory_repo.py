@@ -5,10 +5,10 @@ import uuid
 from collections.abc import Sequence
 from decimal import Decimal
 
-from sqlalchemy import Select, func, select, text
+from sqlalchemy import Select, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Inventory, StockMovement
+from app.models import Inventory, Product, StockMovement
 
 
 class InventoryRepository:
@@ -100,6 +100,7 @@ class InventoryRepository:
         warehouse_id: uuid.UUID | None = None,
         warehouse_ids: Sequence[uuid.UUID] | None = None,
         product_id: uuid.UUID | None = None,
+        search: str | None = None,
         page: int = 1,
         page_size: int = 50,
     ) -> tuple[list[Inventory], int]:
@@ -111,6 +112,16 @@ class InventoryRepository:
             base = base.where(Inventory.warehouse_id.in_(list(warehouse_ids)))
         if product_id:
             base = base.where(Inventory.product_id == product_id)
+        if search and search.strip():
+            like = f"%{search.strip()}%"
+            base = base.where(
+                Inventory.product_id.in_(
+                    select(Product.id).where(
+                        or_(Product.name.ilike(like), Product.sku.ilike(like),
+                            Product.location.ilike(like))
+                    )
+                )
+            )
         total = await self.session.scalar(
             select(func.count()).select_from(base.subquery())
         )

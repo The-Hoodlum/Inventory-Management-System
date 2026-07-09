@@ -45,6 +45,7 @@ export interface WarehouseListParams {
 export interface InventoryListParams {
   warehouse_id?: string;
   product_id?: string;
+  search?: string;
   page?: number;
   page_size?: number;
 }
@@ -83,6 +84,7 @@ export interface ProductInput {
   lead_time_days: number;
   reorder_point?: number | null;
   safety_stock?: number | null;
+  location?: string | null;
   status: ProductStatus;
   // Category/Brand by name (get-or-created server-side, matching the import flow).
   category?: string | null;

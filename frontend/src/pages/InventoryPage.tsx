@@ -26,6 +26,7 @@ export default function InventoryPage() {
   const canTransfer = hasPermission("inventory.transfer");
   const canImport = hasPermission("data.import");
   const [warehouseId, setWarehouseId] = useState("");
+  const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [adjustRow, setAdjustRow] = useState<InventoryRow | null>(null);
   const [transferOpen, setTransferOpen] = useState(false);
@@ -34,9 +35,14 @@ export default function InventoryPage() {
   const { list: warehouses, map: warehouseMap } = useWarehouses();
 
   const { data, isLoading, isError, error, isFetching } = useQuery({
-    queryKey: ["inventory", warehouseId, page],
+    queryKey: ["inventory", warehouseId, search, page],
     queryFn: () =>
-      catalogApi.inventory({ warehouse_id: warehouseId || undefined, page, page_size: PAGE_SIZE }),
+      catalogApi.inventory({
+        warehouse_id: warehouseId || undefined,
+        search: search.trim() || undefined,
+        page,
+        page_size: PAGE_SIZE,
+      }),
     placeholderData: (prev) => prev,
   });
 
@@ -61,7 +67,16 @@ export default function InventoryPage() {
         }
       />
 
-      <div className="mb-4 flex items-center gap-3">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <input
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(1);
+          }}
+          placeholder="Search parts by name, SKU or location…"
+          className={`${INPUT} w-72`}
+        />
         <label className="text-sm text-slate-500" htmlFor="wh">
           Warehouse
         </label>
@@ -106,6 +121,7 @@ export default function InventoryPage() {
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                   <th className="px-4 py-2.5 font-medium">Product</th>
+                  <th className="px-4 py-2.5 font-medium">Location</th>
                   <th className="px-4 py-2.5 font-medium">Warehouse</th>
                   <th className="px-4 py-2.5 text-right font-medium">On hand</th>
                   <th className="px-4 py-2.5 text-right font-medium">Reserved</th>
@@ -124,6 +140,15 @@ export default function InventoryPage() {
                         <div className="font-medium">{product?.name ?? shortId(row.product_id)}</div>
                         {product?.sku && (
                           <div className="font-mono text-xs text-slate-400">{product.sku}</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {product?.location ? (
+                          <span className="inline-flex rounded-pill bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-600">
+                            {product.location}
+                          </span>
+                        ) : (
+                          <span className="text-slate-300">—</span>
                         )}
                       </td>
                       <td className="px-4 py-3 text-slate-600">

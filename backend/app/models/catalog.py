@@ -88,6 +88,8 @@ class Product(Base):
     cartons_per_pallet: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reorder_point: Mapped[int | None] = mapped_column(Integer, nullable=True)
     safety_stock: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Physical storage location (bin / shelf / aisle) so staff can find the part.
+    location: Mapped[str | None] = mapped_column(Text, nullable=True)
     # --- Product Intelligence Profile (migration 0009) ---
     # Consumed by the forecast, risk, procurement, intelligence, and AI engines.
     commodity_tags: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))

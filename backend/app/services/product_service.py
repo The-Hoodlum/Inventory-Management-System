@@ -15,7 +15,7 @@ from app.schemas.product import ProductCreate, ProductUpdate
 _AUDITED_FIELDS = (
     "sku", "barcode", "name", "status", "cost_price", "selling_price", "wholesale_price",
     "units_per_carton", "moq", "lead_time_days", "category_id", "brand_id",
-    "primary_supplier_id", "reorder_point", "safety_stock",
+    "primary_supplier_id", "reorder_point", "safety_stock", "location",
     # Product Intelligence Profile
     "commodity_tags", "country_of_origin", "transport_mode", "criticality",
     "supplier_dependency", "demand_type", "substitutability",
