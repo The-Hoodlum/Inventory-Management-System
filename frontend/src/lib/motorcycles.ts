@@ -92,6 +92,7 @@ export interface MotoUnit {
   warehouse_id: string | null;
   warehouse_name: string | null;
   internal_location: string | null;
+  country_of_origin: string | null;
   status: UnitStatus;
   inspected: boolean;              // independent of status
   hold_reason: string | null;      // set while on_hold; kept for history after
@@ -123,6 +124,7 @@ export interface UnitListParams {
   model_id?: string;
   variant_id?: string;
   colour_id?: string;
+  country_of_origin?: string;
   sold?: boolean;
   inspected?: boolean;
   registered?: boolean;

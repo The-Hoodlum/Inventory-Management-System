@@ -199,6 +199,7 @@ class MotorcycleService:
             supplier_id=payload.supplier_id, container_ref=payload.container_ref,
             date_received=payload.date_received, branch_id=payload.branch_id,
             warehouse_id=payload.warehouse_id, internal_location=payload.internal_location,
+            country_of_origin=payload.country_of_origin,
             status=status, selling_price=_d(payload.selling_price),
         )
         self.repo.session.add(unit)
@@ -463,7 +464,8 @@ class MotorcycleService:
             container_ref=unit.container_ref, date_received=unit.date_received,
             branch_id=unit.branch_id, branch_name=branches.get(unit.branch_id),
             warehouse_id=unit.warehouse_id, warehouse_name=warehouses.get(unit.warehouse_id),
-            internal_location=unit.internal_location, status=unit.status,
+            internal_location=unit.internal_location, country_of_origin=unit.country_of_origin,
+            status=unit.status,
             inspected=unit.inspected, hold_reason=unit.hold_reason,
             reserved_ref=unit.reserved_ref, reserved_so_number=await self.repo.so_number(unit.reserved_ref),
             sold_ref=unit.sold_ref, sold_invoice_number=await self.repo.invoice_number(unit.sold_ref),

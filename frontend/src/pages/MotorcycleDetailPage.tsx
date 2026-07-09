@@ -58,7 +58,7 @@ export default function MotorcycleDetailPage() {
               <LifecycleActions unit={data} onTransition={(to) => transition.mutate(to)} onModal={setModal} busy={transition.isPending} />
             ) : undefined}
             tabs={[
-              { key: "identity", label: "Identity", content: <IdentityTab unit={data} /> },
+              { key: "identity", label: "Identity", content: <IdentityTab unit={data} canManage={canManage} onSaved={invalidate} /> },
               { key: "lifecycle", label: "Lifecycle", content: <LifecycleTab unit={data} canManage={canManage} onSaved={invalidate} /> },
               { key: "sale", label: "Sale", content: <SaleTab unit={data} /> },
               { key: "registration", label: "Registration", content: <RegistrationTab unit={data} canManage={canManage} onSaved={invalidate} /> },
@@ -132,7 +132,8 @@ function money(v: number | null): string {
   return v == null ? "—" : v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function IdentityTab({ unit }: { unit: MotoUnit }) {
+function IdentityTab({ unit, canManage, onSaved }: { unit: MotoUnit; canManage: boolean; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false);
   return (
     <div className="max-w-xl">
       <Row label="Chassis number"><span className="font-mono">{unit.chassis_number}</span></Row>
@@ -141,12 +142,15 @@ function IdentityTab({ unit }: { unit: MotoUnit }) {
       <Row label="Variant">{unit.variant_name}</Row>
       <Row label="Colour">{unit.colour_name}</Row>
       <Row label="Year">{unit.year}</Row>
+      <Row label="Country of origin">{unit.country_of_origin}</Row>
       <Row label="Supplier">{unit.supplier_name}</Row>
       <Row label="Container ref">{unit.container_ref}</Row>
       <Row label="Date received">{unit.date_received}</Row>
       <Row label="Branch">{unit.branch_name}</Row>
       <Row label="Location">{unit.warehouse_name}</Row>
       <Row label="Internal location">{unit.internal_location}</Row>
+      {canManage && <div className="mt-3"><Button variant="secondary" onClick={() => setEditing(true)}>Edit origin</Button></div>}
+      {editing && <EditUnitModal unit={unit} fields={["country_of_origin"]} title="Edit country of origin" onClose={() => setEditing(false)} onDone={() => { setEditing(false); onSaved(); }} />}
     </div>
   );
 }
@@ -420,6 +424,7 @@ function EditUnitModal({ unit, fields, title, onClose, onDone }: {
     registered: unit.registered,
     registration_number: unit.registration_number ?? "",
     registration_papers_received: unit.registration_papers_received,
+    country_of_origin: unit.country_of_origin ?? "",
   });
   const [err, setErr] = useState<string | null>(null);
   const m = useMutation({
@@ -453,6 +458,12 @@ function EditUnitModal({ unit, fields, title, onClose, onDone }: {
         {fields.includes("registration_number") && (
           <ModalField label="Registration number">
             <input className={INPUT} value={String(form.registration_number ?? "")} onChange={(e) => setForm((f) => ({ ...f, registration_number: e.target.value }))} />
+          </ModalField>
+        )}
+        {fields.includes("country_of_origin") && (
+          <ModalField label="Country of origin">
+            <input className={INPUT} list="origin-suggestions" placeholder="e.g. India, Congo, Kenya" value={String(form.country_of_origin ?? "")} onChange={(e) => setForm((f) => ({ ...f, country_of_origin: e.target.value }))} />
+            <datalist id="origin-suggestions"><option value="India" /><option value="Congo" /><option value="Kenya" /></datalist>
           </ModalField>
         )}
         {fields.includes("registration_papers_received") && (

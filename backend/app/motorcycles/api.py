@@ -176,6 +176,7 @@ async def list_units(
     model_id: uuid.UUID | None = Query(default=None),
     variant_id: uuid.UUID | None = Query(default=None),
     colour_id: uuid.UUID | None = Query(default=None),
+    country_of_origin: str | None = Query(default=None),
     sold: bool | None = Query(default=None),
     inspected: bool | None = Query(default=None),
     registered: bool | None = Query(default=None),
@@ -187,7 +188,8 @@ async def list_units(
     items, total = await svc.list_units(
         search=search, status=status_filter,
         branch_ids=resolve_branch_scope(user, branch_id), model_id=model_id,
-        variant_id=variant_id, colour_id=colour_id, sold=sold, inspected=inspected,
+        variant_id=variant_id, colour_id=colour_id, country_of_origin=country_of_origin,
+        sold=sold, inspected=inspected,
         registered=registered, page=page, page_size=page_size,
     )
     return Page[UnitOut](**_page(items, total, page, page_size))

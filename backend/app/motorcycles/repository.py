@@ -198,12 +198,15 @@ class MotorcycleRepository:
         branch_id: uuid.UUID | None = None, branch_ids: Sequence[uuid.UUID] | None = None,
         model_id: uuid.UUID | None = None,
         variant_id: uuid.UUID | None = None, colour_id: uuid.UUID | None = None,
+        country_of_origin: str | None = None,
         sold: bool | None = None, inspected: bool | None = None,
         registered: bool | None = None, page: int = 1, page_size: int = 50,
     ) -> tuple[list[MotorcycleUnit], int]:
         base = select(MotorcycleUnit)
         if status:
             base = base.where(MotorcycleUnit.status == status)
+        if country_of_origin:
+            base = base.where(MotorcycleUnit.country_of_origin == country_of_origin)
         if inspected is not None:
             base = base.where(MotorcycleUnit.inspected.is_(inspected))
         if registered is not None:
