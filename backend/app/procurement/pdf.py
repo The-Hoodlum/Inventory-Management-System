@@ -10,6 +10,8 @@ from typing import Any
 
 from fpdf import FPDF
 
+from app.core.pdf_branding import place_logo
+
 # A4 content width: 210mm - 2 x 15mm margins.
 _CONTENT_W = 180.0
 _INK = (33, 37, 41)
@@ -38,9 +40,12 @@ class _POPdf(FPDF):
     company_name: str = ""
 
     def header(self) -> None:  # noqa: D401 - fpdf hook
+        top = self.get_y()
+        band = max(place_logo(self, 15, top, 45, 15), 10)
+        self.set_xy(15, top)
         self.set_font("Helvetica", "B", 16)
         self.set_text_color(*_INK)
-        self.cell(0, 10, "PURCHASE ORDER", ln=1, align="R")
+        self.cell(0, band, "PURCHASE ORDER", ln=1, align="R")
         self.set_draw_color(*_LINE)
         self.line(15, self.get_y() + 1, 195, self.get_y() + 1)
         self.ln(4)
