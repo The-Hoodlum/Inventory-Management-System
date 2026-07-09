@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useAuth } from "@/auth/AuthContext";
 import { Modal } from "@/components/Modal";
 import { PageHeader } from "@/components/PageHeader";
+import { SellBikeModal } from "@/components/SellBikeModal";
 import { Button, Card, Spinner, StatusBadge } from "@/components/ui";
 import { ApiError } from "@/lib/api";
 import { catalogApi } from "@/lib/catalog";
@@ -23,11 +24,14 @@ type Tab = "orders" | "quotations" | "invoices" | "returns" | "credit_notes";
 const TABS: Tab[] = ["orders", "quotations", "invoices", "returns", "credit_notes"];
 
 export default function SalesPage() {
+  const qc = useQueryClient();
   const { hasPermission } = useAuth();
   const canOrder = hasPermission("sales.order");
   const canReturn = hasPermission("sales.return");
+  const canSellBike = hasPermission("motorcycle.manage");
   const [tab, setTab] = useState<Tab>("orders");
   const [showNew, setShowNew] = useState(false);
+  const [showSellBike, setShowSellBike] = useState(false);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [payInvoice, setPayInvoice] = useState<string | null>(null);
   const [returnInvoice, setReturnInvoice] = useState<Invoice | null>(null);
@@ -43,10 +47,14 @@ export default function SalesPage() {
       <PageHeader
         title="Sales"
         description="Quotations, sales orders, deliveries and invoices — fully linked and traceable."
-        actions={canOrder ? (
-          <Button onClick={() => setShowNew(true)}><Plus className="h-4 w-4" /> New order</Button>
-        ) : undefined}
+        actions={
+          <div className="flex items-center gap-2">
+            {canSellBike && <Button variant="secondary" onClick={() => setShowSellBike(true)}>Sell a bike</Button>}
+            {canOrder && <Button onClick={() => setShowNew(true)}><Plus className="h-4 w-4" /> New order</Button>}
+          </div>
+        }
       />
+      {showSellBike && <SellBikeModal onClose={() => setShowSellBike(false)} onSold={() => { void qc.invalidateQueries({ queryKey: ["sales"] }); }} />}
 
       <div className="mb-4 flex gap-1 border-b border-slate-200">
         {TABS.map((t) => (

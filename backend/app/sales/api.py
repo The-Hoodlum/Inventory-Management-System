@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query
 
 from app.api.v1.deps import (
     CurrentUser,
+    get_motorcycle_service,
     get_sales_service,
     require_feature,
     require_permission,
@@ -15,7 +16,10 @@ from app.api.v1.deps import (
 )
 from app.core.exceptions import BusinessRuleError
 from app.core.permissions import P
+from app.motorcycles.service import MotorcycleService
 from app.sales.schemas import (
+    BikeSaleIn,
+    BikeSaleResult,
     CancelBody,
     ConvertToOrder,
     CreditNoteCreate,
@@ -285,6 +289,21 @@ async def pos_checkout(
     svc: SalesService = Depends(get_sales_service),
 ) -> PosResult:
     return await svc.pos_checkout(tenant_id=user.tenant_id, user_id=user.id, payload=payload)
+
+
+@router.post("/bike-sale", response_model=BikeSaleResult, status_code=201)
+async def sell_bike(
+    payload: BikeSaleIn,
+    user: CurrentUser = Depends(require_permission(P.MOTORCYCLE_MANAGE)),
+    svc: SalesService = Depends(get_sales_service),
+    motorcycles: MotorcycleService = Depends(get_motorcycle_service),
+) -> BikeSaleResult:
+    """Sell a serialized bike from POS or Sales: bike invoice + mark sold + optional
+    payment/receipt, in one transaction. Shares the request session with the motorcycle
+    service, so the invoice + the unit's sold-state commit or roll back together."""
+    return await svc.sell_bike(
+        tenant_id=user.tenant_id, user_id=user.id, payload=payload, motorcycles=motorcycles,
+    )
 
 
 # --------------------------- returns + credit notes ------------------------ #

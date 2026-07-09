@@ -37,6 +37,8 @@ from app.sales.domain import pricing
 from app.sales.domain import status as S
 from app.sales.repository import SO_LINE_REF, SalesRepository
 from app.sales.schemas import (
+    BikeSaleIn,
+    BikeSaleResult,
     ConvertToOrder,
     CreditNoteCreate,
     CreditNoteOut,
@@ -452,6 +454,68 @@ class SalesService:
         self.repo.session.add(walkin)
         await self.repo.session.flush()
         return walkin.id
+
+    # ============================= sell a bike ========================== #
+    async def sell_bike(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, payload: BikeSaleIn, motorcycles,
+    ) -> BikeSaleResult:
+        """Sell ONE serialized motorcycle from POS / Sales, all in one transaction:
+        create a bike-only invoice (no fungible stock line), mark the unit sold + link it
+        to the invoice (revenue lives on the unit's price_charged, as the Sales Log
+        expects), then optionally settle the payment(s) into a receipt. Any failure — e.g.
+        the unit isn't sellable — rolls the whole thing back, leaving no dangling invoice."""
+        from app.motorcycles.schemas import SellIn
+
+        customer_id = payload.customer_id or await self._walkin_customer(tenant_id, user_id)
+        if payload.customer_id:
+            await self._require_customer(payload.customer_id)
+
+        unit = await motorcycles.get_unit(payload.unit_id)  # UnitOut (raises if missing)
+        if "sold" not in unit.allowed_next:
+            raise BusinessRuleError(
+                f"Bike {unit.chassis_number} is {unit.status} and cannot be sold "
+                "(it must be assembled or reserved)."
+            )
+        price = _d(payload.price) if payload.price is not None else _d(unit.selling_price)
+        if price <= 0:
+            raise BusinessRuleError("A selling price is required for this bike.")
+
+        # A bike is priced DIRECTLY in the tenant's billing currency (unlike spare parts,
+        # which are held in USD and converted). So the price IS the amount the customer pays
+        # — no FX conversion. The invoice's payable equals the price; fx is a no-op (1).
+        currency = await self.repo.base_currency(tenant_id)
+        invoice = Invoice(
+            tenant_id=tenant_id, invoice_number=await self.repo.number(tenant_id, "invoice", "INV"),
+            sales_order_id=None, delivery_note_id=None, customer_id=customer_id,
+            branch_id=payload.branch_id or unit.branch_id, currency=currency,
+            payment_terms="pos", status=S.INV_SENT, subtotal=price, discount_total=Decimal("0"),
+            tax_total=Decimal("0"), grand_total=price, fx_rate=Decimal("1"), grand_total_zmw=price,
+            amount_paid=Decimal("0"), created_by=user_id,
+        )
+        self.repo.session.add(invoice)
+        await self.repo.session.flush()
+
+        # Mark the unit sold and link THIS invoice (re-validates sellability; rolls back on fail).
+        await motorcycles.sell(
+            tenant_id=tenant_id, user_id=user_id, unit_id=payload.unit_id,
+            payload=SellIn(invoice_id=invoice.id, customer_id=customer_id,
+                           price_charged=float(price), note=payload.note),
+        )
+
+        receipt_out = None
+        if payload.payments:
+            receipt_out = await self.record_payment(
+                tenant_id=tenant_id, user_id=user_id,
+                payload=PaymentCreate(invoice_id=invoice.id, payments=payload.payments),
+                branch_id=payload.branch_id or unit.branch_id,
+            )
+
+        await self._audit(tenant_id, user_id, "sales_invoice", invoice.id, "bike_sale", None, invoice.status)
+        fresh = await self.repo.get_invoice(invoice.id)
+        return BikeSaleResult(
+            unit_id=payload.unit_id, chassis_number=unit.chassis_number, model_name=unit.model_name,
+            invoice=await self._invoice_out(fresh), receipt=receipt_out,
+        )
 
     # =============================== returns ============================= #
     async def create_return(

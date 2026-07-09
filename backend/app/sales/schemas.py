@@ -338,3 +338,24 @@ class CancelBody(BaseModel):
 
 class RejectBody(BaseModel):
     reason: str = Field(min_length=1, max_length=1000)
+
+
+# ------------------------------- bike sale --------------------------------- #
+class BikeSaleIn(BaseModel):
+    """Sell ONE serialized motorcycle unit from POS or Sales: creates a bike invoice,
+    marks the unit sold, and (if payments are given) settles it and issues a receipt."""
+
+    unit_id: uuid.UUID
+    customer_id: uuid.UUID | None = None      # omitted -> the walk-in customer
+    branch_id: uuid.UUID | None = None
+    price: float | None = Field(default=None, ge=0)  # USD; defaults to the unit's selling price
+    payments: list[PaymentLineIn] = []        # empty -> invoice only (pay later)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class BikeSaleResult(BaseModel):
+    unit_id: uuid.UUID
+    chassis_number: str
+    model_name: str | None = None
+    invoice: InvoiceOut
+    receipt: ReceiptOut | None = None

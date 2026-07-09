@@ -62,6 +62,12 @@ class SalesRepository:
         rate = await self.session.scalar(select(Tenant.fx_rate).where(Tenant.id == tenant_id))
         return Decimal(rate) if rate is not None else Decimal("1")
 
+    async def base_currency(self, tenant_id: uuid.UUID) -> str:
+        """The tenant's billing currency code (e.g. 'ZMW'). Used to label documents priced
+        directly in that currency (like motorcycle sales)."""
+        cur = await self.session.scalar(select(Tenant.base_currency).where(Tenant.id == tenant_id))
+        return cur or "USD"
+
     # ------------------------------ numbering -------------------------- #
     async def number(self, tenant_id: uuid.UUID, doc_type: str, prefix: str) -> str:
         return await self.session.scalar(
