@@ -12,6 +12,24 @@ import io
 from app.core.config import settings
 
 
+def _latin1(text: str) -> str:
+    return str(text).encode("latin-1", "replace").decode("latin-1")
+
+
+def draw_company_block(pdf, x: float, y: float, width: float, lines) -> float:
+    """Draw the company address block (name / address / email / phone) starting at (x, y),
+    each line wrapped WITHIN ``width`` mm so it never bleeds into a right-hand meta column.
+    Falsy lines are skipped. Returns the y coordinate just below the block."""
+    cy = y
+    for text in lines:
+        if not text:
+            continue
+        pdf.set_xy(x, cy)
+        pdf.multi_cell(width, 5, _latin1(text))
+        cy = pdf.get_y()
+    return cy
+
+
 @functools.lru_cache(maxsize=4)
 def _logo_bytes(path: str) -> bytes | None:
     if not path:

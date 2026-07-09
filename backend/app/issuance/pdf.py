@@ -8,7 +8,7 @@ from typing import Any
 from fpdf import FPDF
 
 from app.core.config import settings
-from app.core.pdf_branding import place_logo
+from app.core.pdf_branding import draw_company_block, place_logo
 from app.issuance.schemas import IssuanceOut
 
 _CONTENT_W = 180.0
@@ -74,10 +74,10 @@ def build_issuance_pdf(iss: IssuanceOut) -> bytes:
     pdf.cell(95, 5, _s(settings.company_name or "Company"), ln=1)
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(*_MUTED)
-    for part in (settings.company_address, settings.company_phone):
-        if part:
-            pdf.multi_cell(95, 5, _s(part))
-    left_bottom = pdf.get_y()
+    left_bottom = draw_company_block(
+        pdf, 15, pdf.get_y(), 90,
+        (settings.company_address, settings.company_email, settings.company_phone),
+    )
 
     pdf.set_xy(115, top_y)
     for label, value in (

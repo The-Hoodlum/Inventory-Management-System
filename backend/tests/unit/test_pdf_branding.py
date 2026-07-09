@@ -26,6 +26,20 @@ def test_place_logo_is_a_noop_when_file_missing(monkeypatch):
     assert pdf_branding.place_logo(_pdf(), 15, 15, 45, 15) == 0.0
 
 
+def test_draw_company_block_stays_within_width_and_advances_y():
+    pdf = _pdf()
+    pdf.set_font("Helvetica", "", 9)
+    y0 = pdf.get_y()
+    end = pdf_branding.draw_company_block(
+        pdf, 15, y0, 90,
+        ("ZAMOTO TVS", "4999 North End, Cairo Road, Opposite ZRA Headquarters, Lusaka",
+         "info@zamototvs.com", "+260 772211111", None, ""),
+    )
+    assert end > y0                      # advanced below the block
+    assert pdf.get_x() <= 15 + 90 + 1    # never bled past the column width
+    assert bytes(pdf.output()).startswith(b"%PDF")
+
+
 def test_place_logo_draws_scaled_to_fit(tmp_path, monkeypatch):
     p = tmp_path / "logo.png"
     Image.new("RGB", (300, 200), "white").save(p)   # 3:2 landscape
