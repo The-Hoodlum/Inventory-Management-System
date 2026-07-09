@@ -174,6 +174,8 @@ class Settings(BaseSettings):
     company_address: str = ""
     company_email: str = ""
     company_phone: str = ""
+    # Absolute path to a logo image (PNG/JPG) drawn on printed documents; empty = none.
+    company_logo_path: str = ""
     po_terms: str = (
         "Payment due within 30 days of receipt. Goods remain the property of "
         "the supplier until paid in full. Please quote the PO number on all "
