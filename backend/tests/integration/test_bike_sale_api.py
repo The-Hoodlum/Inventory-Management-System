@@ -41,6 +41,13 @@ def _rand(p: str) -> str:
     return f"{p}-{uuid.uuid4().hex[:8]}"
 
 
+async def _enable_sales(client, h) -> None:
+    flags = dict((await client.get("/api/v1/tenant/settings", headers=h)).json().get("feature_flags", {}))
+    flags.update({"sales_orders": True, "pos": True})
+    r = await client.put("/api/v1/tenant/settings", headers=h, json={"feature_flags": flags})
+    assert r.status_code == 200, r.text
+
+
 async def _assembled_unit(client, h, *, price: float) -> dict:
     brand = (await client.post("/api/v1/motorcycles/models", headers=h,
              json={"name": _rand("Model"), "brand": "TVS"})).json()
@@ -53,6 +60,7 @@ async def _assembled_unit(client, h, *, price: float) -> dict:
 
 async def test_bike_sale_invoices_marks_sold_and_receipts(client):
     h = await _headers(client)
+    await _enable_sales(client, h)
     unit = await _assembled_unit(client, h, price=25000)
     assert unit["status"] == "assembled"
 
@@ -79,6 +87,7 @@ async def test_bike_sale_invoices_marks_sold_and_receipts(client):
 
 async def test_bike_sale_without_payment_is_invoice_only(client):
     h = await _headers(client)
+    await _enable_sales(client, h)
     unit = await _assembled_unit(client, h, price=18000)
 
     r = await client.post("/api/v1/sales/bike-sale", headers=h, json={"unit_id": unit["id"], "price": 18000})
