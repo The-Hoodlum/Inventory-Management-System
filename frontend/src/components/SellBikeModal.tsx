@@ -61,7 +61,12 @@ export function SellBikeModal({ onClose, onSold }: { onClose: () => void; onSold
 
   if (done) {
     return (
-      <Modal title="Bike sold" size="md" onClose={onClose} footer={<Button onClick={onClose}>Done</Button>}>
+      <Modal title="Bike sold" size="md" onClose={onClose} footer={
+        <>
+          <Button variant="secondary" onClick={() => void salesApi.downloadInvoicePdf(done.invoice.id, done.invoice.invoice_number)}>Print invoice</Button>
+          <Button onClick={onClose}>Done</Button>
+        </>
+      }>
         <div className="space-y-2 text-sm">
           <div className="rounded-lg bg-emerald-50 px-3 py-2 text-emerald-800">
             <b>{done.chassis_number}</b>{done.model_name ? ` · ${done.model_name}` : ""} marked <b>sold</b>.

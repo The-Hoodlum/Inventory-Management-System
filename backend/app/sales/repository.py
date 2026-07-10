@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Sequence
 from decimal import Decimal
 
-from sqlalchemy import column, select, table, text
+from sqlalchemy import column, func, select, table, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -67,6 +67,20 @@ class SalesRepository:
         directly in that currency (like motorcycle sales)."""
         cur = await self.session.scalar(select(Tenant.base_currency).where(Tenant.id == tenant_id))
         return cur or "USD"
+
+    async def linked_bike(self, invoice_id: uuid.UUID):
+        """The serialized bike sold on this invoice (chassis, model name, price), or None.
+        Uses raw table refs to stay decoupled from the motorcycles ORM (see ``_moto_units``)."""
+        u = table("motorcycle_units", column("sold_ref"), column("chassis_number"),
+                  column("model_id"), column("price_charged"), column("selling_price"))
+        m = table("motorcycle_models", column("id"), column("name"))
+        row = (await self.session.execute(
+            select(u.c.chassis_number, m.c.name,
+                   func.coalesce(u.c.price_charged, u.c.selling_price, 0))
+            .select_from(u).outerjoin(m, m.c.id == u.c.model_id)
+            .where(u.c.sold_ref == invoice_id)
+        )).first()
+        return tuple(row) if row is not None else None
 
     # ------------------------------ numbering -------------------------- #
     async def number(self, tenant_id: uuid.UUID, doc_type: str, prefix: str) -> str:

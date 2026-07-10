@@ -4,7 +4,7 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from app.api.v1.deps import (
     CurrentUser,
@@ -250,6 +250,19 @@ async def get_invoice(
     svc: SalesService = Depends(get_sales_service),
 ) -> InvoiceOut:
     return await svc.get_invoice(invoice_id)
+
+
+@router.get("/invoices/{invoice_id}/pdf")
+async def invoice_pdf(
+    invoice_id: uuid.UUID,
+    user: CurrentUser = Depends(require_permission(P.SALES_READ)),
+    svc: SalesService = Depends(get_sales_service),
+) -> Response:
+    pdf, number = await svc.invoice_pdf(tenant_id=user.tenant_id, invoice_id=invoice_id)
+    return Response(
+        content=pdf, media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{number}.pdf"'},
+    )
 
 
 # ------------------------------- parts sales ------------------------------- #

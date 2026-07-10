@@ -1,6 +1,6 @@
 // Sales & Distribution API: quotation -> sales order -> delivery -> invoice ->
 // payment -> receipt, plus POS fast-sale.
-import { api } from "@/lib/api";
+import { api, BASE_URL, tokenStore } from "@/lib/api";
 
 export type PaymentMethod =
   | "cash" | "card" | "mobile_money" | "bank_transfer" | "cheque" | "store_credit";
@@ -238,6 +238,23 @@ export const salesApi = {
   // payment + receipt
   pay: (invoice_id: string, payments: PaymentLineIn[]) =>
     api.post<Receipt>("/sales/payments", { invoice_id, payments }),
+
+  async downloadInvoicePdf(id: string, invoiceNumber: string): Promise<void> {
+    const token = tokenStore.getAccess();
+    const res = await fetch(`${BASE_URL}/sales/invoices/${id}/pdf`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(`PDF download failed (${res.status})`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${invoiceNumber}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
 
   // POS
   posCheckout: (body: { location_id: string; customer_id?: string | null; lines: PricedLineIn[]; payments: PaymentLineIn[] }) =>
