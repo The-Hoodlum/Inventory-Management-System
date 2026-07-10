@@ -632,6 +632,16 @@ class SalesService:
     async def get_invoice(self, invoice_id: uuid.UUID) -> InvoiceOut:
         return await self._invoice_out(await self._require(self.repo.get_invoice(invoice_id), "Invoice"))
 
+    async def invoice_pdf(self, *, tenant_id: uuid.UUID, invoice_id: uuid.UUID) -> tuple[bytes, str]:
+        """Render the branded invoice PDF (bytes, filename). Shows the linked bike for a
+        motorcycle sale, and amounts in the tenant's billed currency."""
+        from app.sales.pdf import build_invoice_pdf
+
+        inv = await self.get_invoice(invoice_id)
+        bike = await self.repo.linked_bike(invoice_id)
+        currency = await self.repo.base_currency(tenant_id)
+        return build_invoice_pdf(inv, bike=bike, currency=currency), inv.invoice_number
+
     async def list_quotations(self, **f) -> list[QuotationOut]:
         rows = await self.repo.list_quotes(**f)
         return [await self._quote_out(q) for q in rows]

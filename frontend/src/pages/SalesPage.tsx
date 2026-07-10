@@ -111,6 +111,7 @@ export default function SalesPage() {
               <td className="px-4 py-3 text-right font-mono">{formatMoney(o.balance, "ZMW")}</td>
               <td className="px-4 py-3 text-right">
                 <div className="flex justify-end gap-2">
+                  <Button variant="ghost" onClick={() => void salesApi.downloadInvoicePdf(o.id, o.invoice_number)}>PDF</Button>
                   {canReturn && o.lines.length > 0 && (
                     <Button variant="ghost" onClick={() => setReturnInvoice(o)}>Return</Button>
                   )}

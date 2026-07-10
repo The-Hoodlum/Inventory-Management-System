@@ -95,3 +95,16 @@ async def test_bike_sale_without_payment_is_invoice_only(client):
     assert r.json()["receipt"] is None                       # no payment -> no receipt
     u = (await client.get(f"/api/v1/motorcycles/units/{unit['id']}", headers=h)).json()
     assert u["status"] == "sold"
+
+
+async def test_invoice_pdf_downloads_for_a_bike_sale(client):
+    h = await _headers(client)
+    await _enable_sales(client, h)
+    unit = await _assembled_unit(client, h, price=52000)
+    inv = (await client.post("/api/v1/sales/bike-sale", headers=h,
+           json={"unit_id": unit["id"], "price": 52000})).json()["invoice"]
+
+    pdf = await client.get(f"/api/v1/sales/invoices/{inv['id']}/pdf", headers=h)
+    assert pdf.status_code == 200, pdf.text
+    assert pdf.headers["content-type"] == "application/pdf"
+    assert pdf.content[:4] == b"%PDF" and len(pdf.content) > 1500
