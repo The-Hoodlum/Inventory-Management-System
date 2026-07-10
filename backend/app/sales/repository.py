@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Sequence
 from decimal import Decimal
 
-from sqlalchemy import column, func, select, table, text
+from sqlalchemy import Date, cast, column, func, select, table, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -25,6 +25,9 @@ from app.models import (
     Inventory,
     Invoice,
     InvoiceLine,
+    MotorcycleColour,
+    MotorcycleModel,
+    MotorcycleUnit,
     Product,
     Quotation,
     Return,
@@ -255,6 +258,41 @@ class SalesRepository:
         if date_to is not None:
             stmt = stmt.where(Invoice.invoice_date <= date_to)
         stmt = stmt.order_by(Invoice.invoice_date.desc(), Invoice.created_at.desc()).limit(limit)
+        return list((await self.session.execute(stmt)).all())
+
+    async def list_motorcycle_sales(
+        self, *, branch_id: uuid.UUID | None = None, branch_ids: Sequence[uuid.UUID] | None = None,
+        date_from: dt.date | None = None, date_to: dt.date | None = None, limit: int = 200,
+    ) -> list:
+        """Line-grain motorcycle sales history: one row per SOLD unit (live or imported
+        historical), newest first, aligned to ``SalesService._moto_sale_out``. Sale date is
+        the linked invoice's date, else date_sold, else the unit's last update."""
+        sale_date = func.coalesce(
+            Invoice.invoice_date, MotorcycleUnit.date_sold, cast(MotorcycleUnit.updated_at, Date)
+        )
+        revenue = func.coalesce(MotorcycleUnit.price_charged, MotorcycleUnit.selling_price, 0)
+        stmt = (
+            select(
+                MotorcycleUnit.id, MotorcycleUnit.chassis_number, MotorcycleModel.name,
+                MotorcycleColour.name, sale_date, Customer.name, revenue,
+                Invoice.id, Invoice.invoice_number, MotorcycleUnit.imported_historical,
+            )
+            .select_from(MotorcycleUnit)
+            .outerjoin(Invoice, Invoice.id == MotorcycleUnit.sold_ref)
+            .outerjoin(Customer, Customer.id == MotorcycleUnit.customer_id)
+            .outerjoin(MotorcycleModel, MotorcycleModel.id == MotorcycleUnit.model_id)
+            .outerjoin(MotorcycleColour, MotorcycleColour.id == MotorcycleUnit.colour_id)
+            .where(MotorcycleUnit.status == "sold")
+        )
+        if branch_id is not None:
+            stmt = stmt.where(MotorcycleUnit.branch_id == branch_id)
+        if branch_ids is not None:
+            stmt = stmt.where(MotorcycleUnit.branch_id.in_(list(branch_ids)))
+        if date_from is not None:
+            stmt = stmt.where(sale_date >= date_from)
+        if date_to is not None:
+            stmt = stmt.where(sale_date <= date_to)
+        stmt = stmt.order_by(sale_date.desc()).limit(limit)
         return list((await self.session.execute(stmt)).all())
 
     # ----------------------------- enrichment -------------------------- #

@@ -108,3 +108,17 @@ async def test_invoice_pdf_downloads_for_a_bike_sale(client):
     assert pdf.status_code == 200, pdf.text
     assert pdf.headers["content-type"] == "application/pdf"
     assert pdf.content[:4] == b"%PDF" and len(pdf.content) > 1500
+
+
+async def test_motorcycle_sales_history_lists_the_sold_unit(client):
+    h = await _headers(client)
+    await _enable_sales(client, h)
+    unit = await _assembled_unit(client, h, price=33000)
+    await client.post("/api/v1/sales/bike-sale", headers=h, json={"unit_id": unit["id"], "price": 33000})
+
+    rows = (await client.get("/api/v1/sales/motorcycle-sales", headers=h)).json()
+    mine = next((r for r in rows if r["unit_id"] == unit["id"]), None)
+    assert mine is not None, "sold bike should appear in the motorcycle sales history"
+    assert mine["chassis_number"] == unit["chassis_number"]
+    assert float(mine["revenue"]) == 33000
+    assert mine["invoice_number"]        # linked to the sale invoice

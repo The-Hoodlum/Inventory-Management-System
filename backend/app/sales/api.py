@@ -29,6 +29,7 @@ from app.sales.schemas import (
     DeliveryNoteOut,
     InvoiceCreate,
     InvoiceOut,
+    MotoSaleLineOut,
     PartsSaleLineOut,
     PaymentCreate,
     PosCheckout,
@@ -280,6 +281,22 @@ async def list_parts_sales(
     # motorcycle-linked invoices so a serialized-unit sale never appears here.
     return await svc.list_parts_sales(
         branch_ids=resolve_branch_scope(user, branch_id), product_id=product_id,
+        date_from=date_from, date_to=date_to, limit=limit,
+    )
+
+
+@router.get("/motorcycle-sales", response_model=list[MotoSaleLineOut])
+async def list_motorcycle_sales(
+    branch_id: uuid.UUID | None = Query(default=None),
+    date_from: dt.date | None = Query(default=None),
+    date_to: dt.date | None = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=1000),
+    user: CurrentUser = Depends(require_permission(P.SALES_READ)),
+    svc: SalesService = Depends(get_sales_service),
+) -> list[MotoSaleLineOut]:
+    # Line-grain motorcycle sales (one row per sold unit), newest first.
+    return await svc.list_motorcycle_sales(
+        branch_ids=resolve_branch_scope(user, branch_id),
         date_from=date_from, date_to=date_to, limit=limit,
     )
 

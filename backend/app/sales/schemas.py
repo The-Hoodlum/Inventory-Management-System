@@ -359,3 +359,18 @@ class BikeSaleResult(BaseModel):
     model_name: str | None = None
     invoice: InvoiceOut
     receipt: ReceiptOut | None = None
+
+
+class MotoSaleLineOut(BaseModel):
+    """One motorcycle sale — the line-grain motorcycle sales history (one row per sold
+    unit). Revenue is the unit's price_charged (fallback selling_price)."""
+    unit_id: uuid.UUID
+    chassis_number: str
+    model_name: str | None = None
+    colour_name: str | None = None
+    sale_date: dt.date | None = None
+    customer_name: str | None = None
+    revenue: float
+    invoice_id: uuid.UUID | None = None
+    invoice_number: str | None = None
+    historical: bool = False

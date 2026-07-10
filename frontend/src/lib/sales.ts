@@ -208,6 +208,19 @@ export interface PartsSalesParams {
   limit?: number;
 }
 
+export interface MotoSale {
+  unit_id: string;
+  chassis_number: string;
+  model_name: string | null;
+  colour_name: string | null;
+  sale_date: string | null;
+  customer_name: string | null;
+  revenue: number;
+  invoice_id: string | null;
+  invoice_number: string | null;
+  historical: boolean;
+}
+
 export const salesApi = {
   // quotations
   listQuotations: (status = "") =>
@@ -278,6 +291,16 @@ export const salesApi = {
     }
     const q = sp.toString();
     return api.get<PartsSale[]>(`/sales/parts-sales${q ? `?${q}` : ""}`);
+  },
+
+  // motorcycle sales log (line-grain; one row per sold unit)
+  listMotorcycleSales: (params: { branch_id?: string; date_from?: string; date_to?: string; limit?: number } = {}) => {
+    const sp = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== "") sp.set(k, String(v));
+    }
+    const q = sp.toString();
+    return api.get<MotoSale[]>(`/sales/motorcycle-sales${q ? `?${q}` : ""}`);
   },
 
   // returns + credit notes

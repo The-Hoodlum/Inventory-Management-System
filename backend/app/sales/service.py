@@ -48,6 +48,7 @@ from app.sales.schemas import (
     DeliveryNoteOut,
     InvoiceCreate,
     InvoiceOut,
+    MotoSaleLineOut,
     PartsSaleLineOut,
     PaymentCreate,
     PaymentOut,
@@ -661,6 +662,21 @@ class SalesService:
     async def list_parts_sales(self, **f) -> list[PartsSaleLineOut]:
         rows = await self.repo.list_parts_sales(**f)
         return [self._parts_sale_out(r) for r in rows]
+
+    async def list_motorcycle_sales(self, **f) -> list[MotoSaleLineOut]:
+        rows = await self.repo.list_motorcycle_sales(**f)
+        return [self._moto_sale_out(r) for r in rows]
+
+    @staticmethod
+    def _moto_sale_out(r) -> MotoSaleLineOut:
+        (unit_id, chassis, model_name, colour_name, sale_date, customer_name,
+         revenue, invoice_id, invoice_number, historical) = r
+        return MotoSaleLineOut(
+            unit_id=unit_id, chassis_number=chassis, model_name=model_name,
+            colour_name=colour_name, sale_date=sale_date, customer_name=customer_name,
+            revenue=_f(revenue), invoice_id=invoice_id, invoice_number=invoice_number,
+            historical=bool(historical),
+        )
 
     @staticmethod
     def _parts_sale_out(r) -> PartsSaleLineOut:
