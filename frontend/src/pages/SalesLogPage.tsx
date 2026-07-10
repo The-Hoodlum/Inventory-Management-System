@@ -3,6 +3,7 @@
 // sale is counted once (parts come from invoice lines, motorcycles from sold units — see
 // the backend's shared no-double-count aggregation). Rows drill down into the per-type
 // breakdown; the whole view exports to CSV.
+import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, Download } from "lucide-react";
 import { Fragment, useMemo, useState } from "react";
 
@@ -10,8 +11,11 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button, Card, Spinner } from "@/components/ui";
 import { formatDate, formatNumber } from "@/lib/format";
 import { useBranches } from "@/lib/refdata";
+import { salesApi } from "@/lib/sales";
 import { useSalesLog } from "@/lib/serverReports";
 import type { SalesLogGranularity, SalesLogRow, SalesLogType } from "@/types/api";
+
+interface TxnRow { date: string; kind: "Part" | "Bike"; item: string; customer: string; qty: number; amount: number; ref: string; historical: boolean }
 
 const INPUT =
   "rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500";
@@ -49,9 +53,34 @@ export default function SalesLogPage() {
   const [dateTo, setDateTo] = useState(isoDaysAgo(0));
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
+  const [view, setView] = useState<"summary" | "transactions">("summary");
+
   const q = useSalesLog({ granularity, type, branchId, dateFrom, dateTo });
   const rows = q.data?.rows ?? [];
   const totals = q.data?.totals;
+
+  const txnOn = view === "transactions";
+  const partsQ = useQuery({
+    queryKey: ["txn-parts", branchId, dateFrom, dateTo],
+    queryFn: () => salesApi.listPartsSales({ branch_id: branchId || undefined, date_from: dateFrom, date_to: dateTo, limit: 1000 }),
+    enabled: txnOn && type !== "motorcycles",
+  });
+  const motoQ = useQuery({
+    queryKey: ["txn-moto", branchId, dateFrom, dateTo],
+    queryFn: () => salesApi.listMotorcycleSales({ branch_id: branchId || undefined, date_from: dateFrom, date_to: dateTo, limit: 1000 }),
+    enabled: txnOn && type !== "parts",
+  });
+  const txns: TxnRow[] = useMemo(() => {
+    const out: TxnRow[] = [];
+    if (type !== "motorcycles") for (const p of partsQ.data ?? []) out.push({
+      date: p.sale_date, kind: "Part", item: `${p.name ?? "—"}${p.sku ? ` (${p.sku})` : ""}`,
+      customer: p.customer_name ?? "—", qty: p.qty, amount: p.line_total, ref: p.invoice_number, historical: false });
+    if (type !== "parts") for (const m of motoQ.data ?? []) out.push({
+      date: m.sale_date ?? "", kind: "Bike", item: `${m.model_name ?? "Motorcycle"} · ${m.chassis_number}`,
+      customer: m.customer_name ?? "—", qty: 1, amount: m.revenue, ref: m.invoice_number ?? (m.historical ? "historical" : "—"), historical: m.historical });
+    return out.sort((a, b) => (b.date > a.date ? 1 : b.date < a.date ? -1 : 0));
+  }, [partsQ.data, motoQ.data, type]);
+  const txnLoading = (partsQ.isFetching && type !== "motorcycles") || (motoQ.isFetching && type !== "parts");
 
   const toggle = (label: string) =>
     setExpanded((s) => {
@@ -75,11 +104,21 @@ export default function SalesLogPage() {
     <div>
       <PageHeader
         title="Sales Log"
-        description="Unified parts + motorcycle sales, by day, week or month."
+        description="Unified parts + motorcycle sales — summary by period, or the full transaction history."
         actions={
-          <Button variant="secondary" disabled={rows.length === 0} onClick={exportCsv}>
-            <Download className="h-4 w-4" /> Export CSV
-          </Button>
+          <div className="flex items-center gap-2">
+            <div className="inline-flex rounded-lg border border-slate-300 p-0.5">
+              {(["summary", "transactions"] as const).map((v) => (
+                <button key={v} onClick={() => setView(v)}
+                  className={`rounded-md px-3 py-1 text-sm capitalize ${view === v ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-slate-100"}`}>
+                  {v}
+                </button>
+              ))}
+            </div>
+            <Button variant="secondary" disabled={rows.length === 0} onClick={exportCsv}>
+              <Download className="h-4 w-4" /> Export CSV
+            </Button>
+          </div>
         }
       />
 
@@ -128,7 +167,7 @@ export default function SalesLogPage() {
       </Card>
 
       {/* Totals */}
-      {totals && (
+      {!txnOn && totals && (
         <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
           <TotalCard label="Total revenue" value={money(totals.revenue)} hint={`${formatNumber(totals.units)} units`} strong />
           <TotalCard label="Spare parts" value={money(totals.parts_revenue)} hint={`${formatNumber(totals.parts_units)} units`} />
@@ -137,7 +176,52 @@ export default function SalesLogPage() {
         </div>
       )}
 
+      {/* Transactions (full history) */}
+      {txnOn && (
+        <Card className="overflow-hidden">
+          {txnLoading && txns.length === 0 ? (
+            <div className="flex h-40 items-center justify-center"><Spinner label="Loading transactions…" /></div>
+          ) : txns.length === 0 ? (
+            <div className="p-10 text-center text-sm text-slate-400">No sales in this range.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                    <th className="px-4 py-2.5 font-medium">Date</th>
+                    <th className="px-4 py-2.5 font-medium">Type</th>
+                    <th className="px-4 py-2.5 font-medium">Item</th>
+                    <th className="px-4 py-2.5 font-medium">Customer</th>
+                    <th className="px-4 py-2.5 text-right font-medium">Qty</th>
+                    <th className="px-4 py-2.5 text-right font-medium">Amount</th>
+                    <th className="px-4 py-2.5 font-medium">Ref</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {txns.map((t, i) => (
+                    <tr key={i} className="hover:bg-slate-50">
+                      <td className="px-4 py-2.5 text-slate-500">{t.date ? formatDate(t.date) : "—"}</td>
+                      <td className="px-4 py-2.5">
+                        <span className={`inline-flex rounded-pill px-2 py-0.5 text-2xs font-medium ${t.kind === "Bike" ? "bg-brand-50 text-brand-700" : "bg-slate-100 text-slate-600"}`}>
+                          {t.kind}{t.historical ? " · hist." : ""}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-slate-700">{t.item}</td>
+                      <td className="px-4 py-2.5 text-slate-600">{t.customer}</td>
+                      <td className="px-4 py-2.5 text-right font-mono text-slate-600">{formatNumber(t.qty)}</td>
+                      <td className="px-4 py-2.5 text-right font-mono font-medium text-slate-900">{money(t.amount)}</td>
+                      <td className="px-4 py-2.5 font-mono text-xs text-slate-400">{t.ref}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      )}
+
       {/* Period table */}
+      {!txnOn && (
       <Card className="overflow-hidden">
         {q.isLoading ? (
           <div className="flex h-40 items-center justify-center"><Spinner label="Loading sales…" /></div>
@@ -196,6 +280,7 @@ export default function SalesLogPage() {
           </table>
         )}
       </Card>
+      )}
 
       <p className="mt-3 text-xs text-slate-400">
         Revenue is summed in stored amounts and is not currency-converted (spare parts and
