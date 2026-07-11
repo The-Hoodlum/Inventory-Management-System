@@ -35,6 +35,7 @@ from app.reorder.api import purchase_order_router, reorder_router
 from app.reports.api import router as reports_router
 from app.sales.api import router as sales_router
 from app.search.api import router as search_router
+from app.service_followup.api import router as service_followup_router
 
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
@@ -66,6 +67,9 @@ api_router.include_router(sales_router, prefix="/sales", tags=["sales"])
 api_router.include_router(motorcycles_router, prefix="/motorcycles", tags=["motorcycles"])
 api_router.include_router(bike_issues_router, prefix="/bike-issues", tags=["bike-issues"])
 api_router.include_router(assembly_router, prefix="/assembly", tags=["assembly"])
+api_router.include_router(
+    service_followup_router, prefix="/service-followup", tags=["service-followup"]
+)
 api_router.include_router(dispatch_router, prefix="/delivery-notes", tags=["delivery-notes"])
 api_router.include_router(issuance_router, prefix="/issuances", tags=["issuances"])
 api_router.include_router(customer_delivery_router, prefix="/customer-deliveries", tags=["customer-deliveries"])
