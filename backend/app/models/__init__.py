@@ -82,6 +82,7 @@ from app.models.sales import (
     SalesOrder,
     SalesOrderLine,
 )
+from app.models.service_followup import MotorcycleServicePlan, MotorcycleServiceRecord
 
 __all__ = [
     "Tenant", "User", "UserBranchAccess", "Role", "Permission", "RolePermission", "UserRole",
@@ -104,4 +105,5 @@ __all__ = [
     "CustomerDelivery", "CustomerDeliveryLine",
     "BikeIssue", "BikeIssueLine",
     "AssemblyTarget",
+    "MotorcycleServicePlan", "MotorcycleServiceRecord",
 ]

@@ -315,6 +315,16 @@ def get_assembly_service(db: AsyncSession = Depends(get_db)):
     return AssemblyPlannerService(AssemblyRepository(db), AuditRepository(db))
 
 
+def get_service_followup_service(db: AsyncSession = Depends(get_db)):
+    # Motorcycle service follow-up: computes the next service due for sold bikes (time-
+    # only, usage-scaled) and logs services performed. Reads the serialized registry + an
+    # append-only service log; writes only follow-up tables, never stock.
+    from app.service_followup.repository import ServiceFollowUpRepository
+    from app.service_followup.service import ServiceFollowUpService
+
+    return ServiceFollowUpService(ServiceFollowUpRepository(db), AuditRepository(db))
+
+
 def get_bike_issue_service(db: AsyncSession = Depends(get_db)):
     # Internal bike repairs: parts are CONSUMED through the inventory service (single write
     # path); the serialized unit is held/released via its own registry event. Never writes

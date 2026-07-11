@@ -104,6 +104,9 @@ class MotorcycleUnit(Base):
     registration_papers_received: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     warranty_start: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     warranty_end: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    # How hard this bike is ridden (light/medium/heavy) — scales the service interval on
+    # the service follow-up page. See app/service_followup/domain/schedule.py.
+    service_usage: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'medium'"))
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     # Provenance + historical lifecycle dates for bulk-imported units (migration 0031).
     imported_historical: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))

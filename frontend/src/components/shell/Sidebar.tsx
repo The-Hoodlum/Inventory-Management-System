@@ -8,6 +8,7 @@ import {
   Bike,
   Boxes,
   Building2,
+  CalendarClock,
   ChevronsLeft,
   ChevronsRight,
   ClipboardList,
@@ -72,6 +73,7 @@ const GROUPS: NavGroup[] = [
       { to: "/motorcycles", label: "Motorcycles", icon: Bike, permission: "motorcycle.read" },
       { to: "/bike-issues", label: "Bike Issues", icon: Wrench, permission: "bike_issue.read" },
       { to: "/assembly-planner", label: "Assembly Planner", icon: Hammer, permission: "motorcycle.read" },
+      { to: "/service-followup", label: "Service Follow-up", icon: CalendarClock, permission: "motorcycle.read" },
     ],
   },
   {

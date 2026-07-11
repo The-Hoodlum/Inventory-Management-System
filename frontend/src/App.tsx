@@ -40,6 +40,7 @@ import ReorderPage from "@/pages/ReorderPage";
 import ReportsPage from "@/pages/ReportsPage";
 import SalesLogPage from "@/pages/SalesLogPage";
 import SalesPage from "@/pages/SalesPage";
+import ServiceFollowUpPage from "@/pages/ServiceFollowUpPage";
 import SettingsPage from "@/pages/SettingsPage";
 import SparePartsSalesPage from "@/pages/SparePartsSalesPage";
 import SupplierScoresPage from "@/pages/SupplierScoresPage";
@@ -81,6 +82,7 @@ export default function App() {
         <Route path="/bike-issues" element={<BikeIssuesPage />} />
         <Route path="/bike-issues/:id" element={<BikeIssueDetailPage />} />
         <Route path="/assembly-planner" element={<AssemblyPlannerPage />} />
+        <Route path="/service-followup" element={<ServiceFollowUpPage />} />
         <Route path="/pos" element={<PosPage />} />
         <Route path="/parts-sales" element={<SparePartsSalesPage />} />
         <Route path="/inventory" element={<InventoryPage />} />
