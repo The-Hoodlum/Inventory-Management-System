@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS motorcycle_service_plans (
     tenant_id   UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     -- NULL = the tenant-wide default schedule used when a model has no override.
     model_id    UUID REFERENCES motorcycle_models(id) ON DELETE CASCADE,
-    -- Ordered list of stages: [{"sequence":1,"label":"1st service","interval_days":30}, ...]
+    -- Ordered list of stage objects, each with the keys sequence, label and interval_days.
     -- Each interval_days is the gap from the PREVIOUS service (the first from the sale).
     -- The last stage's interval repeats for every service beyond the list.
     stages      JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -86,31 +86,38 @@ CREATE INDEX IF NOT EXISTS idx_service_records_tenant
     ON motorcycle_service_records (tenant_id, service_date DESC);
 
 -- ---------------------------------------------------------------------------
--- RLS + app_user grants
+-- RLS + app_user grants. Explicit per-table blocks (no format() / no percent signs —
+-- this file is also run through SQLAlchemy op.execute(), which treats a percent as a
+-- bind-parameter marker and fails on it).
 -- ---------------------------------------------------------------------------
 DO $$
-DECLARE
-    t TEXT;
 BEGIN
-    FOREACH t IN ARRAY ARRAY['motorcycle_service_plans', 'motorcycle_service_records']
-    LOOP
-        EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY;', t);
-        EXECUTE format('ALTER TABLE %I FORCE  ROW LEVEL SECURITY;', t);
-        IF NOT EXISTS (
-            SELECT 1 FROM pg_policies
-            WHERE schemaname = 'public' AND tablename = t AND policyname = 'tenant_isolation'
-        ) THEN
-            EXECUTE format(
-                'CREATE POLICY tenant_isolation ON %I '
-                'USING (tenant_id = NULLIF(current_setting(''app.current_tenant'', true), '''')::uuid) '
-                'WITH CHECK (tenant_id = NULLIF(current_setting(''app.current_tenant'', true), '''')::uuid);',
-                t
-            );
-        END IF;
-        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_user') THEN
-            EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON %I TO app_user;', t);
-        END IF;
-    END LOOP;
+    ALTER TABLE motorcycle_service_plans ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE motorcycle_service_plans FORCE  ROW LEVEL SECURITY;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'public' AND tablename = 'motorcycle_service_plans' AND policyname = 'tenant_isolation'
+    ) THEN
+        CREATE POLICY tenant_isolation ON motorcycle_service_plans
+            USING      (tenant_id = NULLIF(current_setting('app.current_tenant', true), '')::uuid)
+            WITH CHECK (tenant_id = NULLIF(current_setting('app.current_tenant', true), '')::uuid);
+    END IF;
+
+    ALTER TABLE motorcycle_service_records ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE motorcycle_service_records FORCE  ROW LEVEL SECURITY;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_policies
+        WHERE schemaname = 'public' AND tablename = 'motorcycle_service_records' AND policyname = 'tenant_isolation'
+    ) THEN
+        CREATE POLICY tenant_isolation ON motorcycle_service_records
+            USING      (tenant_id = NULLIF(current_setting('app.current_tenant', true), '')::uuid)
+            WITH CHECK (tenant_id = NULLIF(current_setting('app.current_tenant', true), '')::uuid);
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_user') THEN
+        GRANT SELECT, INSERT, UPDATE, DELETE ON motorcycle_service_plans   TO app_user;
+        GRANT SELECT, INSERT, UPDATE, DELETE ON motorcycle_service_records TO app_user;
+    END IF;
 END
 $$;
 
