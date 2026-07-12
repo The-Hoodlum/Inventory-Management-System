@@ -253,6 +253,19 @@ class SalesRepository:
     async def list_invoices(self, *, status: str | None, customer_id: uuid.UUID | None, limit: int) -> list[Invoice]:
         return await self._list(Invoice, Invoice.created_at, status, customer_id, limit)
 
+    async def list_invoices_by_statuses(
+        self, *, statuses: Sequence[str], customer_id: uuid.UUID | None, limit: int,
+    ) -> list[Invoice]:
+        """Invoices whose status is in ``statuses``, oldest first — the natural
+        accounts-receivable order (most-overdue on top). Balance is not computable in pure
+        SQL (it depends on applied credit at the invoice's frozen rate), so the caller
+        filters by balance; here we only narrow to the candidate statuses."""
+        stmt = select(Invoice).where(Invoice.status.in_(list(statuses)))
+        if customer_id:
+            stmt = stmt.where(Invoice.customer_id == customer_id)
+        stmt = stmt.order_by(Invoice.invoice_date.asc(), Invoice.created_at.asc()).limit(limit)
+        return list((await self.session.execute(stmt)).scalars().all())
+
     async def list_deliveries(self, *, status: str | None, limit: int) -> list[DeliveryNote]:
         stmt = select(DeliveryNote)
         if status:

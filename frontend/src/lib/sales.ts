@@ -293,6 +293,9 @@ export const salesApi = {
 
   // invoices
   listInvoices: (status = "") => api.get<Invoice[]>(`/sales/invoices${status ? `?status=${status}` : ""}`),
+  // accounts receivable: invoices with an outstanding ZMW balance (voided/paid excluded), oldest first
+  listOutstandingInvoices: (customer_id?: string) =>
+    api.get<Invoice[]>(`/sales/invoices/outstanding${customer_id ? `?customer_id=${customer_id}` : ""}`),
   getInvoice: (id: string) => api.get<Invoice>(`/sales/invoices/${id}`),
   createInvoice: (body: { sales_order_id?: string; delivery_note_id?: string }) =>
     api.post<Invoice>("/sales/invoices", body),

@@ -14,6 +14,7 @@ import {
   ClipboardList,
   Container,
   Contact,
+  CircleDollarSign,
   HandHelping,
   Hammer,
   FileText,
@@ -66,6 +67,7 @@ const GROUPS: NavGroup[] = [
     label: "Sales",
     items: [
       { to: "/sales", label: "Sales", icon: Receipt, permission: "sales.read" },
+      { to: "/sales/pending-payments", label: "Pending Payments", icon: CircleDollarSign, permission: "sales.read" },
       { to: "/parts-sales", label: "Spare Parts POS", icon: ShoppingCart, permission: "pos.use" },
       { to: "/pos", label: "Bike POS", icon: Bike, permission: "motorcycle.manage" },
       { to: "/sales-log", label: "Sales Log", icon: BarChart3, permission: "report.read" },

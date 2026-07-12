@@ -251,6 +251,18 @@ async def list_invoices(
     return await svc.list_invoices(status=status_filter, customer_id=customer_id, limit=limit)
 
 
+@router.get("/invoices/outstanding", response_model=list[InvoiceOut])
+async def list_outstanding_invoices(
+    customer_id: uuid.UUID | None = None,
+    limit: int = Query(default=500, ge=1, le=1000),
+    _: CurrentUser = Depends(require_permission(P.SALES_READ)),
+    svc: SalesService = Depends(get_sales_service),
+) -> list[InvoiceOut]:
+    # Accounts receivable: invoices with an outstanding ZMW balance (voided/paid excluded).
+    # Declared before /invoices/{invoice_id} so "outstanding" isn't parsed as a UUID.
+    return await svc.list_outstanding_invoices(customer_id=customer_id, limit=limit)
+
+
 @router.get("/invoices/{invoice_id}", response_model=InvoiceOut)
 async def get_invoice(
     invoice_id: uuid.UUID,
