@@ -209,6 +209,11 @@ class Invoice(Base):
     grand_total_zmw: Mapped[Decimal] = _num()
     amount_paid: Mapped[Decimal] = _num()   # in ZMW (the billing currency)
     credit_total: Mapped[Decimal] = _num()  # applied credit notes, in USD (converted at fx_rate)
+    # Void / reverse (admin correction; the invoice is kept for audit, excluded from active
+    # totals). See migration 0049.
+    voided_at: Mapped[dt.datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    voided_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"))
+    void_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
     updated_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))

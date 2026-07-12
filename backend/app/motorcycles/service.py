@@ -330,6 +330,31 @@ class MotorcycleService:
         await self._audit(tenant_id, user_id, "unit", unit.id, "sold", old=old, new=L.SOLD)
         return await self._unit_out(unit, with_events=True)
 
+    async def revert_sale_for_invoice(self, *, tenant_id, user_id, invoice_id, reason: str) -> bool:
+        """Reverse a sale when its invoice is VOIDED: return the sold unit to an available
+        (assembled) status, clear the sale linkage, and record the reversal on the unit's
+        own ledger. No-op (returns False) when no unit was sold against the invoice. This
+        is the ONLY sanctioned way out of the terminal 'sold' state."""
+        unit = await self.repo.unit_by_sold_ref(invoice_id, lock=True)
+        if unit is None:
+            return False
+        old = unit.status
+        unit.status = L.ASSEMBLED   # back to an available, sellable state
+        unit.sold_ref = None
+        unit.customer_id = None
+        unit.price_charged = None
+        unit.date_sold = None
+        unit.payment_status = "unpaid"
+        unit.version += 1
+        await self.repo.session.flush()
+        await self.repo.add_event(
+            tenant_id=tenant_id, unit_id=unit.id, event_type="sale_voided", from_status=old,
+            to_status=L.ASSEMBLED, user_id=user_id, reference_type="invoice_void",
+            reference_id=invoice_id, note=reason,
+        )
+        await self._audit(tenant_id, user_id, "unit", unit.id, "sale_voided", old=old, new=L.ASSEMBLED)
+        return True
+
     async def transfer(self, *, tenant_id, user_id, unit_id, payload: TransferIn) -> UnitOut:
         """Serialized branch move: this exact chassis moves to another branch/location,
         recorded as a `transfer` event with from/to branch (both sides visible), audited.

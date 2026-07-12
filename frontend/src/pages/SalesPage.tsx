@@ -31,12 +31,14 @@ export default function SalesPage() {
   const canOrder = hasPermission("sales.order");
   const canQuote = hasPermission("sales.quote");
   const canReturn = hasPermission("sales.return");
+  const canVoid = hasPermission("sales.manage");
   const canSellBike = hasPermission("motorcycle.manage");
   const [tab, setTab] = useState<Tab>("orders");
   const [showNew, setShowNew] = useState(false);
   const [showSellBike, setShowSellBike] = useState(false);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [payInvoice, setPayInvoice] = useState<string | null>(null);
+  const [voidInvoice, setVoidInvoice] = useState<Invoice | null>(null);
   const [returnInvoice, setReturnInvoice] = useState<Invoice | null>(null);
 
   const orders = useQuery({ queryKey: ["sales", "orders"], queryFn: () => salesApi.listOrders(), enabled: tab === "orders" });
@@ -103,24 +105,32 @@ export default function SalesPage() {
       {tab === "invoices" && (
         <DocTable q={invoices} cols={["Invoice #", "Customer", "Status", "USD total", "ZMW payable", "ZMW balance", ""]}
           row={(o) => (
-            <tr key={o.id} className="hover:bg-slate-50">
+            <tr key={o.id} className={"hover:bg-slate-50 " + (o.status === "voided" ? "opacity-60" : "")}>
               <td className="px-4 py-3 font-mono text-[13px] font-medium">
                 {o.invoice_number}
                 <div className="text-2xs font-normal text-slate-400">@ {formatNumber(o.fx_rate)}</div>
               </td>
               <td className="px-4 py-3 text-slate-600">{o.customer_name ?? "—"}</td>
-              <td className="px-4 py-3"><StatusBadge status={o.status} /></td>
+              <td className="px-4 py-3">
+                <StatusBadge status={o.status} />
+                {o.status === "voided" && o.void_reason && (
+                  <div className="text-2xs text-slate-400" title={o.void_reason}>voided: {o.void_reason.slice(0, 28)}</div>
+                )}
+              </td>
               <td className="px-4 py-3 text-right font-mono">{formatMoney(o.grand_total)}</td>
               <td className="px-4 py-3 text-right font-mono font-medium">{formatMoney(o.grand_total_zmw, "ZMW")}</td>
               <td className="px-4 py-3 text-right font-mono">{formatMoney(o.balance, "ZMW")}</td>
               <td className="px-4 py-3 text-right">
                 <div className="flex justify-end gap-2">
                   <Button variant="ghost" onClick={() => void salesApi.downloadInvoicePdf(o.id, o.invoice_number)}>PDF</Button>
-                  {canReturn && o.lines.length > 0 && (
+                  {o.status !== "voided" && canReturn && o.lines.length > 0 && (
                     <Button variant="ghost" onClick={() => setReturnInvoice(o)}>Return</Button>
                   )}
-                  {o.balance > 0 && hasPermission("sales.payment") && (
+                  {o.status !== "voided" && o.balance > 0 && hasPermission("sales.payment") && (
                     <Button variant="secondary" onClick={() => setPayInvoice(o.id)}>Record payment</Button>
+                  )}
+                  {o.status !== "voided" && canVoid && (
+                    <Button variant="ghost" onClick={() => setVoidInvoice(o)}>Void</Button>
                   )}
                 </div>
               </td>
@@ -148,6 +158,7 @@ export default function SalesPage() {
       {showNew && <NewOrderModal onClose={() => setShowNew(false)} />}
       {orderId && <OrderDetailModal orderId={orderId} onClose={() => setOrderId(null)} onPay={setPayInvoice} />}
       {payInvoice && <PaymentModal invoiceId={payInvoice} onClose={() => setPayInvoice(null)} />}
+      {voidInvoice && <VoidInvoiceModal invoice={voidInvoice} onClose={() => setVoidInvoice(null)} />}
       {returnInvoice && <ReturnModal invoice={returnInvoice} onClose={() => setReturnInvoice(null)} />}
     </div>
   );
@@ -337,6 +348,40 @@ function OrderDetailModal({ orderId, onClose, onPay }: { orderId: string; onClos
           </table>
         </div>
       )}
+    </Modal>
+  );
+}
+
+function VoidInvoiceModal({ invoice, onClose }: { invoice: Invoice; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [reason, setReason] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const doVoid = useMutation({
+    mutationFn: () => salesApi.voidInvoice(invoice.id, reason.trim()),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["sales"] }); onClose(); },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : "Could not void the sale."),
+  });
+  return (
+    <Modal title={`Void ${invoice.invoice_number}`} size="md" onClose={onClose} footer={
+      <>
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button disabled={!reason.trim() || doVoid.isPending} onClick={() => { setErr(null); doVoid.mutate(); }}>
+          {doVoid.isPending ? "Voiding…" : "Void sale"}
+        </Button>
+      </>
+    }>
+      <div className="space-y-3 text-sm">
+        <div className="rounded-lg bg-amber-50 px-3 py-2 text-amber-800">
+          This reverses the sale: stock is restored, a sold bike returns to available, and the sale is
+          excluded from active totals. The invoice is kept for the audit trail — it is not deleted.
+        </div>
+        {err && <div className="rounded-lg bg-red-50 px-3 py-2 text-red-700">{err}</div>}
+        <label className="block">
+          <span className="mb-1 block font-medium text-slate-700">Reason (required)</span>
+          <textarea className={`${INPUT} w-full`} rows={3} value={reason} autoFocus
+            onChange={(e) => setReason(e.target.value)} placeholder="Why is this sale being voided?" />
+        </label>
+      </div>
     </Modal>
   );
 }

@@ -45,8 +45,13 @@ DN_PENDING, DN_DELIVERED, DN_PARTIAL, DN_RETURNED = (
 INV_DRAFT, INV_SENT, INV_PARTIALLY_PAID, INV_PAID, INV_OVERDUE, INV_CANCELLED = (
     "draft", "sent", "partially_paid", "paid", "overdue", "cancelled",
 )
-INVOICE_STATUSES = frozenset({INV_DRAFT, INV_SENT, INV_PARTIALLY_PAID, INV_PAID, INV_OVERDUE, INV_CANCELLED})
+# Voided: an admin reversed the sale (stock restored, unit un-sold, netted to zero). The
+# document stays for audit but is excluded from active sales.
+INV_VOIDED = "voided"
+INVOICE_STATUSES = frozenset({INV_DRAFT, INV_SENT, INV_PARTIALLY_PAID, INV_PAID, INV_OVERDUE, INV_CANCELLED, INV_VOIDED})
 INVOICE_PAYABLE = frozenset({INV_DRAFT, INV_SENT, INV_PARTIALLY_PAID, INV_OVERDUE})
+# An invoice that can still be voided (anything except already voided/cancelled).
+INVOICE_VOIDABLE = frozenset({INV_DRAFT, INV_SENT, INV_PARTIALLY_PAID, INV_PAID, INV_OVERDUE})
 
 _EPS = Decimal("0.00005")
 
