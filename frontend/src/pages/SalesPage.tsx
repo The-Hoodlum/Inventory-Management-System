@@ -6,6 +6,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/auth/AuthContext";
 import { Modal } from "@/components/Modal";
 import { PageHeader } from "@/components/PageHeader";
+import { emptyPaymentRow, type PaymentRow, PaymentRows, paymentRowsTotal, toPaymentLines } from "@/components/PaymentRows";
 import { SellBikeModal } from "@/components/SellBikeModal";
 import { Button, Card, Spinner, StatusBadge } from "@/components/ui";
 import { ApiError } from "@/lib/api";
@@ -14,7 +15,7 @@ import { useCustomers } from "@/lib/customers";
 import { formatDate, formatMoney, formatNumber, titleCase } from "@/lib/format";
 import { useBranches, useWarehouses } from "@/lib/refdata";
 import type { Invoice } from "@/lib/sales";
-import { PAYMENT_METHODS, type PaymentMethod, RETURN_REASONS, salesApi } from "@/lib/sales";
+import { RETURN_REASONS, salesApi } from "@/lib/sales";
 
 const INPUT =
   "rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500";
@@ -390,14 +391,13 @@ function PaymentModal({ invoiceId, onClose }: { invoiceId: string; onClose: () =
   const qc = useQueryClient();
   const { data: inv } = useQuery({ queryKey: ["sales", "invoice", invoiceId], queryFn: () => salesApi.getInvoice(invoiceId) });
   const priorPayments = useQuery({ queryKey: ["sales", "invoice-payments", invoiceId], queryFn: () => salesApi.listInvoicePayments(invoiceId) });
-  const [rows, setRows] = useState<{ method: PaymentMethod; amount: string; reference: string }[]>([{ method: "cash", amount: "", reference: "" }]);
+  const [rows, setRows] = useState<PaymentRow[]>([emptyPaymentRow("cash")]);
   const [err, setErr] = useState<string | null>(null);
   const balance = inv?.balance ?? 0;
-  const entered = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  const entered = paymentRowsTotal(rows);
 
   const pay = useMutation({
-    mutationFn: () => salesApi.pay(invoiceId, rows.filter((r) => Number(r.amount) > 0)
-      .map((r) => ({ method: r.method, amount: Number(r.amount), reference: r.reference.trim() || null }))),
+    mutationFn: () => salesApi.pay(invoiceId, toPaymentLines(rows)),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ["sales"] }); onClose(); },
     onError: (e) => setErr(e instanceof ApiError ? e.message : "Payment failed."),
   });
@@ -442,23 +442,7 @@ function PaymentModal({ invoiceId, onClose }: { invoiceId: string; onClose: () =
           </div>
         )}
 
-        {rows.map((r, i) => (
-          <div key={i} className="grid grid-cols-[1fr_1fr_1.2fr] gap-2">
-            <select value={r.method} onChange={(e) => setRows((rs) => rs.map((x, j) => j === i ? { ...x, method: e.target.value as PaymentMethod } : x))} className={INPUT}>
-              {PAYMENT_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-            </select>
-            <input type="number" min={0} value={r.amount} placeholder="Amount"
-              onChange={(e) => setRows((rs) => rs.map((x, j) => j === i ? { ...x, amount: e.target.value } : x))}
-              className={`${INPUT} text-right`} />
-            <input value={r.reference} placeholder="Reference (txn / cheque no.)"
-              onChange={(e) => setRows((rs) => rs.map((x, j) => j === i ? { ...x, reference: e.target.value } : x))}
-              className={INPUT} />
-          </div>
-        ))}
-        <div className="flex items-center justify-between">
-          <button onClick={() => setRows((rs) => [...rs, { method: "card", amount: "", reference: "" }])} className="text-xs text-brand-600 hover:underline">+ Split payment</button>
-          <button onClick={() => setRows((rs) => rs.map((x, i) => i === 0 ? { ...x, amount: String(balance) } : x))} className="text-xs text-slate-500 hover:underline">Pay full</button>
-        </div>
+        <PaymentRows rows={rows} onChange={setRows} fillAmount={balance} />
         {entered > balance + 0.001 && <div className="text-sm text-red-600">Exceeds the outstanding balance.</div>}
       </div>
     </Modal>

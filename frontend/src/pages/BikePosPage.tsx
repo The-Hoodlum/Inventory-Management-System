@@ -10,13 +10,14 @@ import { useState } from "react";
 
 import { useAuth } from "@/auth/AuthContext";
 import { PageHeader } from "@/components/PageHeader";
+import { emptyPaymentRow, type PaymentRow, PaymentRows, paymentRowsTotal, toPaymentLines } from "@/components/PaymentRows";
 import { Button, Card, Spinner } from "@/components/ui";
 import { ApiError } from "@/lib/api";
 import { useCustomers } from "@/lib/customers";
 import { formatDate, formatMoney } from "@/lib/format";
 import { type MotoUnit, motorcyclesApi, useMotoModels } from "@/lib/motorcycles";
 import { useBranches } from "@/lib/refdata";
-import { type BikeSaleResult, PAYMENT_METHODS, type PaymentMethod, salesApi } from "@/lib/sales";
+import { type BikeSaleResult, salesApi } from "@/lib/sales";
 
 const INPUT =
   "rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500";
@@ -41,8 +42,7 @@ export default function BikePosPage() {
   const [price, setPrice] = useState("");
   const [customerId, setCustomerId] = useState("");
   const [takePayment, setTakePayment] = useState(true);
-  const [method, setMethod] = useState<PaymentMethod>("cash");
-  const [amount, setAmount] = useState("");
+  const [payRows, setPayRows] = useState<PaymentRow[]>([emptyPaymentRow("cash")]);
   const [err, setErr] = useState<string | null>(null);
   const [done, setDone] = useState<BikeSaleResult | null>(null);
 
@@ -72,13 +72,13 @@ export default function BikePosPage() {
   ].filter((u) => u.allowed_next.includes("sold"));
 
   const priceNum = Number(price) || 0;
-  const amountNum = Number(amount) || 0;
+  const paidNum = paymentRowsTotal(payRows);
 
   function pick(u: MotoUnit) {
     setBike(u);
     const p = Number(u.selling_price ?? 0);
     setPrice(p ? String(p) : "");
-    setAmount(p ? String(p) : "");
+    setPayRows([{ ...emptyPaymentRow("cash"), amount: p ? String(p) : "" }]);
     setErr(null);
   }
 
@@ -88,13 +88,13 @@ export default function BikePosPage() {
         unit_id: bike!.id,
         customer_id: customerId || null,
         price: priceNum,
-        payments: takePayment && amountNum > 0 ? [{ method, amount: amountNum }] : [],
+        payments: takePayment ? toPaymentLines(payRows) : [],
       }),
     onSuccess: (r) => {
       setDone(r);
       setBike(null);
       setPrice("");
-      setAmount("");
+      setPayRows([emptyPaymentRow("cash")]);
       setCustomerId("");
       void qc.invalidateQueries({ queryKey: ["bike-pos-units"] });
       void qc.invalidateQueries({ queryKey: ["bike-sales-log"] });
@@ -108,7 +108,8 @@ export default function BikePosPage() {
     enabled: canSeeLog,
   });
 
-  const valid = bike && priceNum > 0 && (!takePayment || amountNum > 0);
+  const overpay = takePayment && paidNum > priceNum + 0.001;
+  const valid = bike && priceNum > 0 && (!takePayment || paidNum > 0) && !overpay;
 
   return (
     <div>
@@ -202,7 +203,7 @@ export default function BikePosPage() {
                 <label className="block text-sm">
                   <span className="mb-1 block font-medium text-slate-700">Price (VAT-inclusive) *</span>
                   <input type="number" min={0} className={`${INPUT} w-full`} value={price}
-                    onChange={(e) => { setPrice(e.target.value); if (takePayment) setAmount(e.target.value); }} />
+                    onChange={(e) => setPrice(e.target.value)} />
                 </label>
                 <label className="block text-sm">
                   <span className="mb-1 block font-medium text-slate-700">Customer</span>
@@ -216,12 +217,19 @@ export default function BikePosPage() {
                   Take payment now
                 </label>
                 {takePayment && (
-                  <div className="grid grid-cols-2 gap-2">
-                    <select className={INPUT} value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)}>
-                      {PAYMENT_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-                    </select>
-                    <input type="number" min={0} className={`${INPUT} text-right`} value={amount}
-                      placeholder="Amount received" onChange={(e) => setAmount(e.target.value)} />
+                  <div className="space-y-2">
+                    <PaymentRows rows={payRows} onChange={setPayRows} fillAmount={priceNum} fillLabel="Full price" />
+                    <div className="flex justify-between text-xs text-slate-500">
+                      <span>Collecting</span>
+                      <span className="font-mono">{formatMoney(paidNum)} of {formatMoney(priceNum)}</span>
+                    </div>
+                    {overpay ? (
+                      <div className="text-sm text-red-600">Payments exceed the bike price.</div>
+                    ) : priceNum > 0 && paidNum > 0 && paidNum < priceNum ? (
+                      <div className="text-xs text-amber-600">
+                        Balance {formatMoney(priceNum - paidNum)} left outstanding — the invoice stays partially paid.
+                      </div>
+                    ) : null}
                   </div>
                 )}
                 {err && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
@@ -232,7 +240,7 @@ export default function BikePosPage() {
               disabled={!valid || sell.isPending}
               onClick={() => { setErr(null); sell.mutate(); }}
             >
-              {sell.isPending ? "Selling…" : takePayment ? `Charge ${formatMoney(priceNum)}` : "Create invoice"}
+              {sell.isPending ? "Selling…" : takePayment && paidNum > 0 ? `Charge ${formatMoney(paidNum)}` : "Create invoice"}
             </Button>
           </Card>
         </div>
