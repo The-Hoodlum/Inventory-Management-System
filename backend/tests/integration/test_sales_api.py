@@ -109,11 +109,13 @@ async def test_full_sales_flow(client):
     quote = r.json()
     assert quote["grand_total"] == 500.0  # 5*100, VAT neutralised
 
-    # Convert -> sales order
+    # Convert -> the part lines become a sales order (bike lines, if any, are sold).
     r = await client.post(f"/api/v1/sales/quotations/{quote['id']}/convert", headers=admin_h,
                           json={"location_id": location_id})
     assert r.status_code == 201, r.text
-    so = r.json()
+    conv = r.json()
+    assert conv["quotation_id"] == quote["id"] and conv["bike_sales"] == []
+    so = conv["sales_order"]
     so_id = so["id"]
     assert so["status"] == "draft" and so["quotation_id"] == quote["id"]
 
