@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { useAuth } from "@/auth/AuthContext";
 import { Modal } from "@/components/Modal";
@@ -25,8 +26,10 @@ const TABS: Tab[] = ["orders", "quotations", "invoices", "returns", "credit_note
 
 export default function SalesPage() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const { hasPermission } = useAuth();
   const canOrder = hasPermission("sales.order");
+  const canQuote = hasPermission("sales.quote");
   const canReturn = hasPermission("sales.return");
   const canSellBike = hasPermission("motorcycle.manage");
   const [tab, setTab] = useState<Tab>("orders");
@@ -50,6 +53,7 @@ export default function SalesPage() {
         actions={
           <div className="flex items-center gap-2">
             {canSellBike && <Button variant="secondary" onClick={() => setShowSellBike(true)}>Sell a bike</Button>}
+            {canQuote && <Button variant="secondary" onClick={() => navigate("/sales/quotations/new")}>New quotation</Button>}
             {canOrder && <Button onClick={() => setShowNew(true)}><Plus className="h-4 w-4" /> New order</Button>}
           </div>
         }

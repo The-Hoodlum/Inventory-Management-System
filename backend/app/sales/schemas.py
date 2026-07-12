@@ -55,6 +55,10 @@ class _DocOut(BaseModel):
     id: uuid.UUID
     customer_id: uuid.UUID
     customer_name: str | None = None
+    # Full customer details shown on the document (name / phone / address / tax number).
+    customer_phone: str | None = None
+    customer_address: str | None = None
+    customer_tax_number: str | None = None
     branch_id: uuid.UUID | None = None
     branch_name: str | None = None
     status: str

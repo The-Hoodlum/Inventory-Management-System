@@ -41,6 +41,16 @@ export interface CustomerSummary extends Customer {
   available_credit: number | null;
 }
 
+export interface CustomerAddressInput {
+  address_type?: string;
+  line1?: string | null;
+  line2?: string | null;
+  city?: string | null;
+  region?: string | null;
+  country?: string | null;
+  is_default?: boolean;
+}
+
 export interface CustomerInput {
   name: string;
   contact_name?: string | null;
@@ -51,6 +61,7 @@ export interface CustomerInput {
   payment_terms?: string | null;
   credit_limit?: number;
   notes?: string | null;
+  addresses?: CustomerAddressInput[];
 }
 
 export const customersApi = {
