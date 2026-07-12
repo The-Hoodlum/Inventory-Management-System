@@ -24,6 +24,15 @@ def _num(default: str = "0", nullable: bool = False) -> Mapped[Decimal]:
     return mapped_column(Numeric(18, 4), nullable=nullable, server_default=text(default))
 
 
+def _rate() -> Mapped[Decimal]:
+    """A VAT/rate fraction column (0.16 = 16%), frozen on a document/line."""
+    return mapped_column(Numeric(9, 6), nullable=False, server_default=text("0"))
+
+
+def _treatment() -> Mapped[str]:
+    return mapped_column(Text, nullable=False, server_default=text("'exclusive'"))
+
+
 # ------------------------------- Quotation --------------------------------- #
 class Quotation(Base):
     __tablename__ = "quotations"
@@ -40,8 +49,11 @@ class Quotation(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     subtotal: Mapped[Decimal] = _num()
     discount_total: Mapped[Decimal] = _num()
-    tax_total: Mapped[Decimal] = _num()
-    grand_total: Mapped[Decimal] = _num()
+    net_total: Mapped[Decimal] = _num()   # sum of line net (VAT-exclusive), frozen
+    tax_total: Mapped[Decimal] = _num()   # sum of line VAT, frozen
+    grand_total: Mapped[Decimal] = _num()  # sum of line payable (VAT-inclusive gross)
+    # VAT rate applied, frozen at creation (fraction: 0.16 = 16%). See migration 0048.
+    vat_rate: Mapped[Decimal] = mapped_column(Numeric(9, 6), nullable=False, server_default=text("0"))
     # USD -> billing-currency (ZMW) rate frozen when the quote is created, and the billed
     # ZMW grand total derived from it (never recomputed at view time). See migration 0033.
     fx_rate: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False, server_default=text("1"))
@@ -67,8 +79,12 @@ class QuotationLine(Base):
     unit_price: Mapped[Decimal] = _num()
     discount_pct: Mapped[Decimal] = _num()
     tax_pct: Mapped[Decimal] = _num()
-    line_total: Mapped[Decimal] = _num()
+    line_total: Mapped[Decimal] = _num()      # payable (VAT-inclusive gross)
     line_total_zmw: Mapped[Decimal] = _num()  # line_total * document fx_rate, frozen
+    net_amount: Mapped[Decimal] = _num()      # VAT-exclusive net, frozen
+    vat_amount: Mapped[Decimal] = _num()      # VAT component, frozen
+    vat_treatment: Mapped[str] = _treatment()
+    vat_rate: Mapped[Decimal] = _rate()
 
 
 # ------------------------------ Sales order -------------------------------- #
@@ -92,6 +108,8 @@ class SalesOrder(Base):
     discount_total: Mapped[Decimal] = _num()
     tax_total: Mapped[Decimal] = _num()
     grand_total: Mapped[Decimal] = _num()
+    net_total: Mapped[Decimal] = _num()
+    vat_rate: Mapped[Decimal] = _rate()
     created_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"))
     confirmed_at: Mapped[dt.datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
@@ -115,6 +133,10 @@ class SalesOrderLine(Base):
     discount_pct: Mapped[Decimal] = _num()
     tax_pct: Mapped[Decimal] = _num()
     line_total: Mapped[Decimal] = _num()
+    net_amount: Mapped[Decimal] = _num()
+    vat_amount: Mapped[Decimal] = _num()
+    vat_treatment: Mapped[str] = _treatment()
+    vat_rate: Mapped[Decimal] = _rate()
     reserved_qty: Mapped[Decimal] = _num()
     delivered_qty: Mapped[Decimal] = _num()
 
@@ -178,6 +200,8 @@ class Invoice(Base):
     discount_total: Mapped[Decimal] = _num()
     tax_total: Mapped[Decimal] = _num()
     grand_total: Mapped[Decimal] = _num()
+    net_total: Mapped[Decimal] = _num()
+    vat_rate: Mapped[Decimal] = _rate()
     # USD -> ZMW rate frozen when the invoice is issued; ZMW grand total is the PAYABLE
     # (payments settle against it, in ZMW). ``amount_paid``/``credit_total`` reconcile in
     # ZMW at this frozen rate. See migration 0033.
@@ -206,8 +230,12 @@ class InvoiceLine(Base):
     unit_price: Mapped[Decimal] = _num()
     discount_pct: Mapped[Decimal] = _num()
     tax_pct: Mapped[Decimal] = _num()
-    line_total: Mapped[Decimal] = _num()
+    line_total: Mapped[Decimal] = _num()      # payable (VAT-inclusive gross)
     line_total_zmw: Mapped[Decimal] = _num()  # line_total * invoice fx_rate, frozen (billed)
+    net_amount: Mapped[Decimal] = _num()      # VAT-exclusive net, frozen
+    vat_amount: Mapped[Decimal] = _num()      # VAT component, frozen
+    vat_treatment: Mapped[str] = _treatment()
+    vat_rate: Mapped[Decimal] = _rate()
 
 
 # --------------------------- Payment + Receipt ----------------------------- #
@@ -307,6 +335,8 @@ class CreditNote(Base):
     discount_total: Mapped[Decimal] = _num()
     tax_total: Mapped[Decimal] = _num()
     grand_total: Mapped[Decimal] = _num()
+    net_total: Mapped[Decimal] = _num()
+    vat_rate: Mapped[Decimal] = _rate()
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"))
     applied_at: Mapped[dt.datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
@@ -330,4 +360,8 @@ class CreditNoteLine(Base):
     unit_price: Mapped[Decimal] = _num()
     discount_pct: Mapped[Decimal] = _num()
     tax_pct: Mapped[Decimal] = _num()
-    line_total: Mapped[Decimal] = _num()
+    line_total: Mapped[Decimal] = _num()      # payable (VAT-inclusive gross)
+    net_amount: Mapped[Decimal] = _num()
+    vat_amount: Mapped[Decimal] = _num()
+    vat_treatment: Mapped[str] = _treatment()
+    vat_rate: Mapped[Decimal] = _rate()

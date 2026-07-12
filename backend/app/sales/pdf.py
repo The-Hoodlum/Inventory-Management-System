@@ -128,9 +128,16 @@ def build_invoice_pdf(inv: InvoiceOut, *, bike: tuple | None = None, currency: s
             pdf.cell(width, 6, text_value, border="B", align=align)
         pdf.ln(6)
 
-    # ---- Totals (billed ZMW payable) ----
+    # ---- Totals (billed ZMW payable) with the VAT broken out. net/vat are stored in the
+    # document's line currency; convert to the billed currency at the frozen fx_rate. ----
+    fx = inv.fx_rate or 1.0
+    net_zmw = (inv.net_total or 0.0) * fx
+    vat_zmw = (inv.tax_total or 0.0) * fx
+    vat_label = f"VAT ({_money(inv.vat_rate * 100)}%)" if inv.vat_rate else "VAT"
     pdf.ln(2)
     for label, value, bold in (
+        ("Net", net_zmw, False),
+        (vat_label, vat_zmw, False),
         ("Total", inv.grand_total_zmw, True),
         ("Paid", inv.amount_paid, False),
         ("Balance", inv.balance, True),
@@ -140,5 +147,14 @@ def build_invoice_pdf(inv: InvoiceOut, *, bike: tuple | None = None, currency: s
         pdf.set_text_color(*_INK if bold else _MUTED)
         pdf.cell(40, 6, _s(label))
         pdf.cell(40, 6, f"{cur} {_money(value)}", ln=1, align="R")
+
+    # ---- VAT treatment note ----
+    pdf.ln(3)
+    pdf.set_x(15)
+    pdf.set_font("Helvetica", "I", 7.5)
+    pdf.set_text_color(*_MUTED)
+    note = ("Motorcycle prices are VAT-inclusive (VAT shown is extracted from the price); "
+            "spare-part VAT is added to the net price.")
+    pdf.multi_cell(180, 4, _s(note))
 
     return bytes(pdf.output())

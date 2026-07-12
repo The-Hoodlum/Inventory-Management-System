@@ -8,6 +8,8 @@ export interface TenantSettings {
   default_currency: string;
   // Current USD -> billing-currency rate (numeric serialized as a string), e.g. "20.000000".
   fx_rate: string;
+  // Current VAT rate as a fraction (string), e.g. "0.160000" == 16%.
+  vat_rate: string;
   country: string | null;
   timezone: string;
   logo_url: string | null;

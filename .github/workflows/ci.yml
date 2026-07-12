@@ -110,7 +110,8 @@ jobs:
             database/sql/motorcycle_country_of_origin.sql \
             database/sql/product_location.sql \
             database/sql/motorcycle_service.sql \
-            database/sql/parts_sales.sql ; do
+            database/sql/parts_sales.sql \
+            database/sql/vat.sql ; do
             echo "applying $f"
             psql -v ON_ERROR_STOP=1 -f "$f"
           done

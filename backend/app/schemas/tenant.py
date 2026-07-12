@@ -20,6 +20,9 @@ class TenantSettingsOut(BaseModel):
     # Current USD -> billing-currency (e.g. ZMW) rate. Editable; represents the rate in
     # effect NOW. Snapshotted onto each sales document when issued (never retroactive).
     fx_rate: Decimal
+    # Current VAT rate as a fraction (0.16 = 16%). Editable; snapshotted onto each sales
+    # document when created (never retroactive).
+    vat_rate: Decimal
     country: str | None = None
     timezone: str = "UTC"
     logo_url: str | None = None
@@ -36,6 +39,7 @@ class TenantSettingsOut(BaseModel):
             industry=t.industry,
             default_currency=t.base_currency,
             fx_rate=t.fx_rate,
+            vat_rate=getattr(t, "vat_rate", Decimal("0")),
             country=t.country,
             timezone=t.timezone,
             logo_url=t.logo_url,
@@ -55,6 +59,8 @@ class TenantSettingsUpdate(BaseModel):
     default_currency: str | None = Field(default=None, min_length=3, max_length=3)
     # Must be positive; stored at numeric(18,6). Editing affects only FUTURE documents.
     fx_rate: Decimal | None = Field(default=None, gt=0)
+    # VAT rate as a fraction 0..1 (0.16 = 16%). Editing affects only FUTURE documents.
+    vat_rate: Decimal | None = Field(default=None, ge=0, le=1)
     country: str | None = Field(default=None, max_length=100)
     timezone: str | None = Field(default=None, max_length=64)
     logo_url: str | None = Field(default=None, max_length=1000)
