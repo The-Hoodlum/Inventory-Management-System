@@ -266,6 +266,19 @@ async def invoice_pdf(
     )
 
 
+@router.get("/quotations/{quote_id}/pdf")
+async def quotation_pdf(
+    quote_id: uuid.UUID,
+    user: CurrentUser = Depends(require_permission(P.SALES_READ)),
+    svc: SalesService = Depends(get_sales_service),
+) -> Response:
+    pdf, number = await svc.quotation_pdf(tenant_id=user.tenant_id, quote_id=quote_id)
+    return Response(
+        content=pdf, media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{number}.pdf"'},
+    )
+
+
 # ------------------------------- parts sales ------------------------------- #
 @router.get("/parts-sales", response_model=list[PartsSaleLineOut])
 async def list_parts_sales(

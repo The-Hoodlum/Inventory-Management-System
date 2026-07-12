@@ -327,6 +327,25 @@ class SalesRepository:
         res = await self.session.execute(select(Customer.id, Customer.name).where(Customer.id.in_(ids)))
         return {cid: name for cid, name in res.all()}
 
+    async def customer_details(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, dict]:
+        """Full customer details for documents: name / phone / tax number / a formatted
+        address (the default address, else the first). Keyed by customer id."""
+        ids = [i for i in ids if i]
+        if not ids:
+            return {}
+        rows = await self.session.scalars(select(Customer).where(Customer.id.in_(ids)))
+        out: dict[uuid.UUID, dict] = {}
+        for c in rows:
+            addrs = list(c.addresses) if c.addresses else []
+            chosen = next((a for a in addrs if a.is_default), addrs[0] if addrs else None)
+            address = None
+            if chosen is not None:
+                parts = [chosen.line1, chosen.line2, chosen.city, chosen.region, chosen.country]
+                address = ", ".join(p for p in parts if p) or None
+            out[c.id] = {"name": c.name, "phone": c.phone,
+                         "tax_number": c.tax_number, "address": address}
+        return out
+
     async def branch_names(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
         ids = [i for i in ids if i]
         if not ids:

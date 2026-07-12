@@ -9,7 +9,7 @@ from fpdf import FPDF
 
 from app.core.config import settings
 from app.core.pdf_branding import draw_company_block, place_logo
-from app.sales.schemas import InvoiceOut
+from app.sales.schemas import InvoiceOut, QuotationOut
 
 _INK = (33, 37, 41)
 _MUTED = (110, 116, 124)
@@ -28,6 +28,23 @@ def _money(v: Any) -> str:
         return f"{float(v):,.2f}"
     except Exception:
         return "0.00"
+
+
+def _bill_to(pdf: FPDF, doc: Any) -> None:
+    """Draw the customer block (name / phone / address / tax number) shown on documents."""
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(*_INK)
+    pdf.cell(0, 5, "Bill to", ln=1)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(*_MUTED)
+    pdf.cell(0, 5, _s(getattr(doc, "customer_name", None) or "-"), ln=1)
+    for label, value in (
+        ("", getattr(doc, "customer_address", None)),
+        ("Tel: ", getattr(doc, "customer_phone", None)),
+        ("Tax No: ", getattr(doc, "customer_tax_number", None)),
+    ):
+        if value:
+            pdf.cell(0, 5, _s(f"{label}{value}"), ln=1)
 
 
 class _InvPdf(FPDF):
@@ -87,13 +104,8 @@ def build_invoice_pdf(inv: InvoiceOut, *, bike: tuple | None = None, currency: s
         pdf.cell(48, 5, _s(value), ln=1, align="R")
     pdf.set_y(max(left_bottom, pdf.get_y()) + 3)
 
-    # ---- Bill to ----
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.set_text_color(*_INK)
-    pdf.cell(0, 5, "Bill to", ln=1)
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_text_color(*_MUTED)
-    pdf.cell(0, 5, _s(inv.customer_name or "-"), ln=1)
+    # ---- Bill to (full customer details) ----
+    _bill_to(pdf, inv)
     pdf.ln(2)
 
     # ---- Lines (amounts in the billed currency) ----
@@ -157,4 +169,109 @@ def build_invoice_pdf(inv: InvoiceOut, *, bike: tuple | None = None, currency: s
             "spare-part VAT is added to the net price.")
     pdf.multi_cell(180, 4, _s(note))
 
+    return bytes(pdf.output())
+
+
+class _QuotePdf(_InvPdf):
+    def header(self) -> None:  # noqa: D401
+        top = self.get_y()
+        band = max(place_logo(self, 15, top, 45, 15), 10)
+        self.set_xy(15, top)
+        self.set_font("Helvetica", "B", 16)
+        self.set_text_color(*_INK)
+        self.cell(0, band, "QUOTATION", ln=1, align="R")
+        self.set_draw_color(*_LINE)
+        self.line(15, self.get_y() + 1, 195, self.get_y() + 1)
+        self.ln(4)
+
+
+def build_quotation_pdf(q: QuotationOut, *, currency: str = "") -> bytes:
+    """Branded quotation PDF — same letterhead + Bill-To as the invoice, line items and
+    Net / VAT / Total in the billed currency. Amounts convert to the billed currency at the
+    quotation's frozen fx_rate (bikes/direct-currency lines already sit at fx 1)."""
+    cur = currency or q.currency or ""
+    fx = q.fx_rate or 1.0
+    pdf = _QuotePdf(orientation="P", unit="mm", format="A4")
+    pdf.company_name = settings.company_name
+    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.set_margins(15, 15, 15)
+    pdf.alias_nb_pages()
+    pdf.add_page()
+
+    top_y = pdf.get_y()
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_text_color(*_INK)
+    pdf.cell(95, 5, "From", ln=1)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(*_MUTED)
+    left_bottom = draw_company_block(
+        pdf, 15, pdf.get_y(), 90,
+        (settings.company_name, settings.company_address, settings.company_email, settings.company_phone),
+    )
+    pdf.set_xy(115, top_y)
+    for label, value in (
+        ("Quote No.", q.quote_number),
+        ("Date", q.created_at.date().isoformat() if q.created_at else "-"),
+        ("Valid until", q.valid_until.isoformat() if q.valid_until else "-"),
+        ("Status", q.status.replace("_", " ").title()),
+    ):
+        pdf.set_x(115)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(*_MUTED)
+        pdf.cell(32, 5, _s(label))
+        pdf.set_text_color(*_INK)
+        pdf.cell(48, 5, _s(value), ln=1, align="R")
+    pdf.set_y(max(left_bottom, pdf.get_y()) + 3)
+
+    _bill_to(pdf, q)
+    pdf.ln(2)
+
+    cols = [("Description", 96, "L"), ("Qty", 16, "R"), (f"Unit ({cur})", 34, "R"), (f"Total ({cur})", 34, "R")]
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.set_fill_color(*_HEAD_BG)
+    pdf.set_text_color(*_INK)
+    for title, width, align in cols:
+        pdf.cell(width, 7, _s(title), align=align, fill=True)
+    pdf.ln(7)
+
+    pdf.set_font("Helvetica", "", 8.5)
+    pdf.set_draw_color(*_LINE)
+    for ln_ in q.lines:
+        desc = ln_.description or ln_.name or ln_.sku or ""
+        total_zmw = ln_.line_total_zmw or (ln_.line_total * fx)
+        unit_zmw = (total_zmw / ln_.qty) if ln_.qty else 0.0
+        d = _s(desc)
+        if len(d) > 62:
+            d = d[:61] + "..."
+        for text_value, width, align in (
+            (d, 96, "L"),
+            (_money(ln_.qty) if ln_.qty != int(ln_.qty) else str(int(ln_.qty)), 16, "R"),
+            (_money(unit_zmw), 34, "R"), (_money(total_zmw), 34, "R"),
+        ):
+            pdf.cell(width, 6, text_value, border="B", align=align)
+        pdf.ln(6)
+
+    net_zmw = (q.net_total or 0.0) * fx
+    vat_zmw = (q.tax_total or 0.0) * fx
+    vat_label = f"VAT ({_money(q.vat_rate * 100)}%)" if q.vat_rate else "VAT"
+    pdf.ln(2)
+    for label, value, bold in (
+        ("Net", net_zmw, False),
+        (vat_label, vat_zmw, False),
+        ("Total", q.grand_total_zmw or (q.grand_total * fx), True),
+    ):
+        pdf.set_x(115)
+        pdf.set_font("Helvetica", "B" if bold else "", 9.5 if bold else 9)
+        pdf.set_text_color(*_INK if bold else _MUTED)
+        pdf.cell(40, 6, _s(label))
+        pdf.cell(40, 6, f"{cur} {_money(value)}", ln=1, align="R")
+
+    pdf.ln(3)
+    pdf.set_x(15)
+    pdf.set_font("Helvetica", "I", 7.5)
+    pdf.set_text_color(*_MUTED)
+    pdf.multi_cell(180, 4, _s(
+        "This is a quotation, not a tax invoice. Motorcycle prices are VAT-inclusive; "
+        "spare-part VAT is added to the net price. Prices valid until the date shown."
+    ))
     return bytes(pdf.output())

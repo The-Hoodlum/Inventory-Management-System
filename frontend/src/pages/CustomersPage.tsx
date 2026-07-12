@@ -80,6 +80,8 @@ export default function CustomersPage() {
 function NewCustomerModal({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient();
   const [form, setForm] = useState<CustomerInput>({ name: "", credit_limit: 0 });
+  const [addr, setAddr] = useState("");
+  const [city, setCity] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const set = (k: keyof CustomerInput, v: string | number) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -87,6 +89,9 @@ function NewCustomerModal({ onClose }: { onClose: () => void }) {
     mutationFn: () => customersApi.create({
       ...form, phone: form.phone || null, email: form.email || null,
       tax_number: form.tax_number || null, payment_terms: form.payment_terms || null,
+      addresses: addr.trim()
+        ? [{ line1: addr.trim(), city: city.trim() || null, address_type: "billing", is_default: true }]
+        : undefined,
     }),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ["customers"] }); onClose(); },
     onError: (e) => setErr(e instanceof ApiError ? e.message : "Could not create customer."),
@@ -120,6 +125,10 @@ function NewCustomerModal({ onClose }: { onClose: () => void }) {
           <Field label="Credit limit"><input type="number" min={0} className={`${INPUT} w-full`}
             value={form.credit_limit ?? 0} onChange={(e) => set("credit_limit", Number(e.target.value))} /></Field>
         </div>
+        <Field label="Address"><input className={`${INPUT} w-full`} value={addr}
+          onChange={(e) => setAddr(e.target.value)} placeholder="Street / area (shown on invoices & quotations)" /></Field>
+        <Field label="City / town"><input className={`${INPUT} w-full`} value={city}
+          onChange={(e) => setCity(e.target.value)} /></Field>
       </div>
     </Modal>
   );

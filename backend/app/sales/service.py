@@ -78,6 +78,18 @@ def _f(v) -> float:
     return float(v) if v is not None else 0.0
 
 
+def _cust_kwargs(details: dict, cid) -> dict:
+    """The customer name/phone/address/tax fields for a document output, from a
+    customer_details() map (falls back to blanks when absent)."""
+    d = details.get(cid) or {}
+    return {
+        "customer_name": d.get("name"),
+        "customer_phone": d.get("phone"),
+        "customer_address": d.get("address"),
+        "customer_tax_number": d.get("tax_number"),
+    }
+
+
 def _vat_line_kwargs(ln) -> dict:
     """The frozen net/VAT/treatment/rate fields for a document-line output."""
     return {
@@ -670,6 +682,15 @@ class SalesService:
         currency = await self.repo.base_currency(tenant_id)
         return build_invoice_pdf(inv, bike=bike, currency=currency), inv.invoice_number
 
+    async def quotation_pdf(self, *, tenant_id: uuid.UUID, quote_id: uuid.UUID) -> tuple[bytes, str]:
+        """Render the branded quotation PDF (bytes, filename), amounts in the billed currency."""
+        from app.sales.pdf import build_quotation_pdf
+
+        quote = await self._require(self.repo.get_quote(quote_id), "Quotation")
+        out = await self._quote_out(quote)
+        currency = await self.repo.base_currency(tenant_id)
+        return build_quotation_pdf(out, currency=currency), out.quote_number
+
     async def list_quotations(self, **f) -> list[QuotationOut]:
         rows = await self.repo.list_quotes(**f)
         return [await self._quote_out(q) for q in rows]
@@ -798,11 +819,11 @@ class SalesService:
         return out
 
     async def _quote_out(self, q: Quotation) -> QuotationOut:
-        cust = await self.repo.customer_names([q.customer_id])
+        cust = await self.repo.customer_details([q.customer_id])
         br = await self.repo.branch_names([q.branch_id])
         return QuotationOut(
             id=q.id, quote_number=q.quote_number, customer_id=q.customer_id,
-            customer_name=cust.get(q.customer_id), branch_id=q.branch_id, branch_name=br.get(q.branch_id),
+            **_cust_kwargs(cust, q.customer_id), branch_id=q.branch_id, branch_name=br.get(q.branch_id),
             salesperson_id=q.salesperson_id, status=q.status, currency=q.currency,
             valid_until=q.valid_until, notes=q.notes, subtotal=_f(q.subtotal),
             discount_total=_f(q.discount_total), net_total=_f(q.net_total), tax_total=_f(q.tax_total),
@@ -857,12 +878,12 @@ class SalesService:
         )
 
     async def _invoice_out(self, inv: Invoice) -> InvoiceOut:
-        cust = await self.repo.customer_names([inv.customer_id])
+        cust = await self.repo.customer_details([inv.customer_id])
         br = await self.repo.branch_names([inv.branch_id])
         return InvoiceOut(
             id=inv.id, invoice_number=inv.invoice_number, sales_order_id=inv.sales_order_id,
             delivery_note_id=inv.delivery_note_id, customer_id=inv.customer_id,
-            customer_name=cust.get(inv.customer_id), branch_id=inv.branch_id, branch_name=br.get(inv.branch_id),
+            **_cust_kwargs(cust, inv.customer_id), branch_id=inv.branch_id, branch_name=br.get(inv.branch_id),
             status=inv.status, currency=inv.currency, invoice_date=inv.invoice_date, due_date=inv.due_date,
             payment_terms=inv.payment_terms, subtotal=_f(inv.subtotal), discount_total=_f(inv.discount_total),
             net_total=_f(inv.net_total), tax_total=_f(inv.tax_total), grand_total=_f(inv.grand_total),

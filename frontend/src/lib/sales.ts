@@ -47,13 +47,18 @@ interface DocBase {
   id: string;
   customer_id: string;
   customer_name: string | null;
+  customer_phone: string | null;
+  customer_address: string | null;
+  customer_tax_number: string | null;
   branch_id: string | null;
   status: string;
   currency: string | null;
   subtotal: number;
   discount_total: number;
+  net_total: number;
   tax_total: number;
   grand_total: number;
+  vat_rate: number;
   created_at: string;
 }
 
@@ -221,6 +226,23 @@ export interface MotoSale {
   historical: boolean;
 }
 
+async function downloadPdf(path: string, filename: string): Promise<void> {
+  const token = tokenStore.getAccess();
+  const res = await fetch(`${BASE_URL}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error(`PDF download failed (${res.status})`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${filename}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export const salesApi = {
   // quotations
   listQuotations: (status = "") =>
@@ -252,22 +274,10 @@ export const salesApi = {
   pay: (invoice_id: string, payments: PaymentLineIn[]) =>
     api.post<Receipt>("/sales/payments", { invoice_id, payments }),
 
-  async downloadInvoicePdf(id: string, invoiceNumber: string): Promise<void> {
-    const token = tokenStore.getAccess();
-    const res = await fetch(`${BASE_URL}/sales/invoices/${id}/pdf`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    if (!res.ok) throw new Error(`PDF download failed (${res.status})`);
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${invoiceNumber}.pdf`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  },
+  downloadInvoicePdf: (id: string, invoiceNumber: string) =>
+    downloadPdf(`/sales/invoices/${id}/pdf`, invoiceNumber),
+  downloadQuotationPdf: (id: string, quoteNumber: string) =>
+    downloadPdf(`/sales/quotations/${id}/pdf`, quoteNumber),
 
   // POS
   posCheckout: (body: { location_id: string; customer_id?: string | null; lines: PricedLineIn[]; payments: PaymentLineIn[] }) =>
