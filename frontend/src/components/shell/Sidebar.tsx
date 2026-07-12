@@ -66,8 +66,8 @@ const GROUPS: NavGroup[] = [
     label: "Sales",
     items: [
       { to: "/sales", label: "Sales", icon: Receipt, permission: "sales.read" },
-      { to: "/pos", label: "Point of Sale", icon: ShoppingCart, permission: "pos.use" },
-      { to: "/parts-sales", label: "Spare Parts", icon: Wrench, permission: "pos.use" },
+      { to: "/parts-sales", label: "Spare Parts POS", icon: ShoppingCart, permission: "pos.use" },
+      { to: "/pos", label: "Bike POS", icon: Bike, permission: "motorcycle.manage" },
       { to: "/sales-log", label: "Sales Log", icon: BarChart3, permission: "report.read" },
       { to: "/customers", label: "Customers", icon: Contact, permission: "customer.read" },
       { to: "/motorcycles", label: "Motorcycles", icon: Bike, permission: "motorcycle.read" },
