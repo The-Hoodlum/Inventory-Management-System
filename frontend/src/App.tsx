@@ -7,6 +7,7 @@ import AppLauncherPage from "@/pages/AppLauncherPage";
 import AssemblyPlannerPage from "@/pages/AssemblyPlannerPage";
 import BikeIssueDetailPage from "@/pages/BikeIssueDetailPage";
 import BikeIssuesPage from "@/pages/BikeIssuesPage";
+import BikePosPage from "@/pages/BikePosPage";
 import BranchesPage from "@/pages/BranchesPage";
 import ContainerPage from "@/pages/ContainerPage";
 import CustomerDeliveriesPage from "@/pages/CustomerDeliveriesPage";
@@ -31,7 +32,6 @@ import MovementsPage from "@/pages/MovementsPage";
 import NewPurchaseOrderPage from "@/pages/NewPurchaseOrderPage";
 import NotFoundPage from "@/pages/NotFoundPage";
 import OrderRequestsPage from "@/pages/OrderRequestsPage";
-import PosPage from "@/pages/PosPage";
 import ProductsPage from "@/pages/ProductsPage";
 import PurchaseOrderDetailPage from "@/pages/PurchaseOrderDetailPage";
 import PurchaseOrdersPage from "@/pages/PurchaseOrdersPage";
@@ -83,7 +83,7 @@ export default function App() {
         <Route path="/bike-issues/:id" element={<BikeIssueDetailPage />} />
         <Route path="/assembly-planner" element={<AssemblyPlannerPage />} />
         <Route path="/service-followup" element={<ServiceFollowUpPage />} />
-        <Route path="/pos" element={<PosPage />} />
+        <Route path="/pos" element={<BikePosPage />} />
         <Route path="/parts-sales" element={<SparePartsSalesPage />} />
         <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/import/inventory" element={<ImportInventoryPage />} />

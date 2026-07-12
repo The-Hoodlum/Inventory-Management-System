@@ -16,6 +16,7 @@ import {
   Hammer,
   Receipt,
   Send,
+  ShoppingCart,
   Truck,
   Users,
   Wrench,
@@ -40,7 +41,8 @@ interface ModuleCard {
 
 const MODULES: ModuleCard[] = [
   { title: "Sales", description: "Quotes, orders, invoices, POS", icon: Receipt, to: "/sales", permission: "sales.read" },
-  { title: "Spare Parts", description: "Sell parts & view sales log", icon: Wrench, to: "/parts-sales", permission: "pos.use" },
+  { title: "Spare Parts POS", description: "Sell parts & view sales log", icon: ShoppingCart, to: "/parts-sales", permission: "pos.use" },
+  { title: "Bike POS", description: "Sell a motorcycle by chassis", icon: Bike, to: "/pos", permission: "motorcycle.manage" },
   { title: "Sales Log", description: "Parts + motorcycle revenue", icon: BarChart3, to: "/sales-log", permission: "report.read" },
   { title: "Inventory", description: "Stock, movements, warehouses", icon: Boxes, to: "/inventory", permission: "inventory.read" },
   { title: "Procurement", description: "Purchase orders & reorder", icon: Truck, to: "/purchase-orders", permission: "po.read" },
