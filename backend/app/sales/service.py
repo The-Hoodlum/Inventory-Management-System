@@ -56,6 +56,7 @@ from app.sales.schemas import (
     PosResult,
     PricedLineIn,
     PricedLineOut,
+    QuotationConvertResult,
     QuotationCreate,
     QuotationOut,
     ReceiptOut,
@@ -116,22 +117,70 @@ class SalesService:
         self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, payload: QuotationCreate
     ) -> QuotationOut:
         await self._require_customer(payload.customer_id)
-        lines, totals, vat_rate = await self._priced_lines(tenant_id, QuotationLine, payload.lines)
-        # Snapshot the CURRENT tenant rate onto the quotation and freeze the billed ZMW.
         fx_rate = await self.repo.current_fx_rate(tenant_id)
+        vat_rate = await self.repo.current_vat_rate(tenant_id)
+        # Part lines: USD, VAT by product treatment (existing path).
+        part_lines: list[QuotationLine] = []
+        if payload.lines:
+            part_lines, _, vat_rate = await self._priced_lines(tenant_id, QuotationLine, payload.lines)
+        # Bike lines: priced DIRECTLY in ZMW, VAT-INCLUSIVE (extract, never add).
+        bike_lines = await self._quote_bike_lines(tenant_id, vat_rate, payload.bike_lines)
+        # A quotation with mixed currencies is denominated in ZMW: each part line is
+        # converted at the frozen fx, each bike line is already ZMW. Totals are in ZMW.
+        totals = self._quote_zmw_totals(part_lines, bike_lines, fx_rate)
         quote = Quotation(
             tenant_id=tenant_id, quote_number=await self.repo.number(tenant_id, "quotation", "QUO"),
             customer_id=payload.customer_id, branch_id=payload.branch_id,
             salesperson_id=payload.salesperson_id or user_id, currency=payload.currency,
             valid_until=payload.valid_until, status=S.Q_DRAFT, notes=payload.notes,
-            created_by=user_id, fx_rate=fx_rate, vat_rate=vat_rate, **totals,
+            created_by=user_id, fx_rate=fx_rate, vat_rate=vat_rate,
+            grand_total_zmw=totals["grand_total"], **totals,
         )
-        quote.lines = lines
-        quote.grand_total_zmw = self._freeze_line_zmw(fx_rate, lines)
+        quote.lines = part_lines + bike_lines
         self.repo.session.add(quote)
         await self.repo.session.flush()
         await self._audit(tenant_id, user_id, "sales_quotation", quote.id, "created", None, S.Q_DRAFT)
         return await self._quote_out(quote)
+
+    async def _quote_bike_lines(self, tenant_id, vat_rate, bike_lines_in) -> list:
+        """Build quotation bike lines: each is a serialized unit priced directly in ZMW,
+        VAT-inclusive (the VAT is extracted from the price, never added)."""
+        vat_pct = _d(vat_rate) * Decimal("100")
+        out: list[QuotationLine] = []
+        for bl in bike_lines_in:
+            info = await self.repo.bike_unit_info(bl.unit_id)
+            if info is None:
+                raise NotFoundError("Motorcycle unit not found")
+            chassis, model_name, selling_price, _status = info
+            price = _d(bl.price) if bl.price is not None else _d(selling_price)
+            if price <= 0:
+                raise BusinessRuleError(f"A price is required for bike {chassis}.")
+            a = pricing.line_amounts(1, price, 0, vat_pct, pricing.INCLUSIVE)
+            out.append(QuotationLine(
+                tenant_id=tenant_id, unit_id=bl.unit_id, product_id=None,
+                description=bl.description or f"{model_name or 'Motorcycle'} (chassis {chassis})",
+                qty=Decimal("1"), unit_price=price, discount_pct=Decimal("0"), tax_pct=vat_pct,
+                line_total=a["line_total"], net_amount=a["net"], vat_amount=a["vat"],
+                vat_treatment=pricing.INCLUSIVE, vat_rate=_d(vat_rate),
+            ))
+        return out
+
+    def _quote_zmw_totals(self, part_lines, bike_lines, fx_rate) -> dict:
+        """Freeze each line's billed ZMW (part = amount x fx, bike = amount direct) and sum
+        the document totals in ZMW. Summing the rounded per-line ZMW keeps lines == totals."""
+        net = vat = grand = Decimal("0")
+        for ln in part_lines:
+            ln.line_total_zmw = pricing.to_zmw(ln.line_total, fx_rate)
+            net += pricing.to_zmw(ln.net_amount, fx_rate)
+            vat += pricing.to_zmw(ln.vat_amount, fx_rate)
+            grand += ln.line_total_zmw
+        for ln in bike_lines:
+            ln.line_total_zmw = pricing.to_zmw(ln.line_total, 1)   # already ZMW
+            net += pricing.to_zmw(ln.net_amount, 1)
+            vat += pricing.to_zmw(ln.vat_amount, 1)
+            grand += ln.line_total_zmw
+        return {"subtotal": net, "discount_total": Decimal("0"),
+                "net_total": net, "tax_total": vat, "grand_total": grand}
 
     async def quote_transition(
         self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, quote_id: uuid.UUID, new: str,
@@ -148,28 +197,50 @@ class SalesService:
         return await self._quote_out(quote)
 
     async def convert_quotation(
-        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, quote_id: uuid.UUID, payload: ConvertToOrder
-    ) -> SalesOrderOut:
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, quote_id: uuid.UUID,
+        payload: ConvertToOrder, motorcycles,
+    ) -> QuotationConvertResult:
+        """Convert without re-entry: the PART lines become one sales order; each BIKE line
+        is sold (its own bike invoice) through the bike-sale flow."""
         quote = await self._require(self.repo.get_quote(quote_id, lock=True), "Quotation")
         if quote.status not in S.QUOTE_CONVERTIBLE:
             raise BusinessRuleError(f"Quotation in status {quote.status} cannot be converted.")
-        line_payload = [
-            PricedLineIn(product_id=ln.product_id, qty=_f(ln.qty), unit_price=_f(ln.unit_price),
-                         discount_pct=_f(ln.discount_pct), tax_pct=_f(ln.tax_pct), description=ln.description)
-            for ln in quote.lines
-        ]
-        so = await self._new_sales_order(
-            tenant_id=tenant_id, user_id=user_id, customer_id=quote.customer_id,
-            branch_id=quote.branch_id, location_id=payload.location_id,
-            salesperson_id=quote.salesperson_id, currency=quote.currency,
-            payment_terms=payload.payment_terms, delivery_terms=payload.delivery_terms,
-            notes=quote.notes, lines=line_payload, quotation_id=quote.id,
-        )
+        part_lines = [ln for ln in quote.lines if ln.product_id is not None]
+        bike_lines = [ln for ln in quote.lines if ln.unit_id is not None]
+
+        so_out = None
+        if part_lines:
+            if payload.location_id is None:
+                raise BusinessRuleError("A selling location is required to convert the parts on this quotation.")
+            line_payload = [
+                PricedLineIn(product_id=ln.product_id, qty=_f(ln.qty), unit_price=_f(ln.unit_price),
+                             discount_pct=_f(ln.discount_pct), tax_pct=_f(ln.tax_pct), description=ln.description)
+                for ln in part_lines
+            ]
+            so = await self._new_sales_order(
+                tenant_id=tenant_id, user_id=user_id, customer_id=quote.customer_id,
+                branch_id=quote.branch_id, location_id=payload.location_id,
+                salesperson_id=quote.salesperson_id, currency=quote.currency,
+                payment_terms=payload.payment_terms, delivery_terms=payload.delivery_terms,
+                notes=quote.notes, lines=line_payload, quotation_id=quote.id,
+            )
+            so_out = await self._so_out(so)
+
+        # Each quoted bike is sold now at its quoted price (invoice only; pay later). Any
+        # bike no longer sellable raises and rolls the whole conversion back.
+        bike_sales = []
+        for ln in bike_lines:
+            bike_sales.append(await self.sell_bike(
+                tenant_id=tenant_id, user_id=user_id, motorcycles=motorcycles,
+                payload=BikeSaleIn(unit_id=ln.unit_id, customer_id=quote.customer_id,
+                                   price=_f(ln.unit_price), payments=[]),
+            ))
+
         if quote.status != S.Q_ACCEPTED:
             quote.status = S.Q_ACCEPTED
         await self.repo.session.flush()
         await self._audit(tenant_id, user_id, "sales_quotation", quote.id, "converted", quote.status, S.Q_ACCEPTED)
-        return await self._so_out(so)
+        return QuotationConvertResult(quotation_id=quote.id, sales_order=so_out, bike_sales=bike_sales)
 
     # ============================= sales order =========================== #
     async def create_sales_order(
@@ -867,9 +938,22 @@ class SalesService:
 
     # ---- output builders (per-doc enrichment) ---- #
     async def _priced_line_outs(self, lines) -> list[PricedLineOut]:
-        prod = await self.repo.product_index([ln.product_id for ln in lines])
+        prod = await self.repo.product_index([ln.product_id for ln in lines if ln.product_id])
+        unit_ids = [getattr(ln, "unit_id", None) for ln in lines]
+        bikes = await self.repo.bike_names([u for u in unit_ids if u]) if any(unit_ids) else {}
         out = []
         for ln in lines:
+            unit_id = getattr(ln, "unit_id", None)
+            if unit_id is not None:  # bike line
+                chassis, model_name = bikes.get(unit_id, (None, None))
+                out.append(PricedLineOut(
+                    id=ln.id, product_id=None, unit_id=unit_id, is_bike=True,
+                    chassis_number=chassis, name=model_name, description=ln.description,
+                    qty=_f(ln.qty), unit_price=_f(ln.unit_price), discount_pct=_f(ln.discount_pct),
+                    tax_pct=_f(ln.tax_pct), line_total=_f(ln.line_total),
+                    line_total_zmw=_f(getattr(ln, "line_total_zmw", 0)), **_vat_line_kwargs(ln),
+                ))
+                continue
             sku, name = prod.get(ln.product_id, (None, None))
             out.append(PricedLineOut(
                 id=ln.id, product_id=ln.product_id, sku=sku, name=name, description=ln.description,

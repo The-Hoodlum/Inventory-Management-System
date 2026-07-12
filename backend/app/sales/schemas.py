@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ------------------------------ shared lines ------------------------------- #
@@ -18,9 +18,19 @@ class PricedLineIn(BaseModel):
     description: str | None = Field(default=None, max_length=500)
 
 
+class BikeLineIn(BaseModel):
+    """A serialized motorcycle quoted on a quotation (priced directly in ZMW, VAT-inclusive)."""
+    unit_id: uuid.UUID
+    price: float | None = Field(default=None, ge=0)  # default = unit.selling_price
+    description: str | None = Field(default=None, max_length=500)
+
+
 class PricedLineOut(BaseModel):
     id: uuid.UUID
-    product_id: uuid.UUID
+    product_id: uuid.UUID | None = None
+    unit_id: uuid.UUID | None = None     # set for a bike line
+    is_bike: bool = False
+    chassis_number: str | None = None    # for a bike line
     sku: str | None = None
     name: str | None = None
     description: str | None = None
@@ -80,7 +90,14 @@ class QuotationCreate(BaseModel):
     currency: str | None = None
     valid_until: dt.date | None = None
     notes: str | None = Field(default=None, max_length=2000)
-    lines: list[PricedLineIn] = Field(min_length=1)
+    lines: list[PricedLineIn] = Field(default_factory=list)      # spare-part lines
+    bike_lines: list[BikeLineIn] = Field(default_factory=list)   # motorcycle lines (by unit)
+
+    @model_validator(mode="after")
+    def _at_least_one_line(self) -> QuotationCreate:
+        if not self.lines and not self.bike_lines:
+            raise ValueError("A quotation needs at least one part or bike line.")
+        return self
 
 
 class QuotationOut(_DocOut):
@@ -94,7 +111,9 @@ class QuotationOut(_DocOut):
 
 
 class ConvertToOrder(BaseModel):
-    location_id: uuid.UUID  # selling/source location for the new sales order
+    # Selling/source location for the parts sales order. Optional: a bikes-only quote
+    # needs no location (bikes sell directly), but a quote with parts requires it.
+    location_id: uuid.UUID | None = None
     payment_terms: str | None = None
     delivery_terms: str | None = None
 
@@ -379,6 +398,14 @@ class BikeSaleResult(BaseModel):
     model_name: str | None = None
     invoice: InvoiceOut
     receipt: ReceiptOut | None = None
+
+
+class QuotationConvertResult(BaseModel):
+    """Converting a quotation without re-entry: any part lines become one sales order; any
+    bike lines are sold (one bike invoice each) through the bike-sale flow."""
+    quotation_id: uuid.UUID
+    sales_order: SalesOrderOut | None = None
+    bike_sales: list[BikeSaleResult] = []
 
 
 class MotoSaleLineOut(BaseModel):

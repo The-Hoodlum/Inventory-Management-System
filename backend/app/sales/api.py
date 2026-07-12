@@ -35,6 +35,7 @@ from app.sales.schemas import (
     PaymentOut,
     PosCheckout,
     PosResult,
+    QuotationConvertResult,
     QuotationCreate,
     QuotationOut,
     ReceiptOut,
@@ -122,14 +123,18 @@ async def cancel_quotation(
     )
 
 
-@router.post("/quotations/{quote_id}/convert", response_model=SalesOrderOut, status_code=201)
+@router.post("/quotations/{quote_id}/convert", response_model=QuotationConvertResult, status_code=201)
 async def convert_quotation(
     quote_id: uuid.UUID,
     payload: ConvertToOrder,
     user: CurrentUser = Depends(require_permission(P.SALES_ORDER)),
     svc: SalesService = Depends(get_sales_service),
-) -> SalesOrderOut:
-    return await svc.convert_quotation(tenant_id=user.tenant_id, user_id=user.id, quote_id=quote_id, payload=payload)
+    motorcycles: MotorcycleService = Depends(get_motorcycle_service),
+) -> QuotationConvertResult:
+    return await svc.convert_quotation(
+        tenant_id=user.tenant_id, user_id=user.id, quote_id=quote_id,
+        payload=payload, motorcycles=motorcycles,
+    )
 
 
 # ------------------------------- sales orders ------------------------------ #
