@@ -46,20 +46,30 @@ export default function BikePosPage() {
   const [err, setErr] = useState<string | null>(null);
   const [done, setDone] = useState<BikeSaleResult | null>(null);
 
-  // Available-to-sell units (unsold; the lifecycle allows selling assembled/reserved).
-  const unitsQ = useQuery({
-    queryKey: ["bike-pos-units", search, branchId, modelId],
-    queryFn: () =>
-      motorcyclesApi.listUnits({
-        search: search.trim() || undefined,
-        sold: false,
-        branch_id: branchId || undefined,
-        model_id: modelId || undefined,
-        page_size: 60,
-      }),
+  // Available-to-sell units. Only assembled + reserved units can be sold, so fetch those
+  // statuses server-side (a plain sold=false page would be swamped by unassembled stock).
+  const common = {
+    search: search.trim() || undefined,
+    branch_id: branchId || undefined,
+    model_id: modelId || undefined,
+    page_size: 100,
+  };
+  const assembledQ = useQuery({
+    queryKey: ["bike-pos-units", "assembled", search, branchId, modelId],
+    queryFn: () => motorcyclesApi.listUnits({ ...common, status: "assembled" }),
     placeholderData: (p) => p,
   });
-  const sellable = (unitsQ.data?.items ?? []).filter((u) => u.allowed_next.includes("sold"));
+  const reservedQ = useQuery({
+    queryKey: ["bike-pos-units", "reserved", search, branchId, modelId],
+    queryFn: () => motorcyclesApi.listUnits({ ...common, status: "reserved" }),
+    placeholderData: (p) => p,
+  });
+  const unitsLoading = !assembledQ.data || !reservedQ.data;
+  const unitsFetching = assembledQ.isFetching || reservedQ.isFetching;
+  const sellable = [
+    ...(assembledQ.data?.items ?? []),
+    ...(reservedQ.data?.items ?? []),
+  ].filter((u) => u.allowed_next.includes("sold"));
 
   const priceNum = Number(price) || 0;
   const amountNum = Number(amount) || 0;
@@ -135,10 +145,10 @@ export default function BikePosPage() {
                   <option key={m.id} value={m.id}>{m.name}</option>
                 ))}
               </select>
-              {unitsQ.isFetching && <Spinner />}
+              {unitsFetching && <Spinner />}
             </div>
 
-            {!unitsQ.data ? (
+            {unitsLoading ? (
               <div className="flex h-40 items-center justify-center"><Spinner label="Loading bikes…" /></div>
             ) : sellable.length === 0 ? (
               <div className="p-8 text-center text-sm text-slate-400">
