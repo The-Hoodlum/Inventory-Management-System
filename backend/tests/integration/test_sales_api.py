@@ -44,7 +44,10 @@ async def _enable_sales(client, admin_h) -> None:
     r = await client.get("/api/v1/tenant/settings", headers=admin_h)
     flags = dict(r.json().get("feature_flags", {}))
     flags.update({"sales_orders": True, "pos": True})
-    r = await client.put("/api/v1/tenant/settings", headers=admin_h, json={"feature_flags": flags})
+    # These flow/mechanics tests assert pre-VAT totals; neutralise VAT here (VAT math is
+    # covered by tests/unit/test_sales_vat.py and test_vat_* integration tests).
+    r = await client.put("/api/v1/tenant/settings", headers=admin_h,
+                         json={"feature_flags": flags, "vat_rate": 0})
     assert r.status_code == 200, r.text
 
 
@@ -278,3 +281,41 @@ async def test_cashier_cannot_create_quotation(client):
         "lines": [{"product_id": product_id, "qty": 1, "unit_price": 10}],
         "payments": [{"method": "cash", "amount": 10}]})
     assert r.status_code == 201, r.text
+
+
+# ------------------------------ VAT (spare parts) -------------------------- #
+async def test_vat_applied_and_frozen_on_parts_sale(client):
+    """A spare part is VAT-EXCLUSIVE: 16% is added on top and net/vat/gross are frozen on
+    the invoice + line. Moving the tenant rate afterwards does NOT re-price the document."""
+    admin_h = await _headers(client, ADMIN_EMAIL, ADMIN_PASSWORD)
+    await _enable_sales(client, admin_h)  # sets vat_rate 0 ...
+    # ... now turn VAT on at 16% for this test.
+    r = await client.put("/api/v1/tenant/settings", headers=admin_h, json={"vat_rate": "0.16"})
+    assert r.status_code == 200, r.text
+    product_id, location_id = await _find_stocked(client, admin_h, min_qty=3)
+
+    # POS sale: 2 x 100 -> net 200, VAT 32, gross 232 (customer pays 232).
+    r = await client.post("/api/v1/sales/pos/checkout", headers=admin_h, json={
+        "location_id": location_id,
+        "lines": [{"product_id": product_id, "qty": 2, "unit_price": 100}],
+        "payments": [{"method": "cash", "amount": 232}],
+    })
+    assert r.status_code == 201, r.text
+    inv = r.json()["invoice"]
+    assert inv["net_total"] == 200.0
+    assert inv["tax_total"] == 32.0
+    assert inv["grand_total"] == 232.0        # payable (net + VAT)
+    assert inv["vat_rate"] == 0.16
+    assert inv["status"] == "paid"
+    line = inv["lines"][0]
+    assert line["vat_treatment"] == "exclusive"
+    assert line["net_amount"] == 200.0 and line["vat_amount"] == 32.0
+    assert line["line_total"] == 232.0
+
+    # Move the tenant VAT rate — the issued invoice must not budge.
+    await client.put("/api/v1/tenant/settings", headers=admin_h, json={"vat_rate": "0.2"})
+    again = (await client.get(f"/api/v1/sales/invoices/{inv['id']}", headers=admin_h)).json()
+    assert again["tax_total"] == 32.0 and again["grand_total"] == 232.0 and again["vat_rate"] == 0.16
+
+    # Hand VAT back to 0 for other tests.
+    await client.put("/api/v1/tenant/settings", headers=admin_h, json={"vat_rate": 0})
