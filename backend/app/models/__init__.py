@@ -57,6 +57,7 @@ from app.models.order_request import (
     RequestLine,
     StockTransferLedger,
 )
+from app.models.parts_sales import PartsSale
 from app.models.procurement import (
     DemandForecast,
     PurchaseOrder,
@@ -106,4 +107,5 @@ __all__ = [
     "BikeIssue", "BikeIssueLine",
     "AssemblyTarget",
     "MotorcycleServicePlan", "MotorcycleServiceRecord",
+    "PartsSale",
 ]

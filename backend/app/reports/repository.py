@@ -19,6 +19,7 @@ from app.models import (
     Invoice,
     InvoiceLine,
     MotorcycleUnit,
+    PartsSale,
     Product,
     PurchaseOrder,
     PurchaseOrderEvent,
@@ -149,9 +150,12 @@ class ReportsRepository:
         self, *, branch_id: uuid.UUID | None, date_from: dt.date | None, date_to: dt.date | None,
         branch_ids: Sequence[uuid.UUID] | None = None,
     ) -> list[tuple[dt.date, uuid.UUID | None, Decimal, Decimal]]:
-        """Spare-part sale contributions: (sale_date, branch_id, units, revenue) from
-        ``invoice_lines`` (every line is a fungible product). Excludes motorcycle-linked
-        invoices so a serialized-unit sale is never counted as a part."""
+        """Spare-part sale contributions: (sale_date, branch_id, units, revenue) from TWO
+        disjoint sources — live ``invoice_lines`` (every line is a fungible product) plus
+        imported ``parts_sales`` history (the Sales Log). Excludes motorcycle-linked
+        invoices so a serialized-unit sale is never counted as a part. The two sources
+        never overlap (live POS invoices vs imported historical figures), so a sale is
+        counted exactly once."""
         stmt = (
             select(Invoice.invoice_date, Invoice.branch_id, InvoiceLine.qty, InvoiceLine.line_total)
             .join(Invoice, InvoiceLine.invoice_id == Invoice.id)
@@ -166,7 +170,24 @@ class ReportsRepository:
         if date_to is not None:
             stmt = stmt.where(Invoice.invoice_date <= date_to)
         rows = (await self.session.execute(stmt)).all()
-        return [(r[0], r[1], Decimal(r[2]), Decimal(r[3])) for r in rows]
+        events = [(r[0], r[1], Decimal(r[2]), Decimal(r[3])) for r in rows]
+
+        # Imported historical parts sales. A NULL branch (the sheet carries none) is only
+        # dropped when the caller narrows to specific branches; unscoped views include it.
+        hstmt = select(
+            PartsSale.sale_date, PartsSale.branch_id, PartsSale.qty, PartsSale.revenue_zmw
+        )
+        if branch_id is not None:
+            hstmt = hstmt.where(PartsSale.branch_id == branch_id)
+        if branch_ids is not None:
+            hstmt = hstmt.where(PartsSale.branch_id.in_(list(branch_ids)))
+        if date_from is not None:
+            hstmt = hstmt.where(PartsSale.sale_date >= date_from)
+        if date_to is not None:
+            hstmt = hstmt.where(PartsSale.sale_date <= date_to)
+        hrows = (await self.session.execute(hstmt)).all()
+        events.extend((r[0], r[1], Decimal(r[2]), Decimal(r[3])) for r in hrows)
+        return events
 
     async def motorcycle_sale_events(
         self, *, branch_id: uuid.UUID | None, date_from: dt.date | None, date_to: dt.date | None,
