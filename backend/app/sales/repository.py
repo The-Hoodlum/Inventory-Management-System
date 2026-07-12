@@ -28,11 +28,14 @@ from app.models import (
     MotorcycleColour,
     MotorcycleModel,
     MotorcycleUnit,
+    Payment,
+    PaymentAllocation,
     Product,
     Quotation,
     Return,
     SalesOrder,
     Tenant,
+    User,
     Warehouse,
 )
 from app.repositories.reservation_repo import ReservationRepository
@@ -345,6 +348,19 @@ class SalesRepository:
             out[c.id] = {"name": c.name, "phone": c.phone,
                          "tax_number": c.tax_number, "address": address}
         return out
+
+    async def invoice_payments(self, invoice_id: uuid.UUID) -> list[tuple]:
+        """An invoice's payment lines (via allocations), newest first, with the name of
+        the user who took each. Returns (Payment, received_by_name)."""
+        stmt = (
+            select(Payment, User.full_name)
+            .join(PaymentAllocation, PaymentAllocation.payment_id == Payment.id)
+            .outerjoin(User, User.id == Payment.received_by)
+            .where(PaymentAllocation.invoice_id == invoice_id)
+            .order_by(Payment.created_at)
+        )
+        rows = await self.session.execute(stmt)
+        return [(p, name) for p, name in rows.all()]
 
     async def branch_names(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
         ids = [i for i in ids if i]

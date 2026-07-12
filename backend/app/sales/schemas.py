@@ -211,6 +211,7 @@ class PaymentOut(BaseModel):
     method: str
     amount: float
     reference: str | None = None
+    received_by_name: str | None = None   # the user who took the payment
     created_at: dt.datetime
 
 

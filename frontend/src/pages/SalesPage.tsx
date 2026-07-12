@@ -344,13 +344,15 @@ function OrderDetailModal({ orderId, onClose, onPay }: { orderId: string; onClos
 function PaymentModal({ invoiceId, onClose }: { invoiceId: string; onClose: () => void }) {
   const qc = useQueryClient();
   const { data: inv } = useQuery({ queryKey: ["sales", "invoice", invoiceId], queryFn: () => salesApi.getInvoice(invoiceId) });
-  const [rows, setRows] = useState<{ method: PaymentMethod; amount: string }[]>([{ method: "cash", amount: "" }]);
+  const priorPayments = useQuery({ queryKey: ["sales", "invoice-payments", invoiceId], queryFn: () => salesApi.listInvoicePayments(invoiceId) });
+  const [rows, setRows] = useState<{ method: PaymentMethod; amount: string; reference: string }[]>([{ method: "cash", amount: "", reference: "" }]);
   const [err, setErr] = useState<string | null>(null);
   const balance = inv?.balance ?? 0;
   const entered = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
 
   const pay = useMutation({
-    mutationFn: () => salesApi.pay(invoiceId, rows.filter((r) => Number(r.amount) > 0).map((r) => ({ method: r.method, amount: Number(r.amount) }))),
+    mutationFn: () => salesApi.pay(invoiceId, rows.filter((r) => Number(r.amount) > 0)
+      .map((r) => ({ method: r.method, amount: Number(r.amount), reference: r.reference.trim() || null }))),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ["sales"] }); onClose(); },
     onError: (e) => setErr(e instanceof ApiError ? e.message : "Payment failed."),
   });
@@ -378,18 +380,38 @@ function PaymentModal({ invoiceId, onClose }: { invoiceId: string; onClose: () =
         )}
         <div className="flex justify-between text-sm"><span className="text-slate-500">Outstanding balance (ZMW)</span>
           <span className="font-mono font-semibold">{formatMoney(balance, "ZMW")}</span></div>
+
+        {(priorPayments.data?.length ?? 0) > 0 && (
+          <div className="rounded-lg border border-slate-200 text-xs">
+            <div className="border-b border-slate-100 px-3 py-1.5 font-medium text-slate-500">Payments so far</div>
+            {(priorPayments.data ?? []).map((p) => (
+              <div key={p.id} className="flex items-center justify-between px-3 py-1.5">
+                <span className="text-slate-600">
+                  {titleCase(p.method.replace("_", " "))}
+                  {p.reference ? <span className="ml-1 text-slate-400">· {p.reference}</span> : null}
+                  {p.received_by_name ? <span className="ml-1 text-slate-400">· by {p.received_by_name}</span> : null}
+                </span>
+                <span className="font-mono text-slate-700">{formatMoney(p.amount, "ZMW")}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
         {rows.map((r, i) => (
-          <div key={i} className="grid grid-cols-2 gap-2">
+          <div key={i} className="grid grid-cols-[1fr_1fr_1.2fr] gap-2">
             <select value={r.method} onChange={(e) => setRows((rs) => rs.map((x, j) => j === i ? { ...x, method: e.target.value as PaymentMethod } : x))} className={INPUT}>
               {PAYMENT_METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
             </select>
             <input type="number" min={0} value={r.amount} placeholder="Amount"
               onChange={(e) => setRows((rs) => rs.map((x, j) => j === i ? { ...x, amount: e.target.value } : x))}
               className={`${INPUT} text-right`} />
+            <input value={r.reference} placeholder="Reference (txn / cheque no.)"
+              onChange={(e) => setRows((rs) => rs.map((x, j) => j === i ? { ...x, reference: e.target.value } : x))}
+              className={INPUT} />
           </div>
         ))}
         <div className="flex items-center justify-between">
-          <button onClick={() => setRows((rs) => [...rs, { method: "card", amount: "" }])} className="text-xs text-brand-600 hover:underline">+ Split payment</button>
+          <button onClick={() => setRows((rs) => [...rs, { method: "card", amount: "", reference: "" }])} className="text-xs text-brand-600 hover:underline">+ Split payment</button>
           <button onClick={() => setRows((rs) => rs.map((x, i) => i === 0 ? { ...x, amount: String(balance) } : x))} className="text-xs text-slate-500 hover:underline">Pay full</button>
         </div>
         {entered > balance + 0.001 && <div className="text-sm text-red-600">Exceeds the outstanding balance.</div>}
