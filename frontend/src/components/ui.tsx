@@ -55,6 +55,7 @@ const STATUS_TONES: Record<string, string> = {
   partially_received: "bg-cyan-100 text-cyan-800",
   received: "bg-emerald-100 text-emerald-700",
   cancelled: "bg-slate-200 text-slate-600",
+  voided: "bg-red-100 text-red-700",
   // order-request / transfer statuses
   pending: "bg-amber-100 text-amber-800",
   partially_approved: "bg-cyan-100 text-cyan-800",

@@ -110,6 +110,8 @@ export interface Invoice extends DocBase {
   grand_total_zmw: number;   // the PAYABLE (ZMW)
   amount_paid: number;       // ZMW
   balance: number;           // ZMW
+  voided_at: string | null;
+  void_reason: string | null;
   lines: PricedLineOut[];
 }
 
@@ -285,6 +287,8 @@ export const salesApi = {
     api.post<Receipt>("/sales/payments", { invoice_id, payments }),
   listInvoicePayments: (invoice_id: string) =>
     api.get<Payment[]>(`/sales/invoices/${invoice_id}/payments`),
+  voidInvoice: (invoice_id: string, reason: string) =>
+    api.post<Invoice>(`/sales/invoices/${invoice_id}/void`, { reason }),
   invoicesForCustomer: (customer_id: string) =>
     api.get<Invoice[]>(`/sales/invoices?customer_id=${customer_id}`),
 

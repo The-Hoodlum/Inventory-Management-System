@@ -160,6 +160,7 @@ class ReportsRepository:
             select(Invoice.invoice_date, Invoice.branch_id, InvoiceLine.qty, InvoiceLine.line_total)
             .join(Invoice, InvoiceLine.invoice_id == Invoice.id)
             .where(Invoice.id.not_in(_motorcycle_linked_invoice_ids()))
+            .where(Invoice.status != "voided")   # voided sales are excluded from active totals
         )
         if branch_id is not None:
             stmt = stmt.where(Invoice.branch_id == branch_id)

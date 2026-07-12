@@ -188,10 +188,17 @@ class InvoiceOut(_DocOut):
     amount_paid: float = 0.0         # in ZMW
     credit_total: float = 0.0        # applied credit notes (USD)
     balance: float = 0.0             # in ZMW: grand_total_zmw - amount_paid - credit(ZMW)
+    # Void / reverse — set when an admin reversed the sale (status == 'voided').
+    voided_at: dt.datetime | None = None
+    void_reason: str | None = None
     lines: list[PricedLineOut] = []
 
 
 # --------------------------- payment + receipt ----------------------------- #
+class VoidRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=500, description="Why the sale is being voided (mandatory).")
+
+
 class PaymentLineIn(BaseModel):
     method: str = Field(pattern="^(cash|card|mobile_money|bank_transfer|cheque|store_credit)$")
     amount: float = Field(gt=0)

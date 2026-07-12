@@ -43,6 +43,7 @@ from app.sales.schemas import (
     ReturnOut,
     SalesOrderCreate,
     SalesOrderOut,
+    VoidRequest,
 )
 from app.sales.service import SalesService
 
@@ -264,6 +265,20 @@ async def invoice_pdf(
     return Response(
         content=pdf, media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{number}.pdf"'},
+    )
+
+
+@router.post("/invoices/{invoice_id}/void", response_model=InvoiceOut)
+async def void_invoice(
+    invoice_id: uuid.UUID,
+    payload: VoidRequest,
+    user: CurrentUser = Depends(require_permission(P.SALES_MANAGE)),
+    svc: SalesService = Depends(get_sales_service),
+    motorcycles: MotorcycleService = Depends(get_motorcycle_service),
+) -> InvoiceOut:
+    return await svc.void_invoice(
+        tenant_id=user.tenant_id, user_id=user.id, invoice_id=invoice_id,
+        reason=payload.reason, motorcycles=motorcycles,
     )
 
 

@@ -550,6 +550,55 @@ class SalesService:
             invoice=await self._invoice_out(fresh), receipt=receipt_out,
         )
 
+    # ================================ void =============================== #
+    async def void_invoice(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, invoice_id: uuid.UUID,
+        reason: str, motorcycles,
+    ) -> InvoiceOut:
+        """Admin reversal of a sale (NOT a delete). In one transaction: restore the stock it
+        moved through the single InventoryService write path (ledger entry both ways), return
+        a sold bike to an available status, mark the invoice voided with who/when/why. The
+        document stays for audit; reports exclude it from active totals."""
+        reason = (reason or "").strip()
+        if not reason:
+            raise BusinessRuleError("A reason is required to void a sale.")
+        invoice = await self._require(self.repo.get_invoice(invoice_id, lock=True), "Invoice")
+        if invoice.status == S.INV_VOIDED:
+            raise BusinessRuleError("This sale is already voided.")
+        if invoice.status not in S.INVOICE_VOIDABLE:
+            raise BusinessRuleError(f"An invoice in status {invoice.status} cannot be voided.")
+
+        # 1. Restore fungible stock that the sale issued (via its delivery), through the ONE
+        #    inventory path — a 'receipt' movement per line + audit, tagged to the void.
+        if invoice.delivery_note_id is not None:
+            delivery = await self.repo.get_delivery(invoice.delivery_note_id)
+            if delivery is not None and delivery.location_id is not None and delivery.lines:
+                await self.inventory.receive(
+                    tenant_id=tenant_id, user_id=user_id,
+                    req=ReceiveStockRequest(
+                        warehouse_id=delivery.location_id,
+                        lines=[ReceiptLine(product_id=dl.product_id, quantity=_d(dl.qty))
+                               for dl in delivery.lines],
+                        reference_type="sale_void", reference_id=invoice.id,
+                    ),
+                )
+
+        # 2. A serialized bike sold on this invoice returns to an available status.
+        await motorcycles.revert_sale_for_invoice(
+            tenant_id=tenant_id, user_id=user_id, invoice_id=invoice.id, reason=reason,
+        )
+
+        # 3. Mark the invoice voided (kept for audit; excluded from active sales).
+        old = invoice.status
+        invoice.status = S.INV_VOIDED
+        invoice.voided_at = dt.datetime.now(dt.UTC)
+        invoice.voided_by = user_id
+        invoice.void_reason = reason
+        await self.repo.session.flush()
+        await self._audit(tenant_id, user_id, "sales_invoice", invoice.id, "voided", old, S.INV_VOIDED)
+        fresh = await self.repo.get_invoice(invoice.id)
+        return await self._invoice_out(fresh)
+
     # =============================== returns ============================= #
     async def create_return(
         self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, payload: ReturnCreate
@@ -902,6 +951,7 @@ class SalesService:
             vat_rate=_f(inv.vat_rate), fx_rate=_f(inv.fx_rate), grand_total_zmw=_f(inv.grand_total_zmw),
             amount_paid=_f(inv.amount_paid), credit_total=_f(inv.credit_total),
             balance=_f(self._invoice_balance_zmw(inv)), created_at=inv.created_at,
+            voided_at=inv.voided_at, void_reason=inv.void_reason,
             lines=await self._priced_line_outs(inv.lines),
         )
 

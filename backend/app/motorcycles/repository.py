@@ -193,6 +193,13 @@ class MotorcycleRepository:
             select(MotorcycleUnit).where(func.lower(MotorcycleUnit.chassis_number) == chassis.strip().lower())
         )
 
+    async def unit_by_sold_ref(self, invoice_id: uuid.UUID, *, lock: bool = False) -> MotorcycleUnit | None:
+        """The serialized unit sold against an invoice (for a sale void), if any."""
+        stmt = select(MotorcycleUnit).where(MotorcycleUnit.sold_ref == invoice_id)
+        if lock:
+            stmt = stmt.with_for_update()
+        return await self.session.scalar(stmt)
+
     async def list_units(
         self, *, search: str | None = None, status: str | None = None,
         branch_id: uuid.UUID | None = None, branch_ids: Sequence[uuid.UUID] | None = None,
