@@ -19,6 +19,7 @@ import {
   ShoppingCart,
   Truck,
   Users,
+  Wallet,
   Wrench,
   type LucideIcon,
 } from "lucide-react";
@@ -44,6 +45,7 @@ const MODULES: ModuleCard[] = [
   { title: "Spare Parts POS", description: "Sell parts & view sales log", icon: ShoppingCart, to: "/parts-sales", permission: "pos.use" },
   { title: "Bike POS", description: "Sell a motorcycle by chassis", icon: Bike, to: "/pos", permission: "motorcycle.manage" },
   { title: "Sales Log", description: "Parts + motorcycle revenue", icon: BarChart3, to: "/sales-log", permission: "report.read" },
+  { title: "Pending Payments", description: "Who owes money & collect it", icon: Wallet, to: "/sales/pending-payments", permission: "sales.read" },
   { title: "Inventory", description: "Stock, movements, warehouses", icon: Boxes, to: "/inventory", permission: "inventory.read" },
   { title: "Procurement", description: "Purchase orders & reorder", icon: Truck, to: "/purchase-orders", permission: "po.read" },
   { title: "Delivery Notes", description: "Transfers & dispatch notes", icon: Send, to: "/delivery-notes", permission: "delivery_note.read" },

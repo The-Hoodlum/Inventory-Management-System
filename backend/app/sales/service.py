@@ -835,6 +835,20 @@ class SalesService:
         rows = await self.repo.list_invoices(**f)
         return [await self._invoice_out(i) for i in rows]
 
+    async def list_outstanding_invoices(
+        self, *, customer_id: uuid.UUID | None = None, limit: int = 500,
+    ) -> list[InvoiceOut]:
+        """Accounts-receivable list: invoices still owed money. Narrow to the payable
+        statuses (excludes paid / voided / cancelled), then keep only those whose ZMW
+        balance is still positive — using the SAME ``_invoice_balance_zmw`` the pay path
+        uses (grand_total_zmw - amount_paid - applied credit). Covers both parts and bike
+        invoices, since both carry a ZMW payable. Ordered oldest-first by the repository."""
+        rows = await self.repo.list_invoices_by_statuses(
+            statuses=sorted(S.INVOICE_PAYABLE), customer_id=customer_id, limit=limit,
+        )
+        outs = [await self._invoice_out(i) for i in rows]
+        return [o for o in outs if o.balance > 0.0001]
+
     async def list_deliveries(self, **f) -> list[DeliveryNoteOut]:
         rows = await self.repo.list_deliveries(**f)
         return [await self._delivery_out(d) for d in rows]

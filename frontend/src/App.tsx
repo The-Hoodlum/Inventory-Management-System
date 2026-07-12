@@ -33,6 +33,7 @@ import MovementsPage from "@/pages/MovementsPage";
 import NewPurchaseOrderPage from "@/pages/NewPurchaseOrderPage";
 import NotFoundPage from "@/pages/NotFoundPage";
 import OrderRequestsPage from "@/pages/OrderRequestsPage";
+import PendingPaymentsPage from "@/pages/PendingPaymentsPage";
 import ProductsPage from "@/pages/ProductsPage";
 import PurchaseOrderDetailPage from "@/pages/PurchaseOrderDetailPage";
 import PurchaseOrdersPage from "@/pages/PurchaseOrdersPage";
@@ -74,6 +75,7 @@ export default function App() {
         <Route path="/supplier-scores" element={<SupplierScoresPage />} />
         <Route path="/order-requests" element={<OrderRequestsPage />} />
         <Route path="/sales" element={<SalesPage />} />
+        <Route path="/sales/pending-payments" element={<PendingPaymentsPage />} />
         <Route path="/sales/quotations/new" element={<CreateQuotationPage />} />
         <Route path="/sales-log" element={<SalesLogPage />} />
         <Route path="/customers" element={<CustomersPage />} />
