@@ -72,7 +72,7 @@ export function SellBikeModal({ onClose, onSold }: { onClose: () => void; onSold
             <b>{done.chassis_number}</b>{done.model_name ? ` · ${done.model_name}` : ""} marked <b>sold</b>.
           </div>
           <div className="flex justify-between"><span className="text-slate-500">Invoice</span><span className="font-mono">{done.invoice.invoice_number}</span></div>
-          <div className="flex justify-between"><span className="text-slate-500">Amount</span><span className="font-mono">{formatMoney(Number(done.invoice.grand_total_zmw ?? done.invoice.grand_total))}</span></div>
+          <div className="flex justify-between"><span className="text-slate-500">Amount</span><span className="font-mono">{formatMoney(Number(done.invoice.grand_total_zmw ?? done.invoice.grand_total), "ZMW")}</span></div>
           {done.receipt && <div className="flex justify-between"><span className="text-slate-500">Receipt</span><span className="font-mono">{done.receipt.receipt_number}</span></div>}
           {!done.receipt && <div className="text-xs text-amber-600">Invoice only — record the payment later from Sales.</div>}
         </div>
@@ -111,7 +111,7 @@ export function SellBikeModal({ onClose, onSold }: { onClose: () => void; onSold
                   {sellable.map((u) => (
                     <button key={u.id} className="flex w-full items-center justify-between px-3 py-1.5 text-left text-sm hover:bg-slate-50" onClick={() => pick(u)}>
                       <span className="font-mono text-[13px]">{u.chassis_number}</span>
-                      <span className="text-xs text-slate-500">{u.model_name} · {formatMoney(Number(u.selling_price ?? 0))}</span>
+                      <span className="text-xs text-slate-500">{u.model_name} · {formatMoney(Number(u.selling_price ?? 0), "ZMW")}</span>
                     </button>
                   ))}
                   {sellable.length === 0 && !bikeQ.isFetching && <div className="px-3 py-2 text-xs text-slate-400">No sellable bike matches.</div>}

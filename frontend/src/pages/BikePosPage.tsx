@@ -178,7 +178,7 @@ export default function BikePosPage() {
                         </span>
                       </span>
                       <span className="ml-2 shrink-0 font-mono text-xs text-slate-600">
-                        {formatMoney(Number(u.selling_price ?? 0))}
+                        {formatMoney(Number(u.selling_price ?? 0), "ZMW")}
                       </span>
                     </button>
                   );
@@ -221,13 +221,13 @@ export default function BikePosPage() {
                     <PaymentRows rows={payRows} onChange={setPayRows} fillAmount={priceNum} fillLabel="Full price" />
                     <div className="flex justify-between text-xs text-slate-500">
                       <span>Collecting</span>
-                      <span className="font-mono">{formatMoney(paidNum)} of {formatMoney(priceNum)}</span>
+                      <span className="font-mono">{formatMoney(paidNum, "ZMW")} of {formatMoney(priceNum, "ZMW")}</span>
                     </div>
                     {overpay ? (
                       <div className="text-sm text-red-600">Payments exceed the bike price.</div>
                     ) : priceNum > 0 && paidNum > 0 && paidNum < priceNum ? (
                       <div className="text-xs text-amber-600">
-                        Balance {formatMoney(priceNum - paidNum)} left outstanding — the invoice stays partially paid.
+                        Balance {formatMoney(priceNum - paidNum, "ZMW")} left outstanding — the invoice stays partially paid.
                       </div>
                     ) : null}
                   </div>
@@ -240,7 +240,7 @@ export default function BikePosPage() {
               disabled={!valid || sell.isPending}
               onClick={() => { setErr(null); sell.mutate(); }}
             >
-              {sell.isPending ? "Selling…" : takePayment && paidNum > 0 ? `Charge ${formatMoney(paidNum)}` : "Create invoice"}
+              {sell.isPending ? "Selling…" : takePayment && paidNum > 0 ? `Charge ${formatMoney(paidNum, "ZMW")}` : "Create invoice"}
             </Button>
           </Card>
         </div>
@@ -258,7 +258,7 @@ export default function BikePosPage() {
           <div className="flex justify-between"><span className="text-slate-500">Invoice</span>
             <span className="font-mono">{done.invoice.invoice_number}</span></div>
           <div className="flex justify-between"><span className="text-slate-500">Amount</span>
-            <span className="font-mono">{formatMoney(Number(done.invoice.grand_total_zmw ?? done.invoice.grand_total))}</span></div>
+            <span className="font-mono">{formatMoney(Number(done.invoice.grand_total_zmw ?? done.invoice.grand_total), "ZMW")}</span></div>
           {done.receipt ? (
             <div className="flex justify-between"><span className="text-slate-500">Receipt</span>
               <span className="font-mono">{done.receipt.receipt_number}</span></div>
@@ -304,7 +304,7 @@ export default function BikePosPage() {
                       <td className="px-4 py-3 text-slate-600">{formatDate(s.sale_date)}</td>
                       <td className="px-4 py-3 font-mono text-xs text-slate-700">{s.chassis_number}</td>
                       <td className="px-4 py-3 text-slate-700">{bikeLabel(s)}</td>
-                      <td className="px-4 py-3 text-right font-mono font-medium text-slate-800">{formatMoney(s.revenue)}</td>
+                      <td className="px-4 py-3 text-right font-mono font-medium text-slate-800">{formatMoney(s.revenue, "ZMW")}</td>
                       <td className="px-4 py-3 text-slate-600">{s.customer_name ?? "—"}</td>
                       <td className="px-4 py-3 font-mono text-xs text-slate-500">
                         {s.invoice_number ?? (s.historical ? "hist." : "—")}
