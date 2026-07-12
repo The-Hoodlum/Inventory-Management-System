@@ -132,6 +132,16 @@ export interface PaymentLineIn {
   reference?: string | null;
 }
 
+export interface Payment {
+  id: string;
+  payment_number: string;
+  method: string;
+  amount: number;
+  reference: string | null;
+  received_by_name: string | null;
+  created_at: string;
+}
+
 export interface PosResult {
   sales_order: SalesOrder;
   delivery_note: DeliveryNote;
@@ -273,6 +283,10 @@ export const salesApi = {
   // payment + receipt
   pay: (invoice_id: string, payments: PaymentLineIn[]) =>
     api.post<Receipt>("/sales/payments", { invoice_id, payments }),
+  listInvoicePayments: (invoice_id: string) =>
+    api.get<Payment[]>(`/sales/invoices/${invoice_id}/payments`),
+  invoicesForCustomer: (customer_id: string) =>
+    api.get<Invoice[]>(`/sales/invoices?customer_id=${customer_id}`),
 
   downloadInvoicePdf: (id: string, invoiceNumber: string) =>
     downloadPdf(`/sales/invoices/${id}/pdf`, invoiceNumber),

@@ -682,6 +682,18 @@ class SalesService:
         currency = await self.repo.base_currency(tenant_id)
         return build_invoice_pdf(inv, bike=bike, currency=currency), inv.invoice_number
 
+    async def list_invoice_payments(self, *, invoice_id: uuid.UUID) -> list[PaymentOut]:
+        """The payment lines settled against an invoice (method / amount / reference /
+        who took it / when) — shown on the invoice and in the customer's history."""
+        rows = await self.repo.invoice_payments(invoice_id)
+        return [
+            PaymentOut(
+                id=p.id, payment_number=p.payment_number, method=p.method, amount=_f(p.amount),
+                reference=p.reference, received_by_name=name, created_at=p.created_at,
+            )
+            for p, name in rows
+        ]
+
     async def quotation_pdf(self, *, tenant_id: uuid.UUID, quote_id: uuid.UUID) -> tuple[bytes, str]:
         """Render the branded quotation PDF (bytes, filename), amounts in the billed currency."""
         from app.sales.pdf import build_quotation_pdf

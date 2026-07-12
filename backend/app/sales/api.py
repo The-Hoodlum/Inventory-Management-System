@@ -32,6 +32,7 @@ from app.sales.schemas import (
     MotoSaleLineOut,
     PartsSaleLineOut,
     PaymentCreate,
+    PaymentOut,
     PosCheckout,
     PosResult,
     QuotationCreate,
@@ -264,6 +265,15 @@ async def invoice_pdf(
         content=pdf, media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{number}.pdf"'},
     )
+
+
+@router.get("/invoices/{invoice_id}/payments", response_model=list[PaymentOut])
+async def list_invoice_payments(
+    invoice_id: uuid.UUID,
+    _: CurrentUser = Depends(require_permission(P.SALES_READ)),
+    svc: SalesService = Depends(get_sales_service),
+) -> list[PaymentOut]:
+    return await svc.list_invoice_payments(invoice_id=invoice_id)
 
 
 @router.get("/quotations/{quote_id}/pdf")

@@ -1,14 +1,15 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { useState } from "react";
 
 import { useAuth } from "@/auth/AuthContext";
 import { Modal } from "@/components/Modal";
 import { PageHeader } from "@/components/PageHeader";
-import { Button, Card, Spinner } from "@/components/ui";
+import { Button, Card, Spinner, StatusBadge } from "@/components/ui";
 import { ApiError } from "@/lib/api";
-import { type CustomerInput, customersApi, useCustomers } from "@/lib/customers";
-import { formatMoney } from "@/lib/format";
+import { type Customer, type CustomerInput, customersApi, useCustomers } from "@/lib/customers";
+import { formatDate, formatMoney } from "@/lib/format";
+import { salesApi } from "@/lib/sales";
 
 const INPUT =
   "rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500";
@@ -20,6 +21,7 @@ export default function CustomersPage() {
   const canManage = hasPermission("customer.manage");
   const [search, setSearch] = useState("");
   const [showNew, setShowNew] = useState(false);
+  const [historyOf, setHistoryOf] = useState<Customer | null>(null);
   const list = useCustomers(search);
 
   return (
@@ -56,7 +58,7 @@ export default function CustomersPage() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {list.data.items.map((c) => (
-                  <tr key={c.id} className="hover:bg-slate-50">
+                  <tr key={c.id} onClick={() => setHistoryOf(c)} className="cursor-pointer hover:bg-slate-50">
                     <td className="px-4 py-3 font-mono text-[13px] text-slate-700">{c.code}</td>
                     <td className={`${TD} font-medium`}>{c.name}</td>
                     <td className={`${TD} text-slate-600`}>{c.contact_name ?? "—"}</td>
@@ -73,6 +75,7 @@ export default function CustomersPage() {
       )}
 
       {showNew && <NewCustomerModal onClose={() => setShowNew(false)} />}
+      {historyOf && <CustomerHistoryModal customer={historyOf} onClose={() => setHistoryOf(null)} />}
     </div>
   );
 }
@@ -140,5 +143,109 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <span className="mb-1 block font-medium text-slate-700">{label}</span>
       {children}
     </label>
+  );
+}
+
+
+// Purchase history: the customer's invoices (what they bought, when, how much) with
+// paid / balance / status, each expandable to show HOW it was paid (split payment lines).
+function CustomerHistoryModal({ customer, onClose }: { customer: Customer; onClose: () => void }) {
+  const [openInvoice, setOpenInvoice] = useState<string | null>(null);
+  const invoices = useQuery({
+    queryKey: ["customer-invoices", customer.id],
+    queryFn: () => salesApi.invoicesForCustomer(customer.id),
+  });
+  const addr = customer.addresses?.[0];
+  const addrText = addr ? [addr.line1, addr.city, addr.country].filter(Boolean).join(", ") : null;
+
+  return (
+    <Modal title={`${customer.name} — history`} size="lg" onClose={onClose}
+      footer={<Button variant="secondary" onClick={onClose}>Close</Button>}>
+      <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm md:grid-cols-4">
+          <Detail label="Phone" value={customer.phone} />
+          <Detail label="Tax number" value={customer.tax_number} />
+          <Detail label="Address" value={addrText} />
+          <Detail label="Payment terms" value={customer.payment_terms} />
+        </div>
+
+        {invoices.isLoading ? (
+          <div className="flex h-24 items-center justify-center"><Spinner label="Loading history…" /></div>
+        ) : (invoices.data ?? []).length === 0 ? (
+          <p className="py-6 text-center text-sm text-slate-400">No purchases yet.</p>
+        ) : (
+          <div className="overflow-hidden rounded-lg border border-slate-200">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50">
+                <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
+                  <th className="px-3 py-2 font-medium">Invoice</th>
+                  <th className="px-3 py-2 font-medium">Date</th>
+                  <th className="px-3 py-2 text-right font-medium">Total (ZMW)</th>
+                  <th className="px-3 py-2 text-right font-medium">Paid</th>
+                  <th className="px-3 py-2 text-right font-medium">Balance</th>
+                  <th className="px-3 py-2 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {(invoices.data ?? []).map((inv) => (
+                  <>
+                    <tr key={inv.id} onClick={() => setOpenInvoice(openInvoice === inv.id ? null : inv.id)}
+                      className="cursor-pointer hover:bg-slate-50">
+                      <td className="px-3 py-2 font-mono text-xs text-slate-700">{inv.invoice_number}</td>
+                      <td className="px-3 py-2 text-slate-600">{formatDate(inv.invoice_date)}</td>
+                      <td className="px-3 py-2 text-right font-mono">{formatMoney(inv.grand_total_zmw, "ZMW")}</td>
+                      <td className="px-3 py-2 text-right font-mono text-emerald-700">{formatMoney(inv.amount_paid, "ZMW")}</td>
+                      <td className="px-3 py-2 text-right font-mono">{formatMoney(inv.balance, "ZMW")}</td>
+                      <td className="px-3 py-2"><StatusBadge status={inv.status} /></td>
+                    </tr>
+                    {openInvoice === inv.id && <InvoicePaymentsRow invoiceId={inv.id} />}
+                  </>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+function InvoicePaymentsRow({ invoiceId }: { invoiceId: string }) {
+  const payments = useQuery({
+    queryKey: ["invoice-payments", invoiceId],
+    queryFn: () => salesApi.listInvoicePayments(invoiceId),
+  });
+  return (
+    <tr className="bg-slate-50/60">
+      <td colSpan={6} className="px-4 py-2">
+        {payments.isLoading ? (
+          <Spinner label="Loading payments…" />
+        ) : (payments.data ?? []).length === 0 ? (
+          <span className="text-xs text-slate-400">No payments recorded on this invoice.</span>
+        ) : (
+          <div className="space-y-1">
+            {(payments.data ?? []).map((p) => (
+              <div key={p.id} className="flex items-center justify-between text-xs text-slate-600">
+                <span>
+                  {formatDate(p.created_at)} · {p.method.replace("_", " ")}
+                  {p.reference ? ` · ${p.reference}` : ""}
+                  {p.received_by_name ? ` · by ${p.received_by_name}` : ""}
+                </span>
+                <span className="font-mono">{formatMoney(p.amount, "ZMW")}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+function Detail({ label, value }: { label: string; value: string | null | undefined }) {
+  return (
+    <div>
+      <div className="text-2xs font-medium uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="text-slate-700">{value || "—"}</div>
+    </div>
   );
 }
