@@ -89,6 +89,33 @@ class SalesRepository:
         )
         return {pid: (t or "exclusive") for pid, t in res.all()}
 
+    async def bike_unit_info(self, unit_id: uuid.UUID):
+        """(chassis_number, model_name, selling_price, status) for a unit being quoted, or
+        None. Raw table refs keep this decoupled from the motorcycles ORM."""
+        u = table("motorcycle_units", column("id"), column("chassis_number"),
+                  column("model_id"), column("selling_price"), column("status"))
+        m = table("motorcycle_models", column("id"), column("name"))
+        row = (await self.session.execute(
+            select(u.c.chassis_number, m.c.name, func.coalesce(u.c.selling_price, 0), u.c.status)
+            .select_from(u).outerjoin(m, m.c.id == u.c.model_id)
+            .where(u.c.id == unit_id)
+        )).first()
+        return tuple(row) if row is not None else None
+
+    async def bike_names(self, unit_ids: list[uuid.UUID]) -> dict[uuid.UUID, tuple]:
+        """unit_id -> (chassis_number, model_name) for quotation bike-line output."""
+        ids = [i for i in unit_ids if i]
+        if not ids:
+            return {}
+        u = table("motorcycle_units", column("id"), column("chassis_number"), column("model_id"))
+        m = table("motorcycle_models", column("id"), column("name"))
+        rows = await self.session.execute(
+            select(u.c.id, u.c.chassis_number, m.c.name)
+            .select_from(u).outerjoin(m, m.c.id == u.c.model_id)
+            .where(u.c.id.in_(ids))
+        )
+        return {r[0]: (r[1], r[2]) for r in rows}
+
     async def linked_bike(self, invoice_id: uuid.UUID):
         """The serialized bike sold on this invoice (chassis, model name, price), or None.
         Uses raw table refs to stay decoupled from the motorcycles ORM (see ``_moto_units``)."""

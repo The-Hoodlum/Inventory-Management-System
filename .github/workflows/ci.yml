@@ -112,7 +112,8 @@ jobs:
             database/sql/motorcycle_service.sql \
             database/sql/parts_sales.sql \
             database/sql/vat.sql \
-            database/sql/sales_void.sql ; do
+            database/sql/sales_void.sql \
+            database/sql/quotation_bikes.sql ; do
             echo "applying $f"
             psql -v ON_ERROR_STOP=1 -f "$f"
           done

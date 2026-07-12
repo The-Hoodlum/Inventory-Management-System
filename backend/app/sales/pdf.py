@@ -251,14 +251,14 @@ def build_quotation_pdf(q: QuotationOut, *, currency: str = "") -> bytes:
             pdf.cell(width, 6, text_value, border="B", align=align)
         pdf.ln(6)
 
-    net_zmw = (q.net_total or 0.0) * fx
-    vat_zmw = (q.tax_total or 0.0) * fx
+    # A quotation is denominated in ZMW: net_total / tax_total / grand_total are already
+    # the billed ZMW (part lines converted at fx, bike lines direct) — do NOT re-convert.
     vat_label = f"VAT ({_money(q.vat_rate * 100)}%)" if q.vat_rate else "VAT"
     pdf.ln(2)
     for label, value, bold in (
-        ("Net", net_zmw, False),
-        (vat_label, vat_zmw, False),
-        ("Total", q.grand_total_zmw or (q.grand_total * fx), True),
+        ("Net", q.net_total or 0.0, False),
+        (vat_label, q.tax_total or 0.0, False),
+        ("Total", q.grand_total_zmw or q.grand_total, True),
     ):
         pdf.set_x(115)
         pdf.set_font("Helvetica", "B" if bold else "", 9.5 if bold else 9)

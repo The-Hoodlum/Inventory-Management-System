@@ -14,8 +14,9 @@ import { ApiError } from "@/lib/api";
 import { catalogApi } from "@/lib/catalog";
 import { customersApi, useCustomers } from "@/lib/customers";
 import { formatMoney } from "@/lib/format";
+import { motorcyclesApi } from "@/lib/motorcycles";
 import { useWarehouses } from "@/lib/refdata";
-import { type Quotation, salesApi } from "@/lib/sales";
+import { type Quotation, type QuotationConvertResult, salesApi } from "@/lib/sales";
 import { tenantApi } from "@/lib/tenantSettings";
 
 const INPUT =
@@ -26,7 +27,14 @@ interface Line {
   sku: string;
   name: string;
   qty: number;
-  unit_price: number;
+  unit_price: number;   // USD
+}
+
+interface BikeLine {
+  unit_id: string;
+  chassis: string;
+  label: string;
+  price: number;        // ZMW, VAT-inclusive
 }
 
 export default function CreateQuotationPage() {
@@ -45,10 +53,13 @@ export default function CreateQuotationPage() {
   const [newAddr, setNewAddr] = useState("");
   const [search, setSearch] = useState("");
   const [lines, setLines] = useState<Line[]>([]);
+  const [bikeSearch, setBikeSearch] = useState("");
+  const [bikeLines, setBikeLines] = useState<BikeLine[]>([]);
   const [notes, setNotes] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [saved, setSaved] = useState<Quotation | null>(null);
   const [convertLoc, setConvertLoc] = useState("");
+  const [convertMsg, setConvertMsg] = useState<string | null>(null);
 
   const term = search.trim();
   const searchQ = useQuery({
@@ -60,10 +71,28 @@ export default function CreateQuotationPage() {
   const inLines = new Set(lines.map((l) => l.product_id));
   const matches = (searchQ.data?.items ?? []).filter((p) => !inLines.has(p.id)).slice(0, 8);
 
-  const net = useMemo(() => lines.reduce((s, l) => s + l.qty * l.unit_price, 0), [lines]);
-  const vat = net * vatRate;
-  const total = net + vat;
-  const zmw = total * fx;
+  // Bikes available to quote (assembled/reserved), searched by chassis/engine/model.
+  const bterm = bikeSearch.trim();
+  const bikeQ = useQuery({
+    queryKey: ["quote-bike-search", bterm],
+    queryFn: () => motorcyclesApi.listUnits({ search: bterm, sold: false, page_size: 12 }),
+    enabled: bterm.length >= 2,
+    placeholderData: (p) => p,
+  });
+  const inBikes = new Set(bikeLines.map((b) => b.unit_id));
+  const bikeMatches = (bikeQ.data?.items ?? [])
+    .filter((u) => u.allowed_next.includes("sold") && !inBikes.has(u.id)).slice(0, 8);
+
+  // Everything is shown in ZMW: parts (USD) are converted at fx; bikes are already ZMW
+  // (VAT-inclusive). Parts add VAT on top; bikes have VAT extracted from the price.
+  const partsNetZmw = useMemo(() => lines.reduce((s, l) => s + l.qty * l.unit_price, 0) * fx, [lines, fx]);
+  const partsVatZmw = partsNetZmw * vatRate;
+  const bikesGrossZmw = useMemo(() => bikeLines.reduce((s, b) => s + b.price, 0), [bikeLines]);
+  const bikesNetZmw = vatRate > 0 ? bikesGrossZmw / (1 + vatRate) : bikesGrossZmw;
+  const bikesVatZmw = bikesGrossZmw - bikesNetZmw;
+  const netZmw = partsNetZmw + bikesNetZmw;
+  const vatZmw = partsVatZmw + bikesVatZmw;
+  const totalZmw = partsNetZmw + partsVatZmw + bikesGrossZmw;
 
   function add(p: { id: string; sku: string; name: string; selling_price?: number | string }) {
     setLines((c) => [...c, { product_id: p.id, sku: p.sku, name: p.name, qty: 1, unit_price: Number(p.selling_price ?? 0) }]);
@@ -71,6 +100,13 @@ export default function CreateQuotationPage() {
   }
   const setLine = (i: number, patch: Partial<Line>) =>
     setLines((c) => c.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+  function addBike(u: { id: string; chassis_number: string; model_name: string | null; colour_name: string | null; selling_price: number | null }) {
+    const label = [u.model_name ?? "Bike", u.colour_name].filter(Boolean).join(" · ");
+    setBikeLines((c) => [...c, { unit_id: u.id, chassis: u.chassis_number, label, price: Number(u.selling_price ?? 0) }]);
+    setBikeSearch("");
+  }
+  const setBike = (i: number, patch: Partial<BikeLine>) =>
+    setBikeLines((c) => c.map((b, j) => (j === i ? { ...b, ...patch } : b)));
 
   const save = useMutation({
     mutationFn: async () => {
@@ -87,6 +123,7 @@ export default function CreateQuotationPage() {
         customer_id: cid,
         notes: notes.trim() || null,
         lines: lines.map((l) => ({ product_id: l.product_id, qty: l.qty, unit_price: l.unit_price })),
+        bike_lines: bikeLines.map((b) => ({ unit_id: b.unit_id, price: b.price })),
       });
     },
     onSuccess: (q) => {
@@ -98,13 +135,21 @@ export default function CreateQuotationPage() {
   });
 
   const convert = useMutation({
-    mutationFn: () => salesApi.convertQuotation(saved!.id, convertLoc),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["sales"] }); navigate("/sales"); },
-    onError: (e) => setErr(e instanceof ApiError ? e.message : "Could not convert to an order."),
+    mutationFn: () => salesApi.convertQuotation(
+      saved!.id, saved!.lines.some((l) => !l.is_bike) ? convertLoc : null),
+    onSuccess: (res: QuotationConvertResult) => {
+      void qc.invalidateQueries({ queryKey: ["sales"] });
+      const parts = res.sales_order ? `order ${res.sales_order.so_number}` : "";
+      const bikes = res.bike_sales.length ? `${res.bike_sales.length} bike sale(s)` : "";
+      setErr(null);
+      setConvertMsg([parts, bikes].filter(Boolean).join(" + ") || "converted");
+    },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : "Could not convert."),
   });
 
   const customerValid = inlineNew ? newName.trim().length > 0 : customerId.length > 0;
-  const canSave = customerValid && lines.length > 0 && lines.every((l) => l.qty > 0);
+  const canSave = customerValid && (lines.length > 0 || bikeLines.length > 0)
+    && lines.every((l) => l.qty > 0) && bikeLines.every((b) => b.price > 0);
 
   if (saved) {
     return (
@@ -116,33 +161,45 @@ export default function CreateQuotationPage() {
           </div>
           <div className="rounded-lg bg-slate-50 px-4 py-3 text-sm">
             <Row label="Customer" value={saved.customer_name ?? "—"} />
-            <Row label="Net" value={formatMoney(saved.subtotal)} />
-            <Row label={`VAT${saved.vat_rate ? ` (${(saved.vat_rate * 100).toFixed(0)}%)` : ""}`} value={formatMoney(saved.tax_total)} />
-            <Row label="Total" value={formatMoney(saved.grand_total)} bold />
-            {saved.grand_total_zmw ? <Row label="ZMW payable" value={formatMoney(saved.grand_total_zmw)} /> : null}
+            <Row label="Net (ZMW)" value={formatMoney(saved.net_total, "ZMW")} />
+            <Row label={`VAT${saved.vat_rate ? ` (${(saved.vat_rate * 100).toFixed(0)}%)` : ""}`} value={formatMoney(saved.tax_total, "ZMW")} />
+            <Row label="Total (ZMW)" value={formatMoney(saved.grand_total_zmw || saved.grand_total, "ZMW")} bold />
           </div>
           <div className="flex flex-wrap gap-2">
             <Button variant="secondary" onClick={() => void salesApi.downloadQuotationPdf(saved.id, saved.quote_number)}>
               Print PDF
             </Button>
-            <Button variant="secondary" onClick={() => { setSaved(null); setLines([]); setNotes(""); }}>
+            <Button variant="secondary" onClick={() => { setSaved(null); setLines([]); setBikeLines([]); setNotes(""); setConvertMsg(null); }}>
               New quotation
             </Button>
             <Button variant="secondary" onClick={() => navigate("/sales")}>Go to Sales</Button>
           </div>
           <div className="border-t border-slate-200 pt-4">
-            <div className="mb-1 text-sm font-medium text-slate-700">Convert to a sales order</div>
-            <p className="mb-2 text-xs text-slate-500">Reuses these lines — no re-entry. Pick the selling location to reserve stock.</p>
+            <div className="mb-1 text-sm font-medium text-slate-700">Convert without re-entry</div>
+            <p className="mb-2 text-xs text-slate-500">
+              Part lines become a sales order (reserving stock at the chosen location); each bike line is sold now.
+            </p>
             {err && <div className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
-            <div className="flex items-center gap-2">
-              <select className={`${INPUT} flex-1`} value={convertLoc} onChange={(e) => setConvertLoc(e.target.value)}>
-                <option value="">Select location…</option>
-                {warehouses.list.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-              </select>
-              <Button disabled={!convertLoc || convert.isPending} onClick={() => { setErr(null); convert.mutate(); }}>
-                {convert.isPending ? "Converting…" : "Convert to order"}
-              </Button>
-            </div>
+            {convertMsg ? (
+              <div className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                Converted: {convertMsg}. <button className="underline" onClick={() => navigate("/sales")}>View in Sales →</button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                {saved.lines.some((l) => !l.is_bike) && (
+                  <select className={`${INPUT} flex-1`} value={convertLoc} onChange={(e) => setConvertLoc(e.target.value)}>
+                    <option value="">Select location (for parts)…</option>
+                    {warehouses.list.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                  </select>
+                )}
+                <Button
+                  disabled={convert.isPending || (saved.lines.some((l) => !l.is_bike) && !convertLoc)}
+                  onClick={() => { setErr(null); convert.mutate(); }}
+                >
+                  {convert.isPending ? "Converting…" : "Convert"}
+                </Button>
+              </div>
+            )}
           </div>
         </Card>
       </div>
@@ -153,7 +210,7 @@ export default function CreateQuotationPage() {
     <div>
       <PageHeader
         title="Create Quotation"
-        description="Quote spare parts for a customer. VAT is added at the tenant rate; the ZMW total uses the current exchange rate. Save, print, and convert to an order without re-entering."
+        description="Quote bikes (by chassis) and spare parts together. Everything is totalled in ZMW; parts add VAT, bikes are VAT-inclusive. Save, print, and convert without re-entering."
       />
       <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
         {/* Customer + lines */}
@@ -224,6 +281,49 @@ export default function CreateQuotationPage() {
             </div>
           )}
 
+          <div>
+            <div className="mb-1 text-sm font-medium text-slate-700">Add bikes</div>
+            <input className={`${INPUT} w-full`} placeholder="Search bike (chassis / engine / model)" value={bikeSearch}
+              onChange={(e) => setBikeSearch(e.target.value)} />
+            {bterm.length >= 2 && (
+              <div className="mt-1 max-h-56 overflow-y-auto rounded-lg border border-slate-200">
+                {bikeQ.isFetching && bikeMatches.length === 0 ? (
+                  <div className="p-3"><Spinner label="Searching…" /></div>
+                ) : bikeMatches.length === 0 ? (
+                  <div className="p-3 text-sm text-slate-400">No available bike matches (assembled/reserved only).</div>
+                ) : (
+                  bikeMatches.map((u) => (
+                    <button key={u.id} onClick={() => addBike(u)}
+                      className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-slate-50">
+                      <span><span className="font-mono text-[13px] text-slate-800">{u.chassis_number}</span>
+                        <span className="ml-2 text-xs text-slate-400">{[u.model_name, u.colour_name].filter(Boolean).join(" · ")}</span></span>
+                      <span className="flex items-center gap-2 text-xs text-slate-500">
+                        {formatMoney(Number(u.selling_price ?? 0), "ZMW")}<Plus className="h-3.5 w-3.5 text-brand-600" /></span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+
+          {bikeLines.length > 0 && (
+            <div className="space-y-2">
+              {bikeLines.map((b, i) => (
+                <div key={b.unit_id} className="flex items-center gap-2 text-sm">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-mono text-[13px] text-slate-800">{b.chassis}</div>
+                    <div className="text-xs text-slate-400">{b.label} · VAT-inclusive</div>
+                  </div>
+                  <input type="number" min={0} value={b.price} className={`${INPUT} w-24 text-right`}
+                    onChange={(e) => setBike(i, { price: Number(e.target.value) })} />
+                  <div className="w-16 text-right text-2xs text-slate-400">ZMW</div>
+                  <button onClick={() => setBikeLines((c) => c.filter((_, j) => j !== i))}
+                    className="text-slate-400 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
+                </div>
+              ))}
+            </div>
+          )}
+
           <label className="block text-sm">
             <span className="mb-1 block font-medium text-slate-700">Notes</span>
             <textarea className={`${INPUT} w-full`} rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
@@ -232,16 +332,15 @@ export default function CreateQuotationPage() {
 
         {/* Totals + save */}
         <Card className="flex flex-col p-4">
-          <div className="mb-2 text-sm font-semibold text-slate-800">Quotation total</div>
+          <div className="mb-2 text-sm font-semibold text-slate-800">Quotation total (ZMW)</div>
           <div className="flex-1 space-y-2 text-sm">
-            <Row label="Net" value={formatMoney(net)} />
-            <Row label={`VAT (${(vatRate * 100).toFixed(0)}%)`} value={formatMoney(vat)} />
+            <Row label="Net" value={formatMoney(netZmw, "ZMW")} />
+            <Row label={`VAT (${(vatRate * 100).toFixed(0)}%)`} value={formatMoney(vatZmw, "ZMW")} />
             <div className="border-t border-slate-200 pt-2">
-              <Row label="Total" value={formatMoney(total)} bold />
+              <Row label="Total" value={formatMoney(totalZmw, "ZMW")} bold />
             </div>
-            {fx !== 1 && <Row label="ZMW payable" value={formatMoney(zmw)} />}
             <p className="pt-2 text-xs text-slate-400">
-              Spare parts are VAT-exclusive — 16% is added to the net price. Bikes (VAT-inclusive) sell through Bike POS.
+              Parts are VAT-exclusive (VAT added on top, converted at rate {fx}); bikes are VAT-inclusive (VAT extracted, priced in ZMW).
             </p>
           </div>
           {err && <div className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}

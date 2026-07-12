@@ -25,15 +25,18 @@ export interface PricedLineIn {
 
 export interface PricedLineOut {
   id: string;
-  product_id: string;
+  product_id: string | null;
+  unit_id: string | null;      // set for a bike line
+  is_bike: boolean;
+  chassis_number: string | null;
   sku: string | null;
   name: string | null;
   description: string | null;
   qty: number;
-  unit_price: number;      // USD (source of truth)
+  unit_price: number;      // USD for a part line, ZMW for a bike line
   discount_pct: number;
   tax_pct: number;
-  line_total: number;      // USD
+  line_total: number;
   line_total_zmw: number;  // billed ZMW at the document's frozen rate
 }
 
@@ -238,6 +241,18 @@ export interface MotoSale {
   historical: boolean;
 }
 
+export interface BikeQuoteLineIn {
+  unit_id: string;
+  price?: number | null;
+  description?: string | null;
+}
+
+export interface QuotationConvertResult {
+  quotation_id: string;
+  sales_order: SalesOrder | null;
+  bike_sales: BikeSaleResult[];
+}
+
 async function downloadPdf(path: string, filename: string): Promise<void> {
   const token = tokenStore.getAccess();
   const res = await fetch(`${BASE_URL}${path}`, {
@@ -260,11 +275,11 @@ export const salesApi = {
   listQuotations: (status = "") =>
     api.get<Quotation[]>(`/sales/quotations${status ? `?status=${status}` : ""}`),
   getQuotation: (id: string) => api.get<Quotation>(`/sales/quotations/${id}`),
-  createQuotation: (body: { customer_id: string; branch_id?: string | null; notes?: string | null; lines: PricedLineIn[] }) =>
+  createQuotation: (body: { customer_id: string; branch_id?: string | null; notes?: string | null; lines: PricedLineIn[]; bike_lines?: BikeQuoteLineIn[] }) =>
     api.post<Quotation>("/sales/quotations", body),
   sendQuotation: (id: string) => api.post<Quotation>(`/sales/quotations/${id}/send`),
-  convertQuotation: (id: string, location_id: string) =>
-    api.post<SalesOrder>(`/sales/quotations/${id}/convert`, { location_id }),
+  convertQuotation: (id: string, location_id: string | null) =>
+    api.post<QuotationConvertResult>(`/sales/quotations/${id}/convert`, { location_id: location_id || null }),
 
   // sales orders
   listOrders: (status = "") => api.get<SalesOrder[]>(`/sales/orders${status ? `?status=${status}` : ""}`),

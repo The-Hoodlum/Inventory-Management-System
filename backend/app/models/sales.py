@@ -73,14 +73,17 @@ class QuotationLine(Base):
     id: Mapped[uuid.UUID] = mapped_column(_UUID, primary_key=True, server_default=text("gen_random_uuid()"))
     tenant_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
     quotation_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("quotations.id", ondelete="CASCADE"), nullable=False)
-    product_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("products.id", ondelete="RESTRICT"), nullable=False)
+    # Exactly one of product_id (part line) / unit_id (bike line) is set. A bike line is
+    # priced directly in the billing currency (ZMW), VAT-inclusive; a part line is USD.
+    product_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("products.id", ondelete="RESTRICT"), nullable=True)
+    unit_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("motorcycle_units.id", ondelete="RESTRICT"), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     qty: Mapped[Decimal] = _num()
     unit_price: Mapped[Decimal] = _num()
     discount_pct: Mapped[Decimal] = _num()
     tax_pct: Mapped[Decimal] = _num()
-    line_total: Mapped[Decimal] = _num()      # payable (VAT-inclusive gross)
-    line_total_zmw: Mapped[Decimal] = _num()  # line_total * document fx_rate, frozen
+    line_total: Mapped[Decimal] = _num()      # payable (VAT-inclusive gross), in the line's currency
+    line_total_zmw: Mapped[Decimal] = _num()  # billed ZMW, frozen (part = line_total*fx, bike = line_total)
     net_amount: Mapped[Decimal] = _num()      # VAT-exclusive net, frozen
     vat_amount: Mapped[Decimal] = _num()      # VAT component, frozen
     vat_treatment: Mapped[str] = _treatment()

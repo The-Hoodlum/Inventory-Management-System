@@ -507,8 +507,8 @@ function ReturnModal({ invoice, onClose }: { invoice: Invoice; onClose: () => vo
   const create = useMutation({
     mutationFn: async () => {
       const lines = invoice.lines
-        .map((l) => ({ product_id: l.product_id, qty: Number(qty[l.id] || 0) }))
-        .filter((l) => l.qty > 0);
+        .filter((l) => l.product_id && Number(qty[l.id] || 0) > 0)
+        .map((l) => ({ product_id: l.product_id as string, qty: Number(qty[l.id] || 0) }));
       const ret = await salesApi.createReturn({ invoice_id: invoice.id, location_id: locationId, reason, lines });
       // Raise the matching credit note straight away.
       await salesApi.createCreditNote(ret.id);
