@@ -34,6 +34,7 @@ class TenantSettingsService:
         if before is None:
             raise NotFoundError("Tenant not found")
         old_fx = before.fx_rate
+        old_vat = getattr(before, "vat_rate", None)
 
         tenant = await self.tenants.update(tenant_id, columns)
         if tenant is None:
@@ -49,5 +50,14 @@ class TenantSettingsService:
                 tenant_id=tenant_id, user_id=actor_id, action="tenant.fx_rate.update",
                 entity_type="tenant", entity_id=tenant_id,
                 changes={"old": str(old_fx), "new": str(tenant.fx_rate)},
+            )
+        # Same dedicated audit for the VAT rate — it is financial and snapshotted onto
+        # documents, so its change history matters on its own.
+        new_vat = getattr(tenant, "vat_rate", None)
+        if "vat_rate" in columns and new_vat != old_vat:
+            await self.audit.add(
+                tenant_id=tenant_id, user_id=actor_id, action="tenant.vat_rate.update",
+                entity_type="tenant", entity_id=tenant_id,
+                changes={"old": str(old_vat), "new": str(new_vat)},
             )
         return TenantSettingsOut.from_tenant(tenant)

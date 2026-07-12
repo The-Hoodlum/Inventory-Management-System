@@ -59,7 +59,9 @@ async def _enable_sales(client, admin_h) -> None:
     r = await client.get("/api/v1/tenant/settings", headers=admin_h)
     flags = dict(r.json().get("feature_flags", {}))
     flags.update({"sales_orders": True, "pos": True})
-    r = await client.put("/api/v1/tenant/settings", headers=admin_h, json={"feature_flags": flags})
+    # These fx-freeze tests assert pre-VAT totals; neutralise VAT to isolate the fx rate.
+    r = await client.put("/api/v1/tenant/settings", headers=admin_h,
+                         json={"feature_flags": flags, "vat_rate": 0})
     assert r.status_code == 200, r.text
 
 

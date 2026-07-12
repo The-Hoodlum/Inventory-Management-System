@@ -78,6 +78,16 @@ def _f(v) -> float:
     return float(v) if v is not None else 0.0
 
 
+def _vat_line_kwargs(ln) -> dict:
+    """The frozen net/VAT/treatment/rate fields for a document-line output."""
+    return {
+        "net_amount": _f(getattr(ln, "net_amount", 0)),
+        "vat_amount": _f(getattr(ln, "vat_amount", 0)),
+        "vat_treatment": getattr(ln, "vat_treatment", "exclusive") or "exclusive",
+        "vat_rate": _f(getattr(ln, "vat_rate", 0)),
+    }
+
+
 class SalesService:
     def __init__(
         self, repo: SalesRepository, audit: AuditRepository, inventory: InventoryService
@@ -94,7 +104,7 @@ class SalesService:
         self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, payload: QuotationCreate
     ) -> QuotationOut:
         await self._require_customer(payload.customer_id)
-        lines, totals = await self._priced_lines(tenant_id, QuotationLine, payload.lines)
+        lines, totals, vat_rate = await self._priced_lines(tenant_id, QuotationLine, payload.lines)
         # Snapshot the CURRENT tenant rate onto the quotation and freeze the billed ZMW.
         fx_rate = await self.repo.current_fx_rate(tenant_id)
         quote = Quotation(
@@ -102,7 +112,7 @@ class SalesService:
             customer_id=payload.customer_id, branch_id=payload.branch_id,
             salesperson_id=payload.salesperson_id or user_id, currency=payload.currency,
             valid_until=payload.valid_until, status=S.Q_DRAFT, notes=payload.notes,
-            created_by=user_id, fx_rate=fx_rate, **totals,
+            created_by=user_id, fx_rate=fx_rate, vat_rate=vat_rate, **totals,
         )
         quote.lines = lines
         quote.grand_total_zmw = self._freeze_line_zmw(fx_rate, lines)
@@ -166,13 +176,13 @@ class SalesService:
     async def _new_sales_order(self, *, tenant_id, user_id, customer_id, branch_id, location_id,
                                salesperson_id, currency, payment_terms, delivery_terms, notes,
                                lines, quotation_id) -> SalesOrder:
-        so_lines, totals = await self._priced_lines(tenant_id, SalesOrderLine, lines)
+        so_lines, totals, vat_rate = await self._priced_lines(tenant_id, SalesOrderLine, lines)
         so = SalesOrder(
             tenant_id=tenant_id, so_number=await self.repo.number(tenant_id, "sales_order", "SO"),
             customer_id=customer_id, branch_id=branch_id, location_id=location_id,
             salesperson_id=salesperson_id, quotation_id=quotation_id, currency=currency,
             payment_terms=payment_terms, delivery_terms=delivery_terms, status=S.SO_DRAFT,
-            notes=notes, created_by=user_id, **totals,
+            notes=notes, created_by=user_id, vat_rate=vat_rate, **totals,
         )
         so.lines = so_lines
         self.repo.session.add(so)
@@ -305,13 +315,19 @@ class SalesService:
             ref = price_by_product.get(product_id)
             unit = _d(ref.unit_price) if ref else Decimal("0")
             disc = _d(ref.discount_pct) if ref else Decimal("0")
-            tax = _d(ref.tax_pct) if ref else Decimal("0")
-            lt = pricing.line_total(qty, unit, disc, tax)
+            # Inherit the VAT treatment + rate FROZEN on the sales-order line, so the
+            # quote -> SO -> invoice chain applies the same VAT (never re-derived).
+            treatment = pricing.normalise_treatment(getattr(ref, "vat_treatment", pricing.EXCLUSIVE))
+            vat_rate = _d(getattr(ref, "vat_rate", 0)) if ref else Decimal("0")
+            vat_pct = vat_rate * Decimal("100")
+            a = pricing.line_amounts(qty, unit, disc, vat_pct, treatment)
             inv_lines.append(InvoiceLine(
                 tenant_id=tenant_id, product_id=product_id, description=ref.description if ref else None,
-                qty=qty, unit_price=unit, discount_pct=disc, tax_pct=tax, line_total=lt,
+                qty=qty, unit_price=unit, discount_pct=disc, tax_pct=vat_pct, line_total=a["line_total"],
+                net_amount=a["net"], vat_amount=a["vat"], vat_treatment=treatment, vat_rate=vat_rate,
             ))
-            totals_in.append({"qty": _f(qty), "unit_price": _f(unit), "discount_pct": _f(disc), "tax_pct": _f(tax)})
+            totals_in.append({"qty": _f(qty), "unit_price": _f(unit), "discount_pct": _f(disc),
+                              "tax_pct": _f(vat_pct), "treatment": treatment})
         totals = pricing.document_totals(totals_in)
         # Snapshot the CURRENT tenant rate onto the invoice (its issue moment) and freeze
         # the billed ZMW per line + total. This is the PAYABLE the customer settles in ZMW.
@@ -321,7 +337,7 @@ class SalesService:
             sales_order_id=so.id, delivery_note_id=payload.delivery_note_id, customer_id=so.customer_id,
             branch_id=so.branch_id, currency=so.currency, payment_terms=payload.payment_terms or so.payment_terms,
             due_date=payload.due_date, status=S.INV_SENT, amount_paid=Decimal("0"),
-            created_by=user_id, fx_rate=fx_rate, **totals,
+            created_by=user_id, fx_rate=fx_rate, vat_rate=_d(getattr(so, "vat_rate", 0)), **totals,
         )
         invoice.lines = inv_lines
         invoice.grand_total_zmw = self._freeze_line_zmw(fx_rate, inv_lines)
@@ -484,14 +500,18 @@ class SalesService:
         # A bike is priced DIRECTLY in the tenant's billing currency (unlike spare parts,
         # which are held in USD and converted). So the price IS the amount the customer pays
         # — no FX conversion. The invoice's payable equals the price; fx is a no-op (1).
+        # VAT is INCLUSIVE for motorcycles: the price already contains VAT, so we EXTRACT it
+        # (net = price / (1 + rate)) rather than add it — the customer still pays `price`.
         currency = await self.repo.base_currency(tenant_id)
+        vat_rate = await self.repo.current_vat_rate(tenant_id)
+        amt = pricing.line_amounts(1, price, 0, vat_rate * Decimal("100"), pricing.INCLUSIVE)
         invoice = Invoice(
             tenant_id=tenant_id, invoice_number=await self.repo.number(tenant_id, "invoice", "INV"),
             sales_order_id=None, delivery_note_id=None, customer_id=customer_id,
             branch_id=payload.branch_id or unit.branch_id, currency=currency,
             payment_terms="pos", status=S.INV_SENT, subtotal=price, discount_total=Decimal("0"),
-            tax_total=Decimal("0"), grand_total=price, fx_rate=Decimal("1"), grand_total_zmw=price,
-            amount_paid=Decimal("0"), created_by=user_id,
+            net_total=amt["net"], tax_total=amt["vat"], grand_total=price, vat_rate=vat_rate,
+            fx_rate=Decimal("1"), grand_total_zmw=price, amount_paid=Decimal("0"), created_by=user_id,
         )
         self.repo.session.add(invoice)
         await self.repo.session.flush()
@@ -563,22 +583,29 @@ class SalesService:
         price_index = await self.repo.invoice_line_index(ret.invoice_id) if ret.invoice_id else {}
         cn_lines: list[CreditNoteLine] = []
         totals_in = []
+        cn_vat_rate = Decimal("0")
         for rl in ret.lines:
             ref = price_index.get(rl.product_id)
             unit = _d(ref.unit_price) if ref else Decimal("0")
             disc = _d(ref.discount_pct) if ref else Decimal("0")
-            tax = _d(ref.tax_pct) if ref else Decimal("0")
-            lt = pricing.line_total(rl.qty, unit, disc, tax)
+            # Inherit the VAT treatment + rate frozen on the invoice line being credited.
+            treatment = pricing.normalise_treatment(getattr(ref, "vat_treatment", pricing.EXCLUSIVE))
+            vat_rate = _d(getattr(ref, "vat_rate", 0)) if ref else Decimal("0")
+            cn_vat_rate = vat_rate or cn_vat_rate
+            a = pricing.line_amounts(rl.qty, unit, disc, vat_rate * Decimal("100"), treatment)
             cn_lines.append(CreditNoteLine(
                 tenant_id=tenant_id, product_id=rl.product_id, description=ref.description if ref else None,
-                qty=_d(rl.qty), unit_price=unit, discount_pct=disc, tax_pct=tax, line_total=lt,
+                qty=_d(rl.qty), unit_price=unit, discount_pct=disc, tax_pct=vat_rate * Decimal("100"),
+                line_total=a["line_total"], net_amount=a["net"], vat_amount=a["vat"],
+                vat_treatment=treatment, vat_rate=vat_rate,
             ))
-            totals_in.append({"qty": _f(rl.qty), "unit_price": _f(unit), "discount_pct": _f(disc), "tax_pct": _f(tax)})
+            totals_in.append({"qty": _f(rl.qty), "unit_price": _f(unit), "discount_pct": _f(disc),
+                              "tax_pct": _f(vat_rate * Decimal("100")), "treatment": treatment})
         totals = pricing.document_totals(totals_in)
         cn = CreditNote(
             tenant_id=tenant_id, credit_note_number=await self.repo.number(tenant_id, "credit_note", "CN"),
             invoice_id=ret.invoice_id, return_id=ret.id, customer_id=ret.customer_id,
-            branch_id=ret.branch_id, status=S.CN_DRAFT, created_by=user_id, **totals,
+            branch_id=ret.branch_id, status=S.CN_DRAFT, created_by=user_id, vat_rate=cn_vat_rate, **totals,
         )
         cn.lines = cn_lines
         self.repo.session.add(cn)
@@ -714,19 +741,29 @@ class SalesService:
         return _d(invoice.grand_total_zmw) - _d(invoice.amount_paid) - cls._credit_zmw(invoice)
 
     async def _priced_lines(self, tenant_id, line_model, lines: list[PricedLineIn]):
-        prices = await self.repo.product_prices([ln.product_id for ln in lines])
+        """Build product (spare-part) document lines with VAT applied by EACH product's
+        treatment at the tenant's CURRENT rate (frozen onto the line). Returns
+        (objs, totals, vat_rate)."""
+        ids = [ln.product_id for ln in lines]
+        prices = await self.repo.product_prices(ids)
+        treatments = await self.repo.product_vat(ids)
+        vat_rate = await self.repo.current_vat_rate(tenant_id)   # fraction (0.16)
+        vat_pct = vat_rate * Decimal("100")                      # pricing works in percent
         objs, totals_in = [], []
         for ln in lines:
             unit = _d(ln.unit_price) if ln.unit_price is not None else prices.get(ln.product_id, Decimal("0"))
-            lt = pricing.line_total(ln.qty, unit, ln.discount_pct, ln.tax_pct)
+            treatment = pricing.normalise_treatment(treatments.get(ln.product_id, pricing.EXCLUSIVE))
+            a = pricing.line_amounts(ln.qty, unit, ln.discount_pct, vat_pct, treatment)
             objs.append(line_model(
                 tenant_id=tenant_id, product_id=ln.product_id, description=ln.description,
                 qty=_d(ln.qty), unit_price=unit, discount_pct=_d(ln.discount_pct),
-                tax_pct=_d(ln.tax_pct), line_total=lt,
+                tax_pct=vat_pct, line_total=a["line_total"], net_amount=a["net"],
+                vat_amount=a["vat"], vat_treatment=treatment, vat_rate=vat_rate,
             ))
             totals_in.append({"qty": ln.qty, "unit_price": _f(unit),
-                              "discount_pct": ln.discount_pct, "tax_pct": ln.tax_pct})
-        return objs, pricing.document_totals(totals_in)
+                              "discount_pct": ln.discount_pct, "tax_pct": _f(vat_pct),
+                              "treatment": treatment})
+        return objs, pricing.document_totals(totals_in), vat_rate
 
     async def _require_customer(self, customer_id: uuid.UUID) -> None:
         if await self.repo.get_customer(customer_id) is None:
@@ -756,7 +793,7 @@ class SalesService:
                 id=ln.id, product_id=ln.product_id, sku=sku, name=name, description=ln.description,
                 qty=_f(ln.qty), unit_price=_f(ln.unit_price), discount_pct=_f(ln.discount_pct),
                 tax_pct=_f(ln.tax_pct), line_total=_f(ln.line_total),
-                line_total_zmw=_f(getattr(ln, "line_total_zmw", 0)),
+                line_total_zmw=_f(getattr(ln, "line_total_zmw", 0)), **_vat_line_kwargs(ln),
             ))
         return out
 
@@ -768,7 +805,8 @@ class SalesService:
             customer_name=cust.get(q.customer_id), branch_id=q.branch_id, branch_name=br.get(q.branch_id),
             salesperson_id=q.salesperson_id, status=q.status, currency=q.currency,
             valid_until=q.valid_until, notes=q.notes, subtotal=_f(q.subtotal),
-            discount_total=_f(q.discount_total), tax_total=_f(q.tax_total), grand_total=_f(q.grand_total),
+            discount_total=_f(q.discount_total), net_total=_f(q.net_total), tax_total=_f(q.tax_total),
+            grand_total=_f(q.grand_total), vat_rate=_f(q.vat_rate),
             fx_rate=_f(q.fx_rate), grand_total_zmw=_f(q.grand_total_zmw),
             created_at=q.created_at, lines=await self._priced_line_outs(q.lines),
         )
@@ -786,7 +824,7 @@ class SalesService:
                 id=ln.id, product_id=ln.product_id, sku=sku, name=name, description=ln.description,
                 qty=_f(ln.qty), unit_price=_f(ln.unit_price), discount_pct=_f(ln.discount_pct),
                 tax_pct=_f(ln.tax_pct), line_total=_f(ln.line_total), reserved_qty=_f(ln.reserved_qty),
-                delivered_qty=_f(ln.delivered_qty), outstanding_qty=outstanding,
+                delivered_qty=_f(ln.delivered_qty), outstanding_qty=outstanding, **_vat_line_kwargs(ln),
             ))
         return SalesOrderOut(
             id=so.id, so_number=so.so_number, customer_id=so.customer_id,
@@ -796,7 +834,8 @@ class SalesService:
             quote_number=await self.repo.quote_number(so.quotation_id), status=so.status,
             currency=so.currency, payment_terms=so.payment_terms, delivery_terms=so.delivery_terms,
             notes=so.notes, subtotal=_f(so.subtotal), discount_total=_f(so.discount_total),
-            tax_total=_f(so.tax_total), grand_total=_f(so.grand_total), created_at=so.created_at, lines=lines,
+            net_total=_f(so.net_total), tax_total=_f(so.tax_total), grand_total=_f(so.grand_total),
+            vat_rate=_f(so.vat_rate), created_at=so.created_at, lines=lines,
         )
 
     async def _delivery_out(self, note: DeliveryNote) -> DeliveryNoteOut:
@@ -826,8 +865,8 @@ class SalesService:
             customer_name=cust.get(inv.customer_id), branch_id=inv.branch_id, branch_name=br.get(inv.branch_id),
             status=inv.status, currency=inv.currency, invoice_date=inv.invoice_date, due_date=inv.due_date,
             payment_terms=inv.payment_terms, subtotal=_f(inv.subtotal), discount_total=_f(inv.discount_total),
-            tax_total=_f(inv.tax_total), grand_total=_f(inv.grand_total),
-            fx_rate=_f(inv.fx_rate), grand_total_zmw=_f(inv.grand_total_zmw),
+            net_total=_f(inv.net_total), tax_total=_f(inv.tax_total), grand_total=_f(inv.grand_total),
+            vat_rate=_f(inv.vat_rate), fx_rate=_f(inv.fx_rate), grand_total_zmw=_f(inv.grand_total_zmw),
             amount_paid=_f(inv.amount_paid), credit_total=_f(inv.credit_total),
             balance=_f(self._invoice_balance_zmw(inv)), created_at=inv.created_at,
             lines=await self._priced_line_outs(inv.lines),
@@ -863,7 +902,8 @@ class SalesService:
             id=cn.id, credit_note_number=cn.credit_note_number, invoice_id=cn.invoice_id, invoice_number=inv_no,
             return_id=cn.return_id, customer_id=cn.customer_id, customer_name=cust.get(cn.customer_id),
             branch_id=cn.branch_id, status=cn.status, subtotal=_f(cn.subtotal), discount_total=_f(cn.discount_total),
-            tax_total=_f(cn.tax_total), grand_total=_f(cn.grand_total), notes=cn.notes, applied_at=cn.applied_at,
+            net_total=_f(cn.net_total), tax_total=_f(cn.tax_total), grand_total=_f(cn.grand_total),
+            vat_rate=_f(cn.vat_rate), notes=cn.notes, applied_at=cn.applied_at,
             created_at=cn.created_at, lines=await self._priced_line_outs(cn.lines),
         )
 

@@ -90,6 +90,9 @@ class Product(Base):
     safety_stock: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Physical storage location (bin / shelf / aisle) so staff can find the part.
     location: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # How VAT applies to this product: 'exclusive' (add on top) or 'inclusive' (price
+    # already contains VAT). Spare parts default exclusive. See sales/domain/pricing.py.
+    vat_treatment: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'exclusive'"))
     # --- Product Intelligence Profile (migration 0009) ---
     # Consumed by the forecast, risk, procurement, intelligence, and AI engines.
     commodity_tags: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))

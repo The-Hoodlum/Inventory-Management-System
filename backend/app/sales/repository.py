@@ -71,6 +71,21 @@ class SalesRepository:
         cur = await self.session.scalar(select(Tenant.base_currency).where(Tenant.id == tenant_id))
         return cur or "USD"
 
+    async def current_vat_rate(self, tenant_id: uuid.UUID) -> Decimal:
+        """The tenant's CURRENT VAT rate (fraction, 0.16 = 16%), snapshotted onto a
+        document at creation so historical VAT never moves when the rate is changed."""
+        rate = await self.session.scalar(select(Tenant.vat_rate).where(Tenant.id == tenant_id))
+        return Decimal(rate) if rate is not None else Decimal("0")
+
+    async def product_vat(self, ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+        """product_id -> VAT treatment ('exclusive'/'inclusive'); default exclusive."""
+        if not ids:
+            return {}
+        res = await self.session.execute(
+            select(Product.id, Product.vat_treatment).where(Product.id.in_(ids))
+        )
+        return {pid: (t or "exclusive") for pid, t in res.all()}
+
     async def linked_bike(self, invoice_id: uuid.UUID):
         """The serialized bike sold on this invoice (chassis, model name, price), or None.
         Uses raw table refs to stay decoupled from the motorcycles ORM (see ``_moto_units``)."""

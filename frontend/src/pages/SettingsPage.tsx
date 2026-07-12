@@ -32,6 +32,7 @@ export default function SettingsPage() {
         industry: f.industry,
         default_currency: f.default_currency,
         fx_rate: f.fx_rate,
+        vat_rate: f.vat_rate,
         country: f.country,
         timezone: f.timezone,
         logo_url: f.logo_url,
@@ -109,6 +110,14 @@ export default function SettingsPage() {
               value={form.fx_rate} onChange={(e) => set("fx_rate", e.target.value)} />
             <span className="mt-1 block text-xs text-slate-400">
               Current rate. Applied to new sales documents when issued; existing documents keep their frozen rate.
+            </span>
+          </Field>
+          <Field label="VAT rate (%)">
+            <input className={`${INPUT} w-full`} type="number" min="0" max="100" step="0.01" disabled={!canManage}
+              value={form.vat_rate ? String(Number(form.vat_rate) * 100) : "0"}
+              onChange={(e) => set("vat_rate", String((Number(e.target.value) || 0) / 100))} />
+            <span className="mt-1 block text-xs text-slate-400">
+              Parts add VAT on top of the net price; motorcycle prices are VAT-inclusive. Applied to new documents; existing keep their frozen rate.
             </span>
           </Field>
           <Field label="Country">

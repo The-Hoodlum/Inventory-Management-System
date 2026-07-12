@@ -28,8 +28,12 @@ class PricedLineOut(BaseModel):
     unit_price: float          # in USD (source of truth)
     discount_pct: float
     tax_pct: float
-    line_total: float          # in USD
+    line_total: float          # in USD — the payable (VAT-inclusive gross)
     line_total_zmw: float = 0.0  # billed ZMW at the document's frozen rate (0 where N/A)
+    net_amount: float = 0.0      # VAT-exclusive net, frozen
+    vat_amount: float = 0.0      # VAT component, frozen
+    vat_treatment: str = "exclusive"
+    vat_rate: float = 0.0        # rate applied, frozen (fraction: 0.16 = 16%)
 
 
 class SalesOrderLineOut(PricedLineOut):
@@ -57,8 +61,10 @@ class _DocOut(BaseModel):
     currency: str | None = None
     subtotal: float = 0.0
     discount_total: float = 0.0
-    tax_total: float = 0.0
-    grand_total: float = 0.0
+    net_total: float = 0.0       # sum of line net (VAT-exclusive), frozen
+    tax_total: float = 0.0       # sum of line VAT, frozen
+    grand_total: float = 0.0     # sum of line payable (VAT-inclusive gross)
+    vat_rate: float = 0.0        # rate applied, frozen (fraction: 0.16 = 16%)
     created_at: dt.datetime
 
 
@@ -301,8 +307,10 @@ class CreditNoteOut(BaseModel):
     status: str
     subtotal: float = 0.0
     discount_total: float = 0.0
+    net_total: float = 0.0
     tax_total: float = 0.0
     grand_total: float = 0.0
+    vat_rate: float = 0.0
     notes: str | None = None
     applied_at: dt.datetime | None = None
     created_at: dt.datetime
