@@ -98,14 +98,16 @@ async def test_full_sales_flow(client):
     product_id, location_id = await _find_stocked(client, admin_h, min_qty=10)
     inv0 = await _inv(client, admin_h, product_id, location_id)
 
-    # Quotation
+    # Quotation. VAT is neutralised in this flow test (see _enable_sales); VAT itself is
+    # covered by test_vat_applied_and_frozen_on_parts_sale. Per-line tax_pct is ignored —
+    # VAT is a tenant setting applied by product treatment.
     r = await client.post("/api/v1/sales/quotations", headers=admin_h, json={
         "customer_id": customer_id,
-        "lines": [{"product_id": product_id, "qty": 5, "unit_price": 100, "tax_pct": 10}],
+        "lines": [{"product_id": product_id, "qty": 5, "unit_price": 100}],
     })
     assert r.status_code == 201, r.text
     quote = r.json()
-    assert quote["grand_total"] == 550.0  # 5*100 + 10% tax
+    assert quote["grand_total"] == 500.0  # 5*100, VAT neutralised
 
     # Convert -> sales order
     r = await client.post(f"/api/v1/sales/quotations/{quote['id']}/convert", headers=admin_h,
@@ -142,18 +144,18 @@ async def test_full_sales_flow(client):
         "delivery_note_id": delivery["id"]})
     assert r.status_code == 201, r.text
     invoice = r.json()
-    assert invoice["grand_total"] == 550.0 and invoice["balance"] == 550.0
+    assert invoice["grand_total"] == 500.0 and invoice["balance"] == 500.0
     inv3 = await _inv(client, admin_h, product_id, location_id)
     assert inv3["qty_on_hand"] == inv2["qty_on_hand"]  # invoice never moves stock
 
     # Split payment -> receipt, invoice paid
     r = await client.post("/api/v1/sales/payments", headers=admin_h, json={
         "invoice_id": invoice["id"],
-        "payments": [{"method": "cash", "amount": 300}, {"method": "card", "amount": 250}],
+        "payments": [{"method": "cash", "amount": 300}, {"method": "card", "amount": 200}],
     })
     assert r.status_code == 201, r.text
     receipt = r.json()
-    assert receipt["amount_paid"] == 550.0 and receipt["balance"] == 0.0
+    assert receipt["amount_paid"] == 500.0 and receipt["balance"] == 0.0
     assert len(receipt["methods"]) == 2
     r = await client.get(f"/api/v1/sales/invoices/{invoice['id']}", headers=admin_h)
     assert r.json()["status"] == "paid" and r.json()["balance"] == 0.0
