@@ -27,6 +27,7 @@ const VIEW: Record<string, { path: string; label: string }> = {
   stock_replay: { path: "/inventory", label: "View stock" },
   suppliers: { path: "/suppliers", label: "View suppliers" },
   warehouses: { path: "/warehouses", label: "View warehouses" },
+  parts_sales_log: { path: "/sales-log", label: "View sales log" },
 };
 
 function errMessage(e: unknown): string {

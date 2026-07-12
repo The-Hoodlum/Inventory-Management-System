@@ -78,6 +78,7 @@ services:
       - ./database/sql/motorcycle_country_of_origin.sql:/docker-entrypoint-initdb.d/45_motorcycle_country_of_origin.sql:ro
       - ./database/sql/product_location.sql:/docker-entrypoint-initdb.d/46_product_location.sql:ro
       - ./database/sql/motorcycle_service.sql:/docker-entrypoint-initdb.d/47_motorcycle_service.sql:ro
+      - ./database/sql/parts_sales.sql:/docker-entrypoint-initdb.d/48_parts_sales.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-inventory}"]
       interval: 5s

@@ -38,7 +38,7 @@ MODULES=(
   stock_transfer_ledger customers sales_documents sales_returns motorcycle_units
   motorcycle_import dispatch_notes issuances customer_deliveries reconstruction
   product_wholesale_price user_branch_access order_request_transfer_permission
-  bike_issues assembly_targets motorcycle_country_of_origin product_location motorcycle_service
+  bike_issues assembly_targets motorcycle_country_of_origin product_location motorcycle_service parts_sales
 )
 for m in "${MODULES[@]}"; do
   echo "[init] module: $m"
