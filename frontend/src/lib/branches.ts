@@ -20,6 +20,8 @@ export const branchesApi = {
   },
   create: (body: BranchInput) => api.post<Branch>("/branches", body),
   update: (id: string, body: Partial<BranchInput>) => api.patch<Branch>(`/branches/${id}`, body),
+  // Guarded server-side: refused (409 with a clear message) while anything references it.
+  delete: (id: string) => api.del<void>(`/branches/${id}`),
 };
 
 export type { Branch };

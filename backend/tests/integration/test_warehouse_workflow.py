@@ -80,11 +80,17 @@ async def test_warehouse_manager_workflow(client):
     assert r.status_code == 201, r.text
     supplier_id = r.json()["id"]
 
-    # 2) Create two warehouses (so we can transfer between them).
-    r = await client.post("/api/v1/warehouses", headers=h, json={"code": _uniq("WH"), "name": "WF Main"})
+    # 2) Create two warehouses (so we can transfer between them). A location needs a
+    #    parent branch, so create one first.
+    br = await client.post("/api/v1/branches", headers=h, json={"code": _uniq("BR"), "name": _uniq("Branch")})
+    assert br.status_code == 201, br.text
+    branch_id = br.json()["id"]
+    r = await client.post("/api/v1/warehouses", headers=h,
+                          json={"code": _uniq("WH"), "name": "WF Main", "branch_id": branch_id})
     assert r.status_code == 201, r.text
     wh_a = r.json()["id"]
-    r = await client.post("/api/v1/warehouses", headers=h, json={"code": _uniq("WH"), "name": "WF Second"})
+    r = await client.post("/api/v1/warehouses", headers=h,
+                          json={"code": _uniq("WH"), "name": "WF Second", "branch_id": branch_id})
     assert r.status_code == 201, r.text
     wh_b = r.json()["id"]
 

@@ -74,6 +74,8 @@ export default function BranchesPage() {
 
 function BranchModal({ item, onClose }: { item?: Branch; onClose: () => void }) {
   const qc = useQueryClient();
+  const { hasPermission } = useAuth();
+  const canManage = hasPermission("warehouse.manage");
   const [name, setName] = useState(item?.name ?? "");
   const [code, setCode] = useState(item?.code ?? "");
   const [active, setActive] = useState(item?.is_active ?? true);
@@ -92,17 +94,47 @@ function BranchModal({ item, onClose }: { item?: Branch; onClose: () => void }) 
     onError: (e) => setErr(e instanceof ApiError ? e.message : "Could not save the branch."),
   });
 
+  const del = useMutation({
+    mutationFn: () => branchesApi.delete(item!.id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["branches-admin"] });
+      void qc.invalidateQueries({ queryKey: ["ref", "branches"] });
+      onClose();
+    },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : "Could not delete the branch."),
+  });
+  const busy = save.isPending || del.isPending;
+  const onDelete = () => {
+    if (window.confirm(`Delete branch "${item?.name}"? This can't be undone.`)) {
+      setErr(null);
+      del.mutate();
+    }
+  };
+
   return (
     <Modal title={item ? "Edit branch" : "New branch"} size="md" onClose={onClose} footer={
-      <>
-        <Button variant="secondary" onClick={onClose}>Cancel</Button>
-        <Button disabled={!name.trim() || save.isPending} onClick={() => { setErr(null); save.mutate(); }}>
-          {save.isPending ? "Saving…" : "Save"}
-        </Button>
-      </>
+      <div className="flex w-full items-center justify-between">
+        <div>
+          {item && canManage && (
+            <Button variant="ghost" className="text-red-600 hover:bg-red-50" disabled={busy} onClick={onDelete}>
+              Delete
+            </Button>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button disabled={!name.trim() || busy} onClick={() => { setErr(null); save.mutate(); }}>
+            {save.isPending ? "Saving…" : "Save"}
+          </Button>
+        </div>
+      </div>
     }>
       <div className="space-y-3">
         {err && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
+        <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+          A branch is a top-level site (e.g. Lusaka, Ndola). Locations/warehouses live inside a
+          branch — add those under Warehouses, not here.
+        </p>
         <Field label="Name *">
           <input className={INPUT} value={name} onChange={(e) => setName(e.target.value)} autoFocus
             placeholder="e.g. Lusaka" />

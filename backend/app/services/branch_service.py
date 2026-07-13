@@ -72,12 +72,24 @@ class BranchService:
     ) -> None:
         branch = await self.get(branch_id)
         bid = branch.id
+        name = branch.name  # capture now: a failed delete aborts the txn, so ORM attribute
+        #                     access afterwards would raise instead of returning the name.
+        # Refuse (and say what to move first) if ANYTHING still references the branch —
+        # locations, units, documents, user assignments — so nothing is orphaned or
+        # silently un-linked. Deletion stays the user's own explicit action; no data wipe.
+        blockers = await self.branches.reference_blockers(branch_id)
+        if blockers:
+            summary = ", ".join(f"{count} {label}" for label, count in blockers)
+            raise ConflictError(
+                f"Cannot delete branch '{name}' — it is still referenced by {summary}. "
+                "Move or reassign these first, or deactivate the branch instead (set it inactive)."
+            )
         try:
             await self.branches.delete(branch)
-        except IntegrityError as exc:
+        except IntegrityError as exc:  # backstop for any reference not caught above
             raise ConflictError(
-                "Cannot delete a branch that still owns locations; reassign or remove "
-                "its locations first, or deactivate it (set is_active = false)."
+                f"Cannot delete branch '{name}'; something still references it. "
+                "Reassign or remove those first, or deactivate it instead."
             ) from exc
         await self.audit.add(
             tenant_id=tenant_id, user_id=user_id, action="delete", entity_type="branch",

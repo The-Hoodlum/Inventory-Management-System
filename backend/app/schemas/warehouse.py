@@ -16,7 +16,10 @@ class WarehouseBase(BaseModel):
 
 
 class WarehouseCreate(WarehouseBase):
-    pass
+    # A location (warehouse/room/showroom/depot) lives INSIDE a branch — the parent branch
+    # is required at creation so a location can never be created as, or mistaken for, a
+    # branch. (Bulk imports build Warehouse rows directly and are unaffected.)
+    branch_id: uuid.UUID
 
 
 class WarehouseUpdate(BaseModel):
