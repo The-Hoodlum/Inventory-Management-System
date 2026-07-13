@@ -134,7 +134,7 @@ export default function OrderRequestsPage() {
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
                   <th className="px-4 py-2.5 font-medium">Request #</th>
-                  <th className="px-4 py-2.5 font-medium">Branch</th>
+                  <th className="px-4 py-2.5 font-medium">Location</th>
                   {canApprove && <th className="px-4 py-2.5 font-medium">Requested by</th>}
                   <th className="px-4 py-2.5 font-medium">Purpose</th>
                   <th className="px-4 py-2.5 text-right font-medium">Items</th>
@@ -150,7 +150,12 @@ export default function OrderRequestsPage() {
                     className="cursor-pointer hover:bg-slate-50"
                   >
                     <td className="px-4 py-3 font-mono text-[13px] font-medium text-slate-800">{r.request_number}</td>
-                    <td className="px-4 py-3 text-slate-600">{r.branch_name ?? "—"}</td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {r.source_location_name ?? r.branch_name ?? "—"}
+                      {r.source_branch_name && (
+                        <span className="block text-xs text-slate-400">{r.source_branch_name}</span>
+                      )}
+                    </td>
                     {canApprove && <td className="px-4 py-3 text-slate-600">{r.requester_name ?? "—"}</td>}
                     <td className="px-4 py-3 text-slate-600">{titleCase(r.purpose)}</td>
                     <td className="px-4 py-3 text-right font-mono text-slate-600">{r.lines.length}</td>

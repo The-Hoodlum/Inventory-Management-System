@@ -82,6 +82,8 @@ export function WarehouseFormModal({
   const submit = () => {
     if (!form.code.trim()) return setErr("Code is required.");
     if (!form.name.trim()) return setErr("Name is required.");
+    if (mode === "create" && !form.branch_id)
+      return setErr("Choose the branch this location belongs to.");
     save.mutate();
   };
 
@@ -138,13 +140,17 @@ export function WarehouseFormModal({
             onChange={(e) => set("address", e.target.value)}
           />
         </Field>
-        <Field label="Branch" hint="The site this location belongs to">
+        <Field
+          label="Parent branch"
+          required={mode === "create"}
+          hint="Every location lives inside a branch (e.g. Lusaka, Ndola). A location is not itself a branch."
+        >
           <select
             className={inputClass}
             value={form.branch_id}
             onChange={(e) => set("branch_id", e.target.value)}
           >
-            <option value="">— unassigned —</option>
+            <option value="">— choose a branch —</option>
             {branches.list.map((b) => (
               <option key={b.id} value={b.id}>
                 {b.name}
