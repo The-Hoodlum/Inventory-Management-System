@@ -137,17 +137,19 @@ SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code IN
 WHERE r.is_system AND r.name = 'Branch Manager'
 ON CONFLICT DO NOTHING;
 
--- Salesperson: customers, quotations, sales orders.
+-- Salesperson: customers, quotations, sales orders, and invoicing (quote -> invoice).
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code IN
-    ('customer.read','customer.manage','sales.read','sales.quote','sales.order')
+    ('customer.read','customer.manage','sales.read','sales.quote','sales.order','sales.invoice')
 WHERE r.is_system AND r.name = 'Salesperson'
 ON CONFLICT DO NOTHING;
 
--- Cashier: POS, payments, receipts, read.
+-- Cashier: POS, payments, receipts, read, plus create quotations + invoices for a customer
+-- (bikes by chassis / parts by SKU). The one-step quote -> invoice orchestrates the order
+-- internally, so the cashier needs sales.quote + sales.invoice (not sales.order).
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code IN
-    ('customer.read','sales.read','pos.use','sales.payment')
+    ('customer.read','sales.read','pos.use','sales.payment','sales.quote','sales.invoice')
 WHERE r.is_system AND r.name = 'Cashier'
 ON CONFLICT DO NOTHING;
 

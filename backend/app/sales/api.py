@@ -38,6 +38,7 @@ from app.sales.schemas import (
     PosResult,
     QuotationConvertResult,
     QuotationCreate,
+    QuotationInvoiceResult,
     QuotationOut,
     ReceiptOut,
     RejectBody,
@@ -135,6 +136,27 @@ async def convert_quotation(
     return await svc.convert_quotation(
         tenant_id=user.tenant_id, user_id=user.id, quote_id=quote_id,
         payload=payload, motorcycles=motorcycles,
+        allowed_branch_ids=None if user.all_branches else user.branch_ids,
+    )
+
+
+@router.post("/quotations/{quote_id}/invoice", response_model=QuotationInvoiceResult, status_code=201)
+async def invoice_quotation(
+    quote_id: uuid.UUID,
+    payload: ConvertToOrder,
+    user: CurrentUser = Depends(require_permission(P.SALES_INVOICE)),
+    svc: SalesService = Depends(get_sales_service),
+    motorcycles: MotorcycleService = Depends(get_motorcycle_service),
+) -> QuotationInvoiceResult:
+    """One-step quote -> invoice: parts become an invoice (via a confirmed order), bikes
+    become bike invoices. Lets a cashier bill a customer without re-entering the lines."""
+    # Branch isolation: a scoped user may only sell parts from a location in their branch(es).
+    if payload.location_id is not None:
+        await resolve_warehouse_scope(user, payload.location_id, svc.inventory.warehouses)
+    return await svc.invoice_quotation(
+        tenant_id=user.tenant_id, user_id=user.id, quote_id=quote_id,
+        payload=payload, motorcycles=motorcycles,
+        allowed_branch_ids=None if user.all_branches else user.branch_ids,
     )
 
 

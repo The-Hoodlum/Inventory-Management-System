@@ -253,6 +253,12 @@ export interface QuotationConvertResult {
   bike_sales: BikeSaleResult[];
 }
 
+export interface QuotationInvoiceResult {
+  quotation_id: string;
+  invoice: Invoice | null;   // the parts invoice (null for a bikes-only quotation)
+  bike_sales: BikeSaleResult[];
+}
+
 async function downloadPdf(path: string, filename: string): Promise<void> {
   const token = tokenStore.getAccess();
   const res = await fetch(`${BASE_URL}${path}`, {
@@ -280,6 +286,9 @@ export const salesApi = {
   sendQuotation: (id: string) => api.post<Quotation>(`/sales/quotations/${id}/send`),
   convertQuotation: (id: string, location_id: string | null) =>
     api.post<QuotationConvertResult>(`/sales/quotations/${id}/convert`, { location_id: location_id || null }),
+  // One-step: parts -> an invoice (via a confirmed order), bikes -> bike invoices.
+  invoiceQuotation: (id: string, location_id: string | null) =>
+    api.post<QuotationInvoiceResult>(`/sales/quotations/${id}/invoice`, { location_id: location_id || null }),
 
   // sales orders
   listOrders: (status = "") => api.get<SalesOrder[]>(`/sales/orders${status ? `?status=${status}` : ""}`),
