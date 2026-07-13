@@ -13,7 +13,7 @@ from decimal import Decimal
 
 from sqlalchemy import select
 
-from app.core.exceptions import BusinessRuleError, NotFoundError
+from app.core.exceptions import BusinessRuleError, NotFoundError, PermissionDeniedError
 from app.models import (
     CreditNote,
     CreditNoteLine,
@@ -558,12 +558,17 @@ class SalesService:
     # ============================= sell a bike ========================== #
     async def sell_bike(
         self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, payload: BikeSaleIn, motorcycles,
+        allowed_branch_ids: frozenset[uuid.UUID] | None = None,
     ) -> BikeSaleResult:
         """Sell ONE serialized motorcycle from POS / Sales, all in one transaction:
         create a bike-only invoice (no fungible stock line), mark the unit sold + link it
         to the invoice (revenue lives on the unit's price_charged, as the Sales Log
         expects), then optionally settle the payment(s) into a receipt. Any failure — e.g.
-        the unit isn't sellable — rolls the whole thing back, leaving no dangling invoice."""
+        the unit isn't sellable — rolls the whole thing back, leaving no dangling invoice.
+
+        ``allowed_branch_ids`` (None = unrestricted; owners/admins) enforces branch
+        isolation: a scoped seller may only sell a unit located in — and book it to — one of
+        their branches."""
         from app.motorcycles.schemas import SellIn
 
         customer_id = payload.customer_id or await self._walkin_customer(tenant_id, user_id)
@@ -571,6 +576,13 @@ class SalesService:
             await self._require_customer(payload.customer_id)
 
         unit = await motorcycles.get_unit(payload.unit_id)  # UnitOut (raises if missing)
+        # Branch isolation — checked before sellability so a foreign-branch unit is a 403,
+        # never a leak of its status. Both the unit's branch and any requested branch must
+        # be in scope.
+        if allowed_branch_ids is not None:
+            for b in (unit.branch_id, payload.branch_id):
+                if b is not None and b not in allowed_branch_ids:
+                    raise PermissionDeniedError("You are not assigned to that branch.")
         if "sold" not in unit.allowed_next:
             raise BusinessRuleError(
                 f"Bike {unit.chassis_number} is {unit.status} and cannot be sold "

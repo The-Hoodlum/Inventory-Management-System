@@ -64,6 +64,14 @@ async def _admin_role_id(client, h) -> str:
     return admin["id"]
 
 
+async def _enable_sales(client, admin_h) -> None:
+    r = await client.get("/api/v1/tenant/settings", headers=admin_h)
+    flags = dict(r.json().get("feature_flags", {}))
+    flags.update({"sales_orders": True, "pos": True})
+    r = await client.put("/api/v1/tenant/settings", headers=admin_h, json={"feature_flags": flags})
+    assert r.status_code == 200, r.text
+
+
 # ------------------------------------------------------------------------- #
 async def test_branch_scoped_user_cannot_see_other_branch(client):
     admin = await _headers(client, ADMIN_EMAIL, ADMIN_PASSWORD)
@@ -101,6 +109,21 @@ async def test_branch_scoped_user_cannot_see_other_branch(client):
     both = (await client.get("/api/v1/motorcycles/units", headers=admin, params={"page_size": 200})).json()
     admin_ids = {it["id"] for it in both["items"]}
     assert lusaka_unit in admin_ids and solwezi_unit in admin_ids
+
+    # (4) WRITES are branch-scoped too — a scoped user can't sell into another branch.
+    await _enable_sales(client, admin)
+    # Bike-sale for a Solwezi unit -> 403 (scope checked before sellability).
+    r = await client.post("/api/v1/sales/bike-sale", headers=u,
+                          json={"unit_id": solwezi_unit, "price": 1000})
+    assert r.status_code == 403, r.text
+    assert "assigned" in r.text.lower()  # the branch check, not a permission/feature 403
+    # POS checkout at a Solwezi location -> 403 (never trust the client-supplied location).
+    r = await client.post("/api/v1/sales/pos/checkout", headers=u, json={
+        "location_id": solwezi_wh,
+        "lines": [{"product_id": str(uuid.uuid4()), "qty": 1, "unit_price": 1}],
+        "payments": [{"method": "cash", "amount": 1}]})
+    assert r.status_code == 403, r.text
+    assert "assigned" in r.text.lower()
 
 
 async def test_admin_can_update_a_users_branch_assignment(client):

@@ -13,6 +13,7 @@ from app.api.v1.deps import (
     require_feature,
     require_permission,
     resolve_branch_scope,
+    resolve_warehouse_scope,
 )
 from app.core.exceptions import BusinessRuleError
 from app.core.permissions import P
@@ -373,6 +374,9 @@ async def pos_checkout(
     user: CurrentUser = Depends(require_permission(P.POS_USE)),
     svc: SalesService = Depends(get_sales_service),
 ) -> PosResult:
+    # Branch isolation: a scoped cashier may only sell from a location inside their
+    # branch(es); a location elsewhere is rejected (never trust the client-supplied one).
+    await resolve_warehouse_scope(user, payload.location_id, svc.inventory.warehouses)
     return await svc.pos_checkout(tenant_id=user.tenant_id, user_id=user.id, payload=payload)
 
 
@@ -388,6 +392,8 @@ async def sell_bike(
     service, so the invoice + the unit's sold-state commit or roll back together."""
     return await svc.sell_bike(
         tenant_id=user.tenant_id, user_id=user.id, payload=payload, motorcycles=motorcycles,
+        # Branch isolation: a scoped seller may only sell a bike in one of their branches.
+        allowed_branch_ids=None if user.all_branches else user.branch_ids,
     )
 
 
