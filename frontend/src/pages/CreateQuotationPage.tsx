@@ -16,7 +16,7 @@ import { customersApi, useCustomers } from "@/lib/customers";
 import { formatMoney } from "@/lib/format";
 import { motorcyclesApi } from "@/lib/motorcycles";
 import { useWarehouses } from "@/lib/refdata";
-import { type Quotation, type QuotationConvertResult, salesApi } from "@/lib/sales";
+import { type Quotation, type QuotationConvertResult, type QuotationInvoiceResult, salesApi } from "@/lib/sales";
 import { tenantApi } from "@/lib/tenantSettings";
 
 const INPUT =
@@ -60,6 +60,7 @@ export default function CreateQuotationPage() {
   const [saved, setSaved] = useState<Quotation | null>(null);
   const [convertLoc, setConvertLoc] = useState("");
   const [convertMsg, setConvertMsg] = useState<string | null>(null);
+  const [invoiceResult, setInvoiceResult] = useState<QuotationInvoiceResult | null>(null);
 
   const term = search.trim();
   const searchQ = useQuery({
@@ -147,6 +148,23 @@ export default function CreateQuotationPage() {
     onError: (e) => setErr(e instanceof ApiError ? e.message : "Could not convert."),
   });
 
+  const toInvoice = useMutation({
+    mutationFn: () => salesApi.invoiceQuotation(
+      saved!.id, saved!.lines.some((l) => !l.is_bike) ? convertLoc : null),
+    onSuccess: (res: QuotationInvoiceResult) => {
+      void qc.invalidateQueries({ queryKey: ["sales"] });
+      setErr(null);
+      setInvoiceResult(res);
+    },
+    onError: (e) => setErr(e instanceof ApiError ? e.message : "Could not create the invoice."),
+  });
+  // Every invoice this conversion produced (the parts invoice + one per bike), for printing.
+  const invoiceDocs = invoiceResult
+    ? [...(invoiceResult.invoice ? [invoiceResult.invoice] : []), ...invoiceResult.bike_sales.map((b) => b.invoice)]
+    : [];
+  const needsLoc = !!saved && saved.lines.some((l) => !l.is_bike);
+  const convertBusy = convert.isPending || toInvoice.isPending;
+
   const customerValid = inlineNew ? newName.trim().length > 0 : customerId.length > 0;
   const canSave = customerValid && (lines.length > 0 || bikeLines.length > 0)
     && lines.every((l) => l.qty > 0) && bikeLines.every((b) => b.price > 0);
@@ -169,7 +187,7 @@ export default function CreateQuotationPage() {
             <Button variant="secondary" onClick={() => void salesApi.downloadQuotationPdf(saved.id, saved.quote_number)}>
               Print PDF
             </Button>
-            <Button variant="secondary" onClick={() => { setSaved(null); setLines([]); setBikeLines([]); setNotes(""); setConvertMsg(null); }}>
+            <Button variant="secondary" onClick={() => { setSaved(null); setLines([]); setBikeLines([]); setNotes(""); setConvertMsg(null); setInvoiceResult(null); }}>
               New quotation
             </Button>
             <Button variant="secondary" onClick={() => navigate("/sales")}>Go to Sales</Button>
@@ -177,27 +195,47 @@ export default function CreateQuotationPage() {
           <div className="border-t border-slate-200 pt-4">
             <div className="mb-1 text-sm font-medium text-slate-700">Convert without re-entry</div>
             <p className="mb-2 text-xs text-slate-500">
-              Part lines become a sales order (reserving stock at the chosen location); each bike line is sold now.
+              Turn this quotation into an invoice (parts are invoiced via a stock-reserving order;
+              each bike becomes its own invoice), or into a sales order to fulfil later.
             </p>
             {err && <div className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
-            {convertMsg ? (
+            {invoiceResult ? (
+              <div className="space-y-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                <div className="font-medium">Invoice(s) created — print and give to the customer:</div>
+                {invoiceDocs.map((inv) => (
+                  <div key={inv.id} className="flex items-center justify-between gap-2">
+                    <span className="font-mono">
+                      {inv.invoice_number} · {formatMoney(inv.grand_total_zmw || inv.grand_total, "ZMW")}
+                    </span>
+                    <Button variant="secondary" onClick={() => void salesApi.downloadInvoicePdf(inv.id, inv.invoice_number)}>
+                      Print
+                    </Button>
+                  </div>
+                ))}
+                <button className="underline" onClick={() => navigate("/sales")}>View in Sales →</button>
+              </div>
+            ) : convertMsg ? (
               <div className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
                 Converted: {convertMsg}. <button className="underline" onClick={() => navigate("/sales")}>View in Sales →</button>
               </div>
             ) : (
-              <div className="flex items-center gap-2">
-                {saved.lines.some((l) => !l.is_bike) && (
-                  <select className={`${INPUT} flex-1`} value={convertLoc} onChange={(e) => setConvertLoc(e.target.value)}>
+              <div className="space-y-2">
+                {needsLoc && (
+                  <select className={`${INPUT} w-full`} value={convertLoc} onChange={(e) => setConvertLoc(e.target.value)}>
                     <option value="">Select location (for parts)…</option>
                     {warehouses.list.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
                   </select>
                 )}
-                <Button
-                  disabled={convert.isPending || (saved.lines.some((l) => !l.is_bike) && !convertLoc)}
-                  onClick={() => { setErr(null); convert.mutate(); }}
-                >
-                  {convert.isPending ? "Converting…" : "Convert"}
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button className="flex-1 justify-center" disabled={convertBusy || (needsLoc && !convertLoc)}
+                    onClick={() => { setErr(null); toInvoice.mutate(); }}>
+                    {toInvoice.isPending ? "Invoicing…" : "Convert to invoice"}
+                  </Button>
+                  <Button variant="secondary" disabled={convertBusy || (needsLoc && !convertLoc)}
+                    onClick={() => { setErr(null); convert.mutate(); }}>
+                    {convert.isPending ? "Converting…" : "To sales order"}
+                  </Button>
+                </div>
               </div>
             )}
           </div>

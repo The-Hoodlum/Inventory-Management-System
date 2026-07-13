@@ -260,13 +260,18 @@ async def test_sales_uses_single_inventory_ledger_path(client):
 
 
 # ------------------------------- permissions ------------------------------- #
-async def test_cashier_cannot_create_quotation(client):
+async def test_cashier_can_quote_and_invoice(client):
+    """A cashier can create a quotation for a customer and convert it straight to an invoice
+    (no re-entry), with parts VAT applied EXCLUSIVE (added on top)."""
     admin_h = await _headers(client, ADMIN_EMAIL, ADMIN_PASSWORD)
-    await _enable_sales(client, admin_h)
+    await _enable_sales(client, admin_h)  # sets vat_rate 0 ...
+    # ... turn VAT on at 16% to prove the treatment on the resulting invoice.
+    assert (await client.put("/api/v1/tenant/settings", headers=admin_h,
+                             json={"vat_rate": "0.16"})).status_code == 200
     customer_id = await _customer(client, admin_h)
-    product_id, location_id = await _find_stocked(client, admin_h, min_qty=1)
+    product_id, location_id = await _find_stocked(client, admin_h, min_qty=3)
 
-    # A cashier has pos.use + sales.payment but not sales.quote.
+    # The Cashier role now carries sales.quote + sales.invoice (+ its existing pos/payment).
     role_id = await _role_id(client, admin_h, "Cashier")
     email = f"cashier-{uuid.uuid4().hex[:8]}@demo.com"
     pw = "CashierPass123"
@@ -275,16 +280,34 @@ async def test_cashier_cannot_create_quotation(client):
     assert r.status_code == 201, r.text
     cashier_h = await _headers(client, email, pw)
 
+    # 1) The cashier creates a quotation (2 x 100 -> net 200).
     r = await client.post("/api/v1/sales/quotations", headers=cashier_h, json={
         "customer_id": customer_id,
-        "lines": [{"product_id": product_id, "qty": 1, "unit_price": 10}]})
-    assert r.status_code == 403, r.text
-    # but POS is allowed
+        "lines": [{"product_id": product_id, "qty": 2, "unit_price": 100}]})
+    assert r.status_code == 201, r.text
+    quote = r.json()
+
+    # 2) ... and converts it straight to an invoice (no re-entry). Parts are VAT-EXCLUSIVE:
+    #    net 200, +16% VAT 32 -> gross 232 (NOT 232 built by adding into the price).
+    r = await client.post(f"/api/v1/sales/quotations/{quote['id']}/invoice", headers=cashier_h,
+                          json={"location_id": location_id})
+    assert r.status_code == 201, r.text
+    inv = r.json()["invoice"]
+    assert inv is not None, r.text
+    assert inv["net_total"] == 200.0 and inv["tax_total"] == 32.0 and inv["grand_total"] == 232.0
+    assert inv["vat_rate"] == 0.16
+    line = inv["lines"][0]
+    assert line["vat_treatment"] == "exclusive" and line["line_total"] == 232.0
+
+    # POS is still allowed too.
     r = await client.post("/api/v1/sales/pos/checkout", headers=cashier_h, json={
         "location_id": location_id,
         "lines": [{"product_id": product_id, "qty": 1, "unit_price": 10}],
-        "payments": [{"method": "cash", "amount": 10}]})
+        "payments": [{"method": "cash", "amount": 11.6}]})
     assert r.status_code == 201, r.text
+
+    # Hand VAT back to 0 for other tests.
+    await client.put("/api/v1/tenant/settings", headers=admin_h, json={"vat_rate": 0})
 
 
 # ------------------------------ VAT (spare parts) -------------------------- #

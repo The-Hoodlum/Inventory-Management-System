@@ -408,6 +408,15 @@ class QuotationConvertResult(BaseModel):
     bike_sales: list[BikeSaleResult] = []
 
 
+class QuotationInvoiceResult(BaseModel):
+    """Converting a quotation straight to invoice(s), no re-entry: the part lines become one
+    invoice (via a confirmed sales order that reserves the stock); each bike line becomes its
+    own bike invoice. ``invoice`` is None for a bikes-only quotation."""
+    quotation_id: uuid.UUID
+    invoice: InvoiceOut | None = None
+    bike_sales: list[BikeSaleResult] = []
+
+
 class MotoSaleLineOut(BaseModel):
     """One motorcycle sale — the line-grain motorcycle sales history (one row per sold
     unit). Revenue is the unit's price_charged (fallback selling_price)."""

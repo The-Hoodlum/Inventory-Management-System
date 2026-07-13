@@ -58,6 +58,7 @@ from app.sales.schemas import (
     PricedLineOut,
     QuotationConvertResult,
     QuotationCreate,
+    QuotationInvoiceResult,
     QuotationOut,
     ReceiptOut,
     ReturnCreate,
@@ -199,9 +200,11 @@ class SalesService:
     async def convert_quotation(
         self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, quote_id: uuid.UUID,
         payload: ConvertToOrder, motorcycles,
+        allowed_branch_ids: frozenset[uuid.UUID] | None = None,
     ) -> QuotationConvertResult:
         """Convert without re-entry: the PART lines become one sales order; each BIKE line
-        is sold (its own bike invoice) through the bike-sale flow."""
+        is sold (its own bike invoice) through the bike-sale flow. ``allowed_branch_ids``
+        (None = unrestricted) enforces branch isolation on the bike sales."""
         quote = await self._require(self.repo.get_quote(quote_id, lock=True), "Quotation")
         if quote.status not in S.QUOTE_CONVERTIBLE:
             raise BusinessRuleError(f"Quotation in status {quote.status} cannot be converted.")
@@ -234,6 +237,7 @@ class SalesService:
                 tenant_id=tenant_id, user_id=user_id, motorcycles=motorcycles,
                 payload=BikeSaleIn(unit_id=ln.unit_id, customer_id=quote.customer_id,
                                    price=_f(ln.unit_price), payments=[]),
+                allowed_branch_ids=allowed_branch_ids,
             ))
 
         if quote.status != S.Q_ACCEPTED:
@@ -241,6 +245,30 @@ class SalesService:
         await self.repo.session.flush()
         await self._audit(tenant_id, user_id, "sales_quotation", quote.id, "converted", quote.status, S.Q_ACCEPTED)
         return QuotationConvertResult(quotation_id=quote.id, sales_order=so_out, bike_sales=bike_sales)
+
+    async def invoice_quotation(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, quote_id: uuid.UUID,
+        payload: ConvertToOrder, motorcycles,
+        allowed_branch_ids: frozenset[uuid.UUID] | None = None,
+    ) -> QuotationInvoiceResult:
+        """Turn a quotation straight into invoice(s), no re-entry. Reuses the sales engine
+        end to end: convert (PART lines -> one sales order, BIKE lines -> bike invoices),
+        then confirm the parts order (reserving stock) and invoice it. All in one
+        transaction — any failure rolls the whole thing back."""
+        conv = await self.convert_quotation(
+            tenant_id=tenant_id, user_id=user_id, quote_id=quote_id, payload=payload,
+            motorcycles=motorcycles, allowed_branch_ids=allowed_branch_ids,
+        )
+        invoice = None
+        if conv.sales_order is not None:
+            so_id = conv.sales_order.id
+            await self.confirm_sales_order(tenant_id=tenant_id, user_id=user_id, so_id=so_id)
+            invoice = await self.create_invoice(
+                tenant_id=tenant_id, user_id=user_id, payload=InvoiceCreate(sales_order_id=so_id),
+            )
+        return QuotationInvoiceResult(
+            quotation_id=quote_id, invoice=invoice, bike_sales=conv.bike_sales,
+        )
 
     # ============================= sales order =========================== #
     async def create_sales_order(
