@@ -207,7 +207,8 @@ class MotorcycleRepository:
         variant_id: uuid.UUID | None = None, colour_id: uuid.UUID | None = None,
         country_of_origin: str | None = None,
         sold: bool | None = None, inspected: bool | None = None,
-        registered: bool | None = None, page: int = 1, page_size: int = 50,
+        registered: bool | None = None, assembly_pending: bool | None = None,
+        page: int = 1, page_size: int = 50,
     ) -> tuple[list[MotorcycleUnit], int]:
         base = select(MotorcycleUnit)
         if status:
@@ -216,6 +217,8 @@ class MotorcycleRepository:
             base = base.where(MotorcycleUnit.country_of_origin == country_of_origin)
         if inspected is not None:
             base = base.where(MotorcycleUnit.inspected.is_(inspected))
+        if assembly_pending is not None:
+            base = base.where(MotorcycleUnit.assembly_pending.is_(assembly_pending))
         if registered is not None:
             base = base.where(MotorcycleUnit.registered.is_(registered))
         if branch_id is not None:

@@ -166,6 +166,16 @@ class SellIn(BaseModel):
     customer_id: uuid.UUID | None = None
     price_charged: float | None = Field(default=None, ge=0)
     note: str | None = None
+    # Only relevant when the unit is sold BEFORE assembly: True (default) = the dealership
+    # must assemble it before delivery (queued + delivery blocked); False = the buyer
+    # assembles it (e.g. a reseller), so it ships as-is.
+    assembly_required: bool = True
+
+
+class AssembleIn(BaseModel):
+    """Mark a unit assembled — records the assembly (independent of the sale status), so it
+    works for a unit sold before assembly as well as one still in stock."""
+    note: str | None = None
 
 
 class TransferIn(BaseModel):
@@ -242,6 +252,9 @@ class UnitOut(BaseModel):
     warranty_start: dt.date | None = None
     warranty_end: dt.date | None = None
     assembled_date: dt.date | None = None
+    # Assembly is independent of the sale status: assembled_date is when it was assembled;
+    # assembly_pending = sold before assembly, dealership owes assembly before delivery.
+    assembly_pending: bool = False
     date_sold: dt.date | None = None
     imported_historical: bool = False
     version: int

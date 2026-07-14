@@ -15,6 +15,7 @@ Two responsibilities:
 """
 from __future__ import annotations
 
+import datetime as dt
 import uuid
 from collections.abc import Sequence
 from decimal import Decimal
@@ -29,6 +30,7 @@ from app.models import (
 from app.motorcycles.domain import lifecycle as L
 from app.motorcycles.repository import MotorcycleRepository
 from app.motorcycles.schemas import (
+    AssembleIn,
     ColourCreate,
     ColourOut,
     ColourUpdate,
@@ -201,6 +203,9 @@ class MotorcycleService:
             warehouse_id=payload.warehouse_id, internal_location=payload.internal_location,
             country_of_origin=payload.country_of_origin,
             status=status, selling_price=_d(payload.selling_price),
+            # Record the assembly date up front when it is created ready-to-sell, so
+            # "is it assembled?" stays reliable (matches the backfill in migration 0052).
+            assembled_date=(None if payload.assembly_required else dt.date.today()),
         )
         self.repo.session.add(unit)
         await self.repo.session.flush()
@@ -260,6 +265,8 @@ class MotorcycleService:
             # The reservation fell through — release the serialized hold.
             unit.customer_id = None
             unit.reserved_ref = None
+        if new == L.ASSEMBLED and unit.assembled_date is None:
+            unit.assembled_date = dt.date.today()   # assembly just completed
         unit.status = new
         unit.version += 1
         await self.repo.session.flush()
@@ -314,6 +321,11 @@ class MotorcycleService:
         if invoice is None:
             raise NotFoundError("Invoice not found")
         old = unit.status
+        # Sold before assembly? Then assembly is still owed unless the buyer assembles it
+        # (a reseller sale, assembly_required=False). This drives the assembly queue + the
+        # delivery block; the sale status still becomes 'sold'.
+        sold_before_assembly = unit.assembled_date is None
+        unit.assembly_pending = sold_before_assembly and payload.assembly_required
         unit.status = L.SOLD
         unit.sold_ref = invoice.id
         unit.reserved_ref = None
@@ -322,10 +334,16 @@ class MotorcycleService:
         unit.payment_status = _INVOICE_TO_PAYMENT.get(invoice.status, "unpaid")
         unit.version += 1
         await self.repo.session.flush()
+        note = payload.note
+        if sold_before_assembly:
+            note = (note + " · " if note else "") + (
+                "sold before assembly (assembly owed)" if unit.assembly_pending
+                else "sold before assembly (buyer assembles)"
+            )
         await self.repo.add_event(
             tenant_id=tenant_id, unit_id=unit.id, event_type="sold", from_status=old,
             to_status=L.SOLD, user_id=user_id, reference_type="invoice",
-            reference_id=invoice.id, note=payload.note,
+            reference_id=invoice.id, note=note,
         )
         await self._audit(tenant_id, user_id, "unit", unit.id, "sold", old=old, new=L.SOLD)
         return await self._unit_out(unit, with_events=True)
@@ -339,7 +357,11 @@ class MotorcycleService:
         if unit is None:
             return False
         old = unit.status
-        unit.status = L.ASSEMBLED   # back to an available, sellable state
+        # Return the unit to where it came from: one sold BEFORE assembly (never assembled)
+        # goes back to 'unassembled'; an assembled one returns to 'assembled'.
+        back_to = L.ASSEMBLED if unit.assembled_date is not None else L.UNASSEMBLED
+        unit.status = back_to
+        unit.assembly_pending = False   # no longer sold -> no assembly obligation
         unit.sold_ref = None
         unit.customer_id = None
         unit.price_charged = None
@@ -349,11 +371,33 @@ class MotorcycleService:
         await self.repo.session.flush()
         await self.repo.add_event(
             tenant_id=tenant_id, unit_id=unit.id, event_type="sale_voided", from_status=old,
-            to_status=L.ASSEMBLED, user_id=user_id, reference_type="invoice_void",
+            to_status=back_to, user_id=user_id, reference_type="invoice_void",
             reference_id=invoice_id, note=reason,
         )
-        await self._audit(tenant_id, user_id, "unit", unit.id, "sale_voided", old=old, new=L.ASSEMBLED)
+        await self._audit(tenant_id, user_id, "unit", unit.id, "sale_voided", old=old, new=back_to)
         return True
+
+    async def mark_assembled(self, *, tenant_id, user_id, unit_id, payload: AssembleIn) -> UnitOut:
+        """Record that a unit has been assembled — an INDEPENDENT operational fact. Works for
+        a unit sold before assembly (the sale status stays 'sold'; this just clears the
+        pending flag + records the date, unblocking delivery) and for one still in stock
+        ('unassembled' -> 'assembled')."""
+        unit = await self._require(await self.repo.get_unit(unit_id, lock=True), "Motorcycle unit")
+        if unit.assembled_date is not None and not unit.assembly_pending:
+            raise BusinessRuleError(f"Unit {unit.chassis_number} is already assembled.")
+        old = unit.status
+        if unit.status == L.UNASSEMBLED:
+            unit.status = L.ASSEMBLED   # an in-stock unit: assembly completes the sale-status move
+        unit.assembled_date = unit.assembled_date or dt.date.today()
+        unit.assembly_pending = False
+        unit.version += 1
+        await self.repo.session.flush()
+        await self.repo.add_event(
+            tenant_id=tenant_id, unit_id=unit.id, event_type="assembled", from_status=old,
+            to_status=unit.status, user_id=user_id, note=payload.note,
+        )
+        await self._audit(tenant_id, user_id, "unit", unit.id, "assembled", old=old, new=unit.status)
+        return await self._unit_out(unit, with_events=True)
 
     async def transfer(self, *, tenant_id, user_id, unit_id, payload: TransferIn) -> UnitOut:
         """Serialized branch move: this exact chassis moves to another branch/location,
@@ -500,7 +544,8 @@ class MotorcycleService:
             registration_number=unit.registration_number,
             registration_papers_received=unit.registration_papers_received,
             warranty_start=unit.warranty_start, warranty_end=unit.warranty_end,
-            assembled_date=unit.assembled_date, date_sold=unit.date_sold,
+            assembled_date=unit.assembled_date, assembly_pending=unit.assembly_pending,
+            date_sold=unit.date_sold,
             imported_historical=unit.imported_historical,
             version=unit.version, created_at=unit.created_at, updated_at=unit.updated_at,
             allowed_next=L.allowed_next(unit.status), events=events,

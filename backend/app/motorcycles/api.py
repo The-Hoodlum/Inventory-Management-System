@@ -19,6 +19,7 @@ from app.api.v1.deps import (
 )
 from app.core.permissions import P
 from app.motorcycles.schemas import (
+    AssembleIn,
     ColourCreate,
     ColourOut,
     ColourUpdate,
@@ -180,6 +181,7 @@ async def list_units(
     sold: bool | None = Query(default=None),
     inspected: bool | None = Query(default=None),
     registered: bool | None = Query(default=None),
+    assembly_pending: bool | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
     user: CurrentUser = Depends(require_permission(P.MOTORCYCLE_READ)),
@@ -190,7 +192,7 @@ async def list_units(
         branch_ids=resolve_branch_scope(user, branch_id), model_id=model_id,
         variant_id=variant_id, colour_id=colour_id, country_of_origin=country_of_origin,
         sold=sold, inspected=inspected,
-        registered=registered, page=page, page_size=page_size,
+        registered=registered, assembly_pending=assembly_pending, page=page, page_size=page_size,
     )
     return Page[UnitOut](**_page(items, total, page, page_size))
 
@@ -222,6 +224,18 @@ async def transition_unit(
     svc: MotorcycleService = Depends(get_motorcycle_service),
 ) -> UnitOut:
     return await svc.transition(tenant_id=user.tenant_id, user_id=user.id, unit_id=unit_id, payload=payload)
+
+
+@router.post("/units/{unit_id}/assemble", response_model=UnitOut)
+async def assemble_unit(
+    unit_id: uuid.UUID,
+    payload: AssembleIn,
+    user: CurrentUser = Depends(require_permission(P.MOTORCYCLE_MANAGE)),
+    svc: MotorcycleService = Depends(get_motorcycle_service),
+) -> UnitOut:
+    """Record a unit as assembled — works for one sold BEFORE assembly (clears the pending
+    flag + the delivery block) as well as one still in stock."""
+    return await svc.mark_assembled(tenant_id=user.tenant_id, user_id=user.id, unit_id=unit_id, payload=payload)
 
 
 @router.post("/units/{unit_id}/reserve", response_model=UnitOut)
