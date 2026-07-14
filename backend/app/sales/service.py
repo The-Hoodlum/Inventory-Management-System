@@ -621,7 +621,7 @@ class SalesService:
         if "sold" not in unit.allowed_next:
             raise BusinessRuleError(
                 f"Bike {unit.chassis_number} is {unit.status} and cannot be sold "
-                "(it must be assembled or reserved)."
+                "(an on-hold or already-sold unit can't be sold; clear the hold first)."
             )
         price = _d(payload.price) if payload.price is not None else _d(unit.selling_price)
         if price <= 0:
@@ -647,10 +647,12 @@ class SalesService:
         await self.repo.session.flush()
 
         # Mark the unit sold and link THIS invoice (re-validates sellability; rolls back on fail).
+        # assembly_required only bites when the unit is sold before assembly.
         await motorcycles.sell(
             tenant_id=tenant_id, user_id=user_id, unit_id=payload.unit_id,
             payload=SellIn(invoice_id=invoice.id, customer_id=customer_id,
-                           price_charged=float(price), note=payload.note),
+                           price_charged=float(price), note=payload.note,
+                           assembly_required=payload.assembly_required),
         )
 
         receipt_out = None

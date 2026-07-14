@@ -115,6 +115,11 @@ CREATE TABLE IF NOT EXISTS motorcycle_units (
     registration_papers_received  BOOLEAN NOT NULL DEFAULT false,
     warranty_start                DATE,
     warranty_end                  DATE,
+    -- Assembly is a SEPARATE operational fact (a unit may be SOLD before it is assembled,
+    -- e.g. to a reseller who assembles it themselves). `assembled_date` (added in
+    -- motorcycle_import.sql) records WHEN it was assembled; `assembly_pending` = TRUE means
+    -- it was sold before assembly and WE still owe assembly before it can be delivered.
+    assembly_pending              BOOLEAN NOT NULL DEFAULT false,
     version                       INT NOT NULL DEFAULT 0,
     created_at                    TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at                    TIMESTAMPTZ NOT NULL DEFAULT now(),

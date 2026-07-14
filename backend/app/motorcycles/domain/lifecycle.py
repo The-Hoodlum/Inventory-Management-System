@@ -36,8 +36,12 @@ SOLD = "sold"
 STATUSES = frozenset({UNASSEMBLED, ASSEMBLED, RESERVED, ON_HOLD, SOLD})
 
 # The legal transition graph — the single source of truth for legality.
+# A unit may be RESERVED or SOLD straight from 'unassembled': the dealership sells bikes
+# before assembly (e.g. to resellers who assemble them, or retail with assembly to follow).
+# Assembly is tracked as an independent fact (assembled_date + assembly_pending), NOT by
+# forcing 'assembled' first.
 _ALLOWED: dict[str, set[str]] = {
-    UNASSEMBLED: {ASSEMBLED, ON_HOLD},
+    UNASSEMBLED: {ASSEMBLED, ON_HOLD, RESERVED, SOLD},
     ASSEMBLED: {RESERVED, SOLD, ON_HOLD},
     RESERVED: {SOLD, ASSEMBLED},          # fulfilled, or the reservation fell through
     ON_HOLD: {ASSEMBLED, UNASSEMBLED},    # cleared -> back to sellable
@@ -51,9 +55,10 @@ TERMINAL = frozenset({SOLD})
 IN_STOCK = frozenset({UNASSEMBLED, ASSEMBLED, ON_HOLD})
 POST_SALE = frozenset({SOLD})
 
-# Where a serialized hold / sale may ORIGINATE from (the service checks these).
-RESERVABLE_FROM = frozenset({ASSEMBLED})
-SELLABLE_FROM = frozenset({ASSEMBLED, RESERVED})
+# Where a serialized hold / sale may ORIGINATE from (the service checks these). Selling /
+# reserving from 'unassembled' is allowed — assembly is a separate operational step.
+RESERVABLE_FROM = frozenset({ASSEMBLED, UNASSEMBLED})
+SELLABLE_FROM = frozenset({ASSEMBLED, RESERVED, UNASSEMBLED})
 
 # The only statuses that carry a customer; every other status must have none.
 CUSTOMER_STATUSES = frozenset({RESERVED, SOLD})

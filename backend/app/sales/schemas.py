@@ -390,6 +390,9 @@ class BikeSaleIn(BaseModel):
     price: float | None = Field(default=None, ge=0)  # USD; defaults to the unit's selling price
     payments: list[PaymentLineIn] = []        # empty -> invoice only (pay later)
     note: str | None = Field(default=None, max_length=500)
+    # When selling a bike BEFORE assembly: True (default) = the dealership assembles it before
+    # delivery (queued + delivery blocked); False = the buyer assembles it (reseller), ships as-is.
+    assembly_required: bool = True
 
 
 class BikeSaleResult(BaseModel):
