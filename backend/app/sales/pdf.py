@@ -68,7 +68,9 @@ class _InvPdf(FPDF):
         self.cell(0, 10, f"{_s(self.company_name)}  -  Page {self.page_no()}/{{nb}}", align="C")
 
 
-def build_invoice_pdf(inv: InvoiceOut, *, bike: tuple | None = None, currency: str = "") -> bytes:
+def build_invoice_pdf(
+    inv: InvoiceOut, *, bike: tuple | None = None, currency: str = "", payments: list | None = None
+) -> bytes:
     cur = currency or inv.currency or ""
     pdf = _InvPdf(orientation="P", unit="mm", format="A4")
     pdf.company_name = settings.company_name
@@ -159,6 +161,33 @@ def build_invoice_pdf(inv: InvoiceOut, *, bike: tuple | None = None, currency: s
         pdf.set_text_color(*_INK if bold else _MUTED)
         pdf.cell(40, 6, _s(label))
         pdf.cell(40, 6, f"{cur} {_money(value)}", ln=1, align="R")
+
+    # ---- How it was paid: per-method breakdown + balance due ----
+    if payments:
+        pdf.ln(3)
+        pdf.set_x(15)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(*_INK)
+        pdf.cell(0, 5, "Payments received", ln=1)
+        pdf.set_font("Helvetica", "", 8.5)
+        for p in payments:
+            method = _s(str(getattr(p, "method", "")).replace("_", " ").title())
+            ref = getattr(p, "reference", None)
+            when = getattr(p, "created_at", None)
+            bits = [when.date().isoformat()] if when else []
+            if ref:
+                bits.append(f"ref {ref}")
+            suffix = f"  ({', '.join(bits)})" if bits else ""
+            pdf.set_x(15)
+            pdf.set_text_color(*_MUTED)
+            pdf.cell(120, 5, _s(f"{method}{suffix}"))
+            pdf.set_text_color(*_INK)
+            pdf.cell(60, 5, f"{cur} {_money(getattr(p, 'amount', 0))}", ln=1, align="R")
+        pdf.set_x(15)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(*_INK)
+        pdf.cell(120, 5, "Balance due")
+        pdf.cell(60, 5, f"{cur} {_money(inv.balance)}", ln=1, align="R")
 
     # ---- VAT treatment note ----
     pdf.ln(3)
