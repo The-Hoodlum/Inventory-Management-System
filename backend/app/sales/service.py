@@ -840,7 +840,8 @@ class SalesService:
         inv = await self.get_invoice(invoice_id)
         bike = await self.repo.linked_bike(invoice_id)
         currency = await self.repo.base_currency(tenant_id)
-        return build_invoice_pdf(inv, bike=bike, currency=currency), inv.invoice_number
+        payments = await self.list_invoice_payments(invoice_id=invoice_id)
+        return build_invoice_pdf(inv, bike=bike, currency=currency, payments=payments), inv.invoice_number
 
     async def list_invoice_payments(self, *, invoice_id: uuid.UUID) -> list[PaymentOut]:
         """The payment lines settled against an invoice (method / amount / reference /
