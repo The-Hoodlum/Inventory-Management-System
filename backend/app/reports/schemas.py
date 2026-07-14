@@ -118,3 +118,42 @@ class SalesLogReport(BaseModel):
     date_to: dt.date
     rows: list[SalesLogRow]
     totals: SalesLogTotals
+
+
+# ---------------------- daily / monthly sales summary ----------------------- #
+class SalesSummaryLine(BaseModel):
+    """One sold line in the period. ``kind`` is 'part' (SKU + qty) or 'bike' (chassis +
+    model). Amounts are the frozen ZMW payable (net + vat = gross)."""
+    kind: str
+    ref: str                       # part SKU or bike chassis number
+    description: str | None = None  # part name or bike model
+    qty: float
+    net: float
+    vat: float
+    gross: float
+    invoice_number: str
+    branch_name: str | None = None
+    date: dt.date
+
+
+class SalesSummaryPayment(BaseModel):
+    method: str
+    amount: float
+
+
+class SalesSummaryReport(BaseModel):
+    """What was sold in a day / month (invoiced transactions only), in frozen ZMW: the
+    lines, the payment breakdown by method, and the net / VAT / gross + collected /
+    outstanding totals. Scoped to the caller's branch(es)."""
+    period: str            # 'daily' | 'monthly'
+    label: str             # e.g. '2026-07-14' or '2026-07'
+    date_from: dt.date
+    date_to: dt.date
+    branch_id: uuid.UUID | None = None
+    lines: list[SalesSummaryLine]
+    payments: list[SalesSummaryPayment]
+    net_total: float
+    vat_total: float
+    gross_total: float
+    collected_total: float
+    outstanding_total: float
