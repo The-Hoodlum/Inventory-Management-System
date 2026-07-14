@@ -253,8 +253,9 @@ class SalesService:
     ) -> QuotationInvoiceResult:
         """Turn a quotation straight into invoice(s), no re-entry. Reuses the sales engine
         end to end: convert (PART lines -> one sales order, BIKE lines -> bike invoices),
-        then confirm the parts order (reserving stock) and invoice it. All in one
-        transaction — any failure rolls the whole thing back."""
+        then confirm the parts order (reserve), DELIVER it (issue = DEDUCT stock through the
+        single inventory write path, like a counter sale), and invoice the delivered goods.
+        All in one transaction — any failure (e.g. not enough stock) rolls it all back."""
         conv = await self.convert_quotation(
             tenant_id=tenant_id, user_id=user_id, quote_id=quote_id, payload=payload,
             motorcycles=motorcycles, allowed_branch_ids=allowed_branch_ids,
@@ -263,8 +264,14 @@ class SalesService:
         if conv.sales_order is not None:
             so_id = conv.sales_order.id
             await self.confirm_sales_order(tenant_id=tenant_id, user_id=user_id, so_id=so_id)
+            # Deliver everything now (deducts on-hand via InventoryService) so the invoice
+            # bills goods the customer is taking — a counter sale, not a bill-then-deliver.
+            delivery = await self.create_delivery(
+                tenant_id=tenant_id, user_id=user_id, so_id=so_id, payload=DeliveryCreate(),
+            )
             invoice = await self.create_invoice(
-                tenant_id=tenant_id, user_id=user_id, payload=InvoiceCreate(sales_order_id=so_id),
+                tenant_id=tenant_id, user_id=user_id,
+                payload=InvoiceCreate(delivery_note_id=delivery.id),
             )
         return QuotationInvoiceResult(
             quotation_id=quote_id, invoice=invoice, bike_sales=conv.bike_sales,

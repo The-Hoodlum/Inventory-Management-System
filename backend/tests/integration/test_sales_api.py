@@ -270,6 +270,7 @@ async def test_cashier_can_quote_and_invoice(client):
                              json={"vat_rate": "0.16"})).status_code == 200
     customer_id = await _customer(client, admin_h)
     product_id, location_id = await _find_stocked(client, admin_h, min_qty=3)
+    inv0 = await _inv(client, admin_h, product_id, location_id)
 
     # The Cashier role now carries sales.quote + sales.invoice (+ its existing pos/payment).
     role_id = await _role_id(client, admin_h, "Cashier")
@@ -298,6 +299,11 @@ async def test_cashier_can_quote_and_invoice(client):
     assert inv["vat_rate"] == 0.16
     line = inv["lines"][0]
     assert line["vat_treatment"] == "exclusive" and line["line_total"] == 232.0
+
+    # The 2 units were DEDUCTED from stock (a counter sale, not just reserved).
+    inv1 = await _inv(client, admin_h, product_id, location_id)
+    assert inv1["qty_on_hand"] == inv0["qty_on_hand"] - 2
+    assert inv1["qty_reserved"] == inv0["qty_reserved"]  # consumed the hold, not left reserved
 
     # POS is still allowed too.
     r = await client.post("/api/v1/sales/pos/checkout", headers=cashier_h, json={

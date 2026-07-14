@@ -195,8 +195,9 @@ export default function CreateQuotationPage() {
           <div className="border-t border-slate-200 pt-4">
             <div className="mb-1 text-sm font-medium text-slate-700">Convert without re-entry</div>
             <p className="mb-2 text-xs text-slate-500">
-              Turn this quotation into an invoice (parts are invoiced via a stock-reserving order;
-              each bike becomes its own invoice), or into a sales order to fulfil later.
+              Turn this quotation into an invoice (parts are issued from stock at the chosen
+              location and invoiced; each bike becomes its own invoice), or into a sales order
+              to fulfil later.
             </p>
             {err && <div className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
             {invoiceResult ? (
