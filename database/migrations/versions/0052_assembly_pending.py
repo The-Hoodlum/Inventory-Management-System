@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from typing import Union
 
-import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0052"
@@ -23,16 +22,19 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "motorcycle_units",
-        sa.Column("assembly_pending", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+    # Idempotent: on a fresh build the base motorcycle_units.sql already declares the column,
+    # so IF NOT EXISTS makes this a no-op there while still adding it to older databases
+    # (mirrors how assembled_date was added in motorcycle_import.sql).
+    op.execute(
+        "ALTER TABLE motorcycle_units "
+        "ADD COLUMN IF NOT EXISTS assembly_pending BOOLEAN NOT NULL DEFAULT false;"
     )
     op.execute("""
         UPDATE motorcycle_units
-        SET assembled_date = COALESCE(assembled_date, date_received, created_at::date)
+        SET assembled_date = COALESCE(assembled_date, date_received, CAST(created_at AS date))
         WHERE status IN ('assembled', 'reserved', 'sold') AND assembled_date IS NULL;
     """)
 
 
 def downgrade() -> None:
-    op.drop_column("motorcycle_units", "assembly_pending")
+    op.execute("ALTER TABLE motorcycle_units DROP COLUMN IF EXISTS assembly_pending;")
