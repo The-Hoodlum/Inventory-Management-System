@@ -412,6 +412,38 @@ export interface SalesLogReport {
   totals: SalesLogTotals;
 }
 
+// ---- Daily / monthly sales summary report (backend /reports/sales-summary) ----
+export interface SalesSummaryLine {
+  kind: "part" | "bike";
+  ref: string;                 // part SKU or bike chassis
+  description: string | null;  // part name or bike model
+  qty: number;
+  net: number;
+  vat: number;
+  gross: number;
+  invoice_number: string;
+  branch_name: string | null;
+  date: string;
+}
+export interface SalesSummaryPayment {
+  method: string;
+  amount: number;
+}
+export interface SalesSummaryReport {
+  period: "daily" | "monthly";
+  label: string;
+  date_from: string;
+  date_to: string;
+  branch_id: string | null;
+  lines: SalesSummaryLine[];
+  payments: SalesSummaryPayment[];
+  net_total: number;
+  vat_total: number;
+  gross_total: number;
+  collected_total: number;
+  outstanding_total: number;
+}
+
 // ---- User administration (backend /users) ----
 export interface AppUser {
   id: string;

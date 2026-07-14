@@ -17,6 +17,9 @@ from app.reports.schemas import (
     SalesLogReport,
     SalesLogRow,
     SalesLogTotals,
+    SalesSummaryLine,
+    SalesSummaryPayment,
+    SalesSummaryReport,
     StockPositionReport,
     StockPositionRow,
     SupplierPerformanceReport,
@@ -162,6 +165,57 @@ class ReportsService:
         return SalesLogReport(
             granularity=granularity, type=type_filter, branch_id=branch_id,
             date_from=date_from, date_to=date_to, rows=rows, totals=totals,
+        )
+
+    async def get_sales_summary(
+        self, *, period: str, on: dt.date, branch_ids: Sequence[uuid.UUID] | None = None,
+    ) -> SalesSummaryReport:
+        """What was sold in a day / month (invoiced transactions only), in frozen ZMW:
+        line detail (parts by SKU+qty, bikes by chassis+model), the payment breakdown by
+        method, and net / VAT / gross + collected / outstanding totals. ``period`` maps to
+        the sales-log's own daily/monthly bucketing so the date bounds match exactly."""
+        date_from, date_to, label = sales_log._period_bounds(on, period)
+
+        lines: list[SalesSummaryLine] = []
+        net_total = vat_total = gross_total = 0.0
+        for sku, name, qty, net, vat, gross, inv_no, branch, d in await self.repo.sales_summary_part_lines(
+            date_from=date_from, date_to=date_to, branch_ids=branch_ids
+        ):
+            lines.append(SalesSummaryLine(
+                kind="part", ref=sku or "", description=name, qty=float(qty),
+                net=float(net or 0), vat=float(vat or 0), gross=float(gross or 0),
+                invoice_number=inv_no, branch_name=branch, date=d,
+            ))
+            net_total += float(net or 0)
+            vat_total += float(vat or 0)
+            gross_total += float(gross or 0)
+        for chassis, model, net, vat, gross, inv_no, branch, d in await self.repo.sales_summary_bike_lines(
+            date_from=date_from, date_to=date_to, branch_ids=branch_ids
+        ):
+            lines.append(SalesSummaryLine(
+                kind="bike", ref=chassis or "", description=model, qty=1.0,
+                net=float(net or 0), vat=float(vat or 0), gross=float(gross or 0),
+                invoice_number=inv_no, branch_name=branch, date=d,
+            ))
+            net_total += float(net or 0)
+            vat_total += float(vat or 0)
+            gross_total += float(gross or 0)
+        lines.sort(key=lambda x: (x.date, x.invoice_number, x.kind, x.ref))
+
+        payments = [
+            SalesSummaryPayment(method=method, amount=float(amount))
+            for method, amount in await self.repo.sales_summary_payments(
+                date_from=date_from, date_to=date_to, branch_ids=branch_ids
+            )
+        ]
+        collected = sum(p.amount for p in payments)
+        return SalesSummaryReport(
+            period=period, label=label, date_from=date_from, date_to=date_to,
+            branch_id=(branch_ids[0] if branch_ids and len(branch_ids) == 1 else None),
+            lines=lines, payments=sorted(payments, key=lambda p: -p.amount),
+            net_total=round(net_total, 2), vat_total=round(vat_total, 2),
+            gross_total=round(gross_total, 2), collected_total=round(collected, 2),
+            outstanding_total=round(gross_total - collected, 2),
         )
 
     async def get_supplier_performance(

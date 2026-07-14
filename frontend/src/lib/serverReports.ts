@@ -8,6 +8,7 @@ import type {
   SalesLogGranularity,
   SalesLogReport,
   SalesLogType,
+  SalesSummaryReport,
   StockPositionReport,
   SupplierPerformanceReport,
 } from "@/types/api";
@@ -31,6 +32,17 @@ export function useSalesLog(params: SalesLogParams, enabled = true) {
     enabled,
     staleTime: 30_000,
     queryFn: () => api.get<SalesLogReport>(`/reports/sales-log?${sp.toString()}`),
+  });
+}
+
+export function useSalesSummary(period: "daily" | "monthly", date: string, branchId: string) {
+  const sp = new URLSearchParams({ period });
+  if (date) sp.set("date", date);
+  if (branchId) sp.set("branch_id", branchId);
+  return useQuery({
+    queryKey: ["report", "sales-summary", period, date, branchId ?? ""],
+    staleTime: 30_000,
+    queryFn: () => api.get<SalesSummaryReport>(`/reports/sales-summary?${sp.toString()}`),
   });
 }
 

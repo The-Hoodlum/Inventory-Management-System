@@ -19,6 +19,7 @@ from app.reports import sales_log
 from app.reports.schemas import (
     InventoryAgingReport,
     SalesLogReport,
+    SalesSummaryReport,
     StockPositionReport,
     SupplierPerformanceReport,
 )
@@ -56,6 +57,24 @@ async def sales_log_report(
         granularity=granularity, type_filter=type, branch_id=None,
         branch_ids=resolve_branch_scope(user, branch_id),
         date_from=date_from, date_to=date_to,
+    )
+
+
+@router.get("/sales-summary", response_model=SalesSummaryReport)
+async def sales_summary(
+    period: str = Query(default="daily"),
+    date: dt.date | None = Query(default=None),
+    branch_id: uuid.UUID | None = Query(default=None),
+    user: CurrentUser = Depends(require_permission(P.REPORT_READ)),
+    svc: ReportsService = Depends(get_reports_service),
+) -> SalesSummaryReport:
+    """Daily / monthly sales report (invoiced transactions, frozen ZMW): line detail +
+    payment breakdown by method + totals, scoped to the caller's branch(es)."""
+    if period not in ("daily", "monthly"):
+        raise BusinessRuleError("period must be daily or monthly.")
+    return await svc.get_sales_summary(
+        period=period, on=date or dt.date.today(),
+        branch_ids=resolve_branch_scope(user, branch_id),
     )
 
 

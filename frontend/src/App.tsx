@@ -42,6 +42,7 @@ import ReorderPage from "@/pages/ReorderPage";
 import ReportsPage from "@/pages/ReportsPage";
 import SalesLogPage from "@/pages/SalesLogPage";
 import SalesPage from "@/pages/SalesPage";
+import SalesReportPage from "@/pages/SalesReportPage";
 import ServiceFollowUpPage from "@/pages/ServiceFollowUpPage";
 import SettingsPage from "@/pages/SettingsPage";
 import SparePartsSalesPage from "@/pages/SparePartsSalesPage";
@@ -78,6 +79,7 @@ export default function App() {
         <Route path="/sales/pending-payments" element={<PendingPaymentsPage />} />
         <Route path="/sales/quotations/new" element={<CreateQuotationPage />} />
         <Route path="/sales-log" element={<SalesLogPage />} />
+        <Route path="/sales-report" element={<SalesReportPage />} />
         <Route path="/customers" element={<CustomersPage />} />
         <Route path="/motorcycles" element={<MotorcyclesPage />} />
         <Route path="/motorcycles/setup" element={<MotorcycleSetupPage />} />

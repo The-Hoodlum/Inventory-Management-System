@@ -10,7 +10,7 @@ import uuid
 from collections.abc import Sequence
 from decimal import Decimal
 
-from sqlalchemy import Date, cast, func, select
+from sqlalchemy import Date, cast, column, func, select, table
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -20,6 +20,8 @@ from app.models import (
     InvoiceLine,
     MotorcycleUnit,
     PartsSale,
+    Payment,
+    PaymentAllocation,
     Product,
     PurchaseOrder,
     PurchaseOrderEvent,
@@ -219,6 +221,73 @@ class ReportsRepository:
             stmt = stmt.where(sale_date <= date_to)
         rows = (await self.session.execute(stmt)).all()
         return [(r[0], r[1], Decimal(r[2]), bool(r[3])) for r in rows]
+
+    # -------------------- daily / monthly sales summary ------------------- #
+    # Invoiced transactions only, in the FROZEN ZMW payable (grand_total_zmw /
+    # line_total_zmw); net/vat convert the frozen USD net/vat at the invoice's own frozen
+    # fx_rate. Voided invoices excluded. Each invoice is counted once (parts via their
+    # lines, a bike via its linked unit — the two never overlap), so no double count.
+    async def sales_summary_part_lines(
+        self, *, date_from: dt.date, date_to: dt.date, branch_ids: Sequence[uuid.UUID] | None = None
+    ) -> list:
+        stmt = (
+            select(
+                Product.sku, Product.name, InvoiceLine.qty,
+                InvoiceLine.net_amount * Invoice.fx_rate, InvoiceLine.vat_amount * Invoice.fx_rate,
+                InvoiceLine.line_total_zmw, Invoice.invoice_number, Branch.name, Invoice.invoice_date,
+            )
+            .select_from(InvoiceLine)
+            .join(Invoice, Invoice.id == InvoiceLine.invoice_id)
+            .join(Product, Product.id == InvoiceLine.product_id)
+            .outerjoin(Branch, Branch.id == Invoice.branch_id)
+            .where(Invoice.id.not_in(_motorcycle_linked_invoice_ids()))
+            .where(Invoice.status != "voided")
+            .where(Invoice.invoice_date >= date_from, Invoice.invoice_date <= date_to)
+        )
+        if branch_ids is not None:
+            stmt = stmt.where(Invoice.branch_id.in_(list(branch_ids)))
+        stmt = stmt.order_by(Invoice.invoice_date, Invoice.invoice_number)
+        return list((await self.session.execute(stmt)).all())
+
+    async def sales_summary_bike_lines(
+        self, *, date_from: dt.date, date_to: dt.date, branch_ids: Sequence[uuid.UUID] | None = None
+    ) -> list:
+        u = table("motorcycle_units", column("sold_ref"), column("chassis_number"), column("model_id"))
+        m = table("motorcycle_models", column("id"), column("name"))
+        stmt = (
+            select(
+                u.c.chassis_number, m.c.name,
+                Invoice.net_total * Invoice.fx_rate, Invoice.tax_total * Invoice.fx_rate,
+                Invoice.grand_total_zmw, Invoice.invoice_number, Branch.name, Invoice.invoice_date,
+            )
+            .select_from(Invoice)
+            .join(u, u.c.sold_ref == Invoice.id)
+            .outerjoin(m, m.c.id == u.c.model_id)
+            .outerjoin(Branch, Branch.id == Invoice.branch_id)
+            .where(Invoice.status != "voided")
+            .where(Invoice.invoice_date >= date_from, Invoice.invoice_date <= date_to)
+        )
+        if branch_ids is not None:
+            stmt = stmt.where(Invoice.branch_id.in_(list(branch_ids)))
+        stmt = stmt.order_by(Invoice.invoice_date, Invoice.invoice_number)
+        return list((await self.session.execute(stmt)).all())
+
+    async def sales_summary_payments(
+        self, *, date_from: dt.date, date_to: dt.date, branch_ids: Sequence[uuid.UUID] | None = None
+    ) -> list[tuple[str, Decimal]]:
+        """Payments (ZMW) grouped by method, tied to the period's non-voided invoices."""
+        stmt = (
+            select(Payment.method, func.sum(PaymentAllocation.amount))
+            .select_from(PaymentAllocation)
+            .join(Payment, Payment.id == PaymentAllocation.payment_id)
+            .join(Invoice, Invoice.id == PaymentAllocation.invoice_id)
+            .where(Invoice.status != "voided")
+            .where(Invoice.invoice_date >= date_from, Invoice.invoice_date <= date_to)
+            .group_by(Payment.method)
+        )
+        if branch_ids is not None:
+            stmt = stmt.where(Invoice.branch_id.in_(list(branch_ids)))
+        return [(r[0], Decimal(r[1] or 0)) for r in (await self.session.execute(stmt)).all()]
 
     # ------------------------- supplier performance ----------------------- #
     async def suppliers_basic(self) -> list[tuple[uuid.UUID, str, int]]:
