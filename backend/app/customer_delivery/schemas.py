@@ -42,6 +42,10 @@ class CustomerDeliveryCreate(BaseModel):
 
 class DeliverBody(BaseModel):
     received_by: str | None = Field(default=None, max_length=256)
+    # A SALE handover of a bike SOLD before assembly is blocked (it isn't built yet) unless a
+    # manager (sales.manage) explicitly overrides. Consignment is exempt — the reseller
+    # assembles it. See CustomerDeliveryService.deliver.
+    override_unassembled: bool = False
 
 
 class SettlePartLineIn(BaseModel):
@@ -76,6 +80,7 @@ class CustomerDeliveryLineOut(BaseModel):
     chassis_number: str | None = None
     engine_number: str | None = None
     model_name: str | None = None
+    assembly_pending: bool = False   # bike sold before assembly, assembly still owed
     qty: float
     settled_qty: float
     returned_qty: float

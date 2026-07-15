@@ -28,19 +28,25 @@ export default function CustomerDeliveryDetailPage() {
   const { hasPermission } = useAuth();
   const canDispatch = hasPermission("delivery_note.dispatch");
   const canReceive = hasPermission("delivery_note.receive");
+  const canManage = hasPermission("sales.manage");   // may override a before-assembly block
   const [err, setErr] = useState<string | null>(null);
   const [settling, setSettling] = useState(false);
 
   const { data: cd, isLoading } = useQuery({ queryKey: ["customer-delivery", "one", id], queryFn: () => customerDeliveryApi.get(id), enabled: !!id });
   const refresh = () => { void qc.invalidateQueries({ queryKey: ["customer-delivery"] }); };
   const onErr = (e: unknown) => setErr(e instanceof ApiError ? e.message : "Action failed.");
-  const deliver = useMutation({ mutationFn: () => customerDeliveryApi.deliver(id), onSuccess: refresh, onError: onErr });
+  const deliver = useMutation({ mutationFn: (override: boolean) => customerDeliveryApi.deliver(id, { override_unassembled: override }), onSuccess: refresh, onError: onErr });
   const cancel = useMutation({ mutationFn: () => customerDeliveryApi.cancel(id), onSuccess: refresh, onError: onErr });
 
   if (isLoading || !cd) return <div><PageHeader title="Delivery" /><div className="flex h-40 items-center justify-center"><Spinner label="Loading…" /></div></div>;
 
   const isDraft = cd.status === "draft";
   const isOpenConsignment = cd.delivery_mode === "consignment" && (cd.status === "out_at_reseller" || cd.status === "partially_settled");
+  // A SALE handover of a bike sold before assembly is blocked (not built yet) — a manager overrides.
+  const unassembledChassis = cd.delivery_mode === "sale"
+    ? cd.lines.filter((l) => l.line_kind === "motorcycle" && l.assembly_pending).map((l) => l.chassis_number ?? "—")
+    : [];
+  const blockedByAssembly = isDraft && unassembledChassis.length > 0;
 
   return (
     <div>
@@ -53,13 +59,21 @@ export default function CustomerDeliveryDetailPage() {
           <div className="flex items-center gap-2">
             <Button variant="secondary" onClick={() => navigate("/customer-deliveries")}>Back</Button>
             <Button variant="secondary" onClick={() => void customerDeliveryApi.downloadPdf(cd.id, cd.delivery_number)}>PDF</Button>
-            {isDraft && canDispatch && <Button disabled={deliver.isPending} onClick={() => { setErr(null); deliver.mutate(); }}>{deliver.isPending ? "Delivering…" : "Deliver"}</Button>}
+            {isDraft && canDispatch && !blockedByAssembly && <Button disabled={deliver.isPending} onClick={() => { setErr(null); deliver.mutate(false); }}>{deliver.isPending ? "Delivering…" : "Deliver"}</Button>}
+            {isDraft && canDispatch && blockedByAssembly && canManage && <Button disabled={deliver.isPending} onClick={() => { setErr(null); deliver.mutate(true); }}>{deliver.isPending ? "Delivering…" : "Override & deliver"}</Button>}
             {isDraft && canDispatch && <Button variant="ghost" disabled={cancel.isPending} onClick={() => { setErr(null); cancel.mutate(); }}>Cancel</Button>}
             {isOpenConsignment && canReceive && !settling && <Button onClick={() => setSettling(true)}>Settle / return…</Button>}
           </div>
         }
       />
       {err && <div className="mb-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
+
+      {blockedByAssembly && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-800">
+          <b>Not yet assembled:</b> {unassembledChassis.join(", ")}. Dispatch is blocked until the bike is
+          assembled{canManage ? " — use “Override & deliver” to release it anyway." : ". A manager (sales.manage) can override."}
+        </div>
+      )}
 
       <Card className="mb-4 p-4">
         <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-sm md:grid-cols-4">
@@ -108,7 +122,17 @@ export default function CustomerDeliveryDetailPage() {
 
 function lineTitle(l: CustomerDeliveryLine) {
   if (l.line_kind === "motorcycle") {
-    return <span><span className="font-mono text-[13px] text-slate-800">{l.chassis_number}</span><span className="ml-2 text-xs text-slate-400">{l.model_name}</span></span>;
+    return (
+      <span>
+        <span className="font-mono text-[13px] text-slate-800">{l.chassis_number}</span>
+        <span className="ml-2 text-xs text-slate-400">{l.model_name}</span>
+        {l.assembly_pending && (
+          <span className="ml-2 inline-flex items-center gap-1 rounded-pill bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-700 ring-1 ring-inset ring-orange-200">
+            🟠 Awaiting assembly
+          </span>
+        )}
+      </span>
+    );
   }
   return <span>{l.name}<span className="ml-2 font-mono text-xs text-slate-400">{l.sku}</span></span>;
 }

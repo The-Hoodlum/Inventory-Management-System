@@ -56,7 +56,12 @@ async def deliver_delivery(
     user: CurrentUser = Depends(require_permission(P.DELIVERY_NOTE_DISPATCH)),
     svc: CustomerDeliveryService = Depends(get_customer_delivery_service),
 ) -> CustomerDeliveryOut:
-    return await svc.deliver(tenant_id=user.tenant_id, user_id=user.id, delivery_id=delivery_id, received_by=payload.received_by)
+    # Overriding a before-assembly block is a manager act — gated on sales.manage.
+    return await svc.deliver(
+        tenant_id=user.tenant_id, user_id=user.id, delivery_id=delivery_id,
+        received_by=payload.received_by, override_unassembled=payload.override_unassembled,
+        can_override=P.SALES_MANAGE in user.permissions,
+    )
 
 
 @router.post("/{delivery_id}/settle", response_model=CustomerDeliveryOut)
