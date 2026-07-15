@@ -22,6 +22,7 @@ from app.customer_delivery.schemas import (
 )
 from app.models import CustomerDelivery, CustomerDeliveryLine, MotorcycleUnitEvent
 from app.motorcycles.domain import lifecycle as L
+from app.notifications import events as N_EVENTS
 from app.repositories.audit_repo import AuditRepository
 from app.services.inventory_service import InventoryService, _available
 
@@ -41,10 +42,11 @@ def _now() -> dt.datetime:
 
 
 class CustomerDeliveryService:
-    def __init__(self, repo: CustomerDeliveryRepository, inventory: InventoryService, audit: AuditRepository) -> None:
+    def __init__(self, repo: CustomerDeliveryRepository, inventory: InventoryService, audit: AuditRepository, notifications=None) -> None:
         self.repo = repo
         self.inventory = inventory
         self.audit = audit
+        self.notifications = notifications   # optional NotificationService; None -> no notifications
 
     # ------------------------------- create ---------------------------------- #
     async def create(self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, payload: CustomerDeliveryCreate) -> CustomerDeliveryOut:
@@ -140,6 +142,15 @@ class CustomerDeliveryService:
                         reference_type="customer_delivery", reference_id=cd.id,
                         note=f"Dispatched before assembly (manager override) — {cd.delivery_number}", user_id=user_id,
                     ))
+                # Flag the override to the managers (sales.manage in the branch) for awareness.
+                if self.notifications is not None:
+                    await self.notifications.notify(
+                        tenant_id=tenant_id, event_type=N_EVENTS.BIKE_DISPATCHED_UNASSEMBLED, severity="critical",
+                        title=f"Unassembled bike released for dispatch — {cd.delivery_number}",
+                        body=f"Manager override on {chassis} (not yet assembled).", href="/customer-deliveries",
+                        entity_type="customer_delivery", entity_id=cd.id, branch_id=cd.branch_id,
+                        actor_user_id=user_id, permission="sales.manage",
+                    )
             # Proof of handover — the sale already deducted; nothing moves here.
             cd.status = S.DELIVERED
         else:  # consignment — hold parts + consign bikes, no deduction

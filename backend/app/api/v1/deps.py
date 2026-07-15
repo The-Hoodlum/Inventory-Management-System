@@ -293,7 +293,7 @@ def get_customer_delivery_service(db: AsyncSession = Depends(get_db)):
     from app.customer_delivery.repository import CustomerDeliveryRepository
     from app.customer_delivery.service import CustomerDeliveryService
 
-    return CustomerDeliveryService(CustomerDeliveryRepository(db), get_inventory_service(db), AuditRepository(db))
+    return CustomerDeliveryService(CustomerDeliveryRepository(db), get_inventory_service(db), AuditRepository(db), get_notification_service(db))
 
 
 def get_notification_service(db: AsyncSession = Depends(get_db)):
@@ -442,7 +442,7 @@ def get_order_request_service(db: AsyncSession = Depends(get_db)) -> OrderReques
 def get_motorcycle_service(db: AsyncSession = Depends(get_db)) -> MotorcycleService:
     # Serialized-asset registry. Selling links to the existing sales documents; the
     # unit's own event ledger is its immutable lifecycle history.
-    return MotorcycleService(MotorcycleRepository(db), AuditRepository(db))
+    return MotorcycleService(MotorcycleRepository(db), AuditRepository(db), get_notification_service(db))
 
 
 def get_whatsapp_channel_service(db: AsyncSession = Depends(get_db)) -> WhatsAppChannelService:

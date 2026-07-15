@@ -12,10 +12,12 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterable
 
+from app.core.logging import get_logger
 from app.models import Notification
 from app.notifications.repository import NotificationRepository
 from app.notifications.schemas import NotificationOut
 
+logger = get_logger(__name__)
 _SEVERITIES = {"info", "warning", "critical"}
 
 
@@ -65,6 +67,34 @@ class NotificationService:
         ids = await self.repo.recipients_with_permission(permission, branch_id=branch_id)
         drop = {u for u in (exclude or []) if u is not None}
         return [u for u in ids if u not in drop]
+
+    async def notify(
+        self, *, tenant_id: uuid.UUID, event_type: str, title: str,
+        permission: str | None = None, recipient_user_ids: Iterable[uuid.UUID] | None = None,
+        severity: str = "info", body: str | None = None, href: str | None = None,
+        entity_type: str | None = None, entity_id: uuid.UUID | None = None,
+        branch_id: uuid.UUID | None = None, actor_user_id: uuid.UUID | None = None,
+    ) -> int:
+        """Best-effort emit for a PRODUCER: resolve recipients (an explicit set and/or every
+        holder of ``permission`` in ``branch_id``, minus the actor) and store one row each —
+        all inside a SAVEPOINT so a notification failure can NEVER roll back the caller's
+        business transaction. Returns rows created (0 on any problem; logged, not raised)."""
+        try:
+            async with self.repo.session.begin_nested():
+                recipients = list(recipient_user_ids or [])
+                if permission is not None:
+                    recipients += await self.resolve_recipients(
+                        permission=permission, branch_id=branch_id,
+                        exclude=[actor_user_id] if actor_user_id else None,
+                    )
+                return await self.emit(
+                    tenant_id=tenant_id, event_type=event_type, title=title, severity=severity,
+                    body=body, href=href, entity_type=entity_type, entity_id=entity_id,
+                    branch_id=branch_id, actor_user_id=actor_user_id, recipient_user_ids=recipients,
+                )
+        except Exception:  # noqa: BLE001 — a notification must never break the producer
+            logger.warning("notification_emit_failed", extra={"event_type": event_type})
+            return 0
 
     # ------------------------------- reads ----------------------------- #
     async def list_for_user(self, user_id: uuid.UUID, *, limit: int = 30) -> list[NotificationOut]:

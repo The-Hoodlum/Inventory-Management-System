@@ -312,6 +312,16 @@ class MotorcycleRepository:
         )
         return list(rows)
 
+    async def sold_by(self, unit_id: uuid.UUID) -> uuid.UUID | None:
+        """The user who last recorded this unit as sold (the salesperson) — for notifying
+        them when the bike they sold before assembly is finally assembled."""
+        return await self.session.scalar(
+            select(MotorcycleUnitEvent.user_id)
+            .where(MotorcycleUnitEvent.unit_id == unit_id, MotorcycleUnitEvent.event_type == "sold")
+            .order_by(MotorcycleUnitEvent.created_at.desc())
+            .limit(1)
+        )
+
     # ========================= name resolution ========================== #
     async def _names(self, model, ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, str]:
         wanted = _ids(ids)
