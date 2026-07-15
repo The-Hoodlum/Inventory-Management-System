@@ -21,6 +21,8 @@ from app.motorcycles.service import MotorcycleService
 from app.sales.schemas import (
     BikeSaleIn,
     BikeSaleResult,
+    BulkBikeSaleIn,
+    BulkBikeSaleResult,
     CancelBody,
     ConvertToOrder,
     CreditNoteCreate,
@@ -415,6 +417,22 @@ async def sell_bike(
     return await svc.sell_bike(
         tenant_id=user.tenant_id, user_id=user.id, payload=payload, motorcycles=motorcycles,
         # Branch isolation: a scoped seller may only sell a bike in one of their branches.
+        allowed_branch_ids=None if user.all_branches else user.branch_ids,
+    )
+
+
+@router.post("/bike-sale/bulk", response_model=BulkBikeSaleResult, status_code=201)
+async def sell_bikes_bulk(
+    payload: BulkBikeSaleIn,
+    user: CurrentUser = Depends(require_permission(P.MOTORCYCLE_MANAGE)),
+    svc: SalesService = Depends(get_sales_service),
+    motorcycles: MotorcycleService = Depends(get_motorcycle_service),
+) -> BulkBikeSaleResult:
+    """Sell several bikes to one customer on ONE invoice + one payment, in one transaction
+    (all-or-nothing). Shares the request session with the motorcycle service, so the invoice
+    and every unit's sold-state commit or roll back together."""
+    return await svc.sell_bikes_bulk(
+        tenant_id=user.tenant_id, user_id=user.id, payload=payload, motorcycles=motorcycles,
         allowed_branch_ids=None if user.all_branches else user.branch_ids,
     )
 

@@ -116,22 +116,23 @@ class SalesRepository:
         )
         return {r[0]: (r[1], r[2]) for r in rows}
 
-    async def linked_bike(self, invoice_id: uuid.UUID):
-        """The serialized bike sold on this invoice (chassis, model name, price,
-        assembly_pending), or None. Uses raw table refs to stay decoupled from the
-        motorcycles ORM (see ``_moto_units``)."""
+    async def linked_bikes(self, invoice_id: uuid.UUID) -> list[tuple]:
+        """Every serialized bike sold on this invoice (chassis, model name, price,
+        assembly_pending), ordered by chassis. One for a single bike sale; several for a
+        bulk sale. Uses raw table refs to stay decoupled from the motorcycles ORM."""
         u = table("motorcycle_units", column("sold_ref"), column("chassis_number"),
                   column("model_id"), column("price_charged"), column("selling_price"),
                   column("assembly_pending"))
         m = table("motorcycle_models", column("id"), column("name"))
-        row = (await self.session.execute(
+        rows = (await self.session.execute(
             select(u.c.chassis_number, m.c.name,
                    func.coalesce(u.c.price_charged, u.c.selling_price, 0),
                    u.c.assembly_pending)
             .select_from(u).outerjoin(m, m.c.id == u.c.model_id)
             .where(u.c.sold_ref == invoice_id)
-        )).first()
-        return tuple(row) if row is not None else None
+            .order_by(u.c.chassis_number)
+        )).all()
+        return [tuple(r) for r in rows]
 
     # ------------------------------ numbering -------------------------- #
     async def number(self, tenant_id: uuid.UUID, doc_type: str, prefix: str) -> str:
