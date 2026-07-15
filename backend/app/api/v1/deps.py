@@ -296,6 +296,14 @@ def get_customer_delivery_service(db: AsyncSession = Depends(get_db)):
     return CustomerDeliveryService(CustomerDeliveryRepository(db), get_inventory_service(db), AuditRepository(db))
 
 
+def get_notification_service(db: AsyncSession = Depends(get_db)):
+    # Event-driven, per-recipient notifications. Producers call emit(); the bell/inbox read.
+    from app.notifications.repository import NotificationRepository
+    from app.notifications.service import NotificationService
+
+    return NotificationService(NotificationRepository(db))
+
+
 def get_issuance_service(db: AsyncSession = Depends(get_db)):
     # Internal issuance / handover: fungible loans go through the reservation mechanism +
     # inventory service; bikes through the serialized registry. Never writes stock.

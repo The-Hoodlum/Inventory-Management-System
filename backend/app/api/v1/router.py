@@ -29,6 +29,7 @@ from app.integrations.whatsapp.router import router as whatsapp_router
 from app.intelligence.api import router as intelligence_router
 from app.issuance.api import router as issuance_router
 from app.motorcycles.api import router as motorcycles_router
+from app.notifications.api import router as notifications_router
 from app.order_requests.api import router as order_requests_router
 from app.procurement.api import router as procurement_router
 from app.reorder.api import purchase_order_router, reorder_router
@@ -74,3 +75,4 @@ api_router.include_router(dispatch_router, prefix="/delivery-notes", tags=["deli
 api_router.include_router(issuance_router, prefix="/issuances", tags=["issuances"])
 api_router.include_router(customer_delivery_router, prefix="/customer-deliveries", tags=["customer-deliveries"])
 api_router.include_router(search_router, prefix="/search", tags=["search"])
+api_router.include_router(notifications_router, prefix="/notifications", tags=["notifications"])
