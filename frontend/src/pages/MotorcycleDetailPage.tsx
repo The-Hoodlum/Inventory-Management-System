@@ -97,6 +97,8 @@ function eventTitle(type: string, to?: string | null): string {
   if (type === "created") return "Unit received";
   if (type === "reserved") return "Reserved for customer";
   if (type === "sold") return "Sold";
+  if (type === "assembled") return "Assembled";
+  if (type === "dispatched_unassembled") return "Dispatched before assembly (override)";
   if (type === "transfer") return "Branch transfer";
   if (type === "status_change" && to) return `Moved to ${statusLabel(to)}`;
   return statusLabel(type);

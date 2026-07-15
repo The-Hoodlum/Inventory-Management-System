@@ -34,3 +34,16 @@ def test_invoice_pdf_renders_without_payments():
     # A brand-new unpaid invoice (no payments) still renders fine.
     out = build_invoice_pdf(_invoice(amount_paid=0.0, balance=200000.0, status="sent"), currency="ZMW")
     assert isinstance(out, bytes) and out[:4] == b"%PDF"
+
+
+def test_invoice_pdf_bike_sold_before_assembly_renders():
+    # A bike sold before assembly (4-tuple, assembly_pending=True) flags "NOT YET ASSEMBLED".
+    bike = ("CH-123", "HLX 125", 20000.0, True)
+    out = build_invoice_pdf(_invoice(), bike=bike, currency="ZMW")
+    assert isinstance(out, bytes) and out[:4] == b"%PDF"
+
+
+def test_invoice_pdf_tolerates_legacy_3tuple_bike():
+    # An older 3-tuple bike (no assembly flag) must still render.
+    out = build_invoice_pdf(_invoice(), bike=("CH-9", "RTR 200", 56000.0), currency="ZMW")
+    assert isinstance(out, bytes) and out[:4] == b"%PDF"

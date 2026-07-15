@@ -205,6 +205,9 @@ export interface MotoMetrics {
   sold: number;
   cancelled: number;
   by_status: Record<string, number>;
+  waiting_for_assembly: number;    // sold before assembly, assembly still owed
+  unassembled_in_stock: number;    // on hand, not yet assembled
+  avg_assembly_days: number | null;
 }
 
 export function useMotoMetrics(branchId: string | null, enabled = true) {

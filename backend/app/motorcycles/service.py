@@ -436,6 +436,7 @@ class MotorcycleService:
         counts = await self.repo.status_counts(branch_id=branch_id, branch_ids=branch_ids)
         in_stock = sum(n for s, n in counts.items() if s in L.IN_STOCK)
         sold = sum(n for s, n in counts.items() if s in L.POST_SALE)
+        assembly = await self.repo.assembly_rollup(branch_id=branch_id, branch_ids=branch_ids)
         return MetricsOut(
             total=sum(counts.values()),
             in_stock=in_stock,
@@ -443,6 +444,9 @@ class MotorcycleService:
             sold=sold,
             cancelled=0,  # no 'cancelled' status in the five-status model
             by_status=counts,
+            waiting_for_assembly=assembly["waiting_for_assembly"],
+            unassembled_in_stock=assembly["unassembled_in_stock"],
+            avg_assembly_days=assembly["avg_assembly_days"],
         )
 
     async def list_units(self, **f) -> tuple[list[UnitOut], int]:

@@ -122,8 +122,11 @@ def build_invoice_pdf(
     pdf.set_font("Helvetica", "", 8.5)
     pdf.set_draw_color(*_LINE)
     rows: list[tuple[str, float, float, float]] = []
+    bike_assembly_pending = False
     if bike is not None:
-        chassis, model_name, price = bike
+        # 4-tuple (chassis, model, price, assembly_pending); tolerate older 3-tuples.
+        chassis, model_name, price, *rest = bike
+        bike_assembly_pending = bool(rest[0]) if rest else False
         rows.append((f"Motorcycle - {model_name or 'unit'} (chassis {chassis})", 1.0, float(price), float(price)))
     for ln_ in inv.lines:
         desc = ln_.description or ln_.name or ln_.sku or ""
@@ -141,6 +144,14 @@ def build_invoice_pdf(
         ):
             pdf.cell(width, 6, text_value, border="B", align=align)
         pdf.ln(6)
+
+    # ---- Bike sold before assembly: flag that it is not yet assembled ----
+    if bike_assembly_pending:
+        pdf.ln(1)
+        pdf.set_font("Helvetica", "B", 8.5)
+        pdf.set_text_color(0xB4, 0x53, 0x09)   # amber
+        pdf.cell(0, 5, _s("Assembly status: NOT YET ASSEMBLED - to be assembled before delivery."), ln=1)
+        pdf.set_text_color(*_INK)
 
     # ---- Totals (billed ZMW payable) with the VAT broken out. net/vat are stored in the
     # document's line currency; convert to the billed currency at the frozen fx_rate. ----
