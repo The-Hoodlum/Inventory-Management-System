@@ -50,6 +50,7 @@ from app.motorcycles.schemas import (
     VariantOut,
     VariantUpdate,
 )
+from app.notifications import events as N_EVENTS
 from app.repositories.audit_repo import AuditRepository
 
 # Invoice status -> the unit's convenience payment_status flag (future modules own the logic).
@@ -65,9 +66,10 @@ def _f(v) -> float | None:
 
 
 class MotorcycleService:
-    def __init__(self, repo: MotorcycleRepository, audit: AuditRepository) -> None:
+    def __init__(self, repo: MotorcycleRepository, audit: AuditRepository, notifications=None) -> None:
         self.repo = repo
         self.audit = audit
+        self.notifications = notifications   # optional NotificationService; None -> no notifications
 
     # ==================================================================== #
     # Layer 1: reference catalog
@@ -346,6 +348,16 @@ class MotorcycleService:
             reference_id=invoice.id, note=note,
         )
         await self._audit(tenant_id, user_id, "unit", unit.id, "sold", old=old, new=L.SOLD)
+        # A bike sold before assembly still owes assembly — tell the workshop (motorcycle.manage
+        # in the unit's branch), so it lands on someone's radar for the assembly queue.
+        if unit.assembly_pending and self.notifications is not None:
+            await self.notifications.notify(
+                tenant_id=tenant_id, event_type=N_EVENTS.BIKE_SOLD_BEFORE_ASSEMBLY, severity="warning",
+                title=f"Bike {unit.chassis_number} sold before assembly",
+                body="Queue it for assembly before delivery.", href="/assembly-queue",
+                entity_type="unit", entity_id=unit.id, branch_id=unit.branch_id,
+                actor_user_id=user_id, permission="motorcycle.manage",
+            )
         return await self._unit_out(unit, with_events=True)
 
     async def revert_sale_for_invoice(self, *, tenant_id, user_id, invoice_id, reason: str) -> bool:
@@ -386,6 +398,8 @@ class MotorcycleService:
         if unit.assembled_date is not None and not unit.assembly_pending:
             raise BusinessRuleError(f"Unit {unit.chassis_number} is already assembled.")
         old = unit.status
+        # A SOLD unit that owed assembly: the customer's bike is now ready (unblocks delivery).
+        was_owed_after_sale = unit.assembly_pending and unit.status == L.SOLD
         if unit.status == L.UNASSEMBLED:
             unit.status = L.ASSEMBLED   # an in-stock unit: assembly completes the sale-status move
         unit.assembled_date = unit.assembled_date or dt.date.today()
@@ -397,6 +411,17 @@ class MotorcycleService:
             to_status=unit.status, user_id=user_id, note=payload.note,
         )
         await self._audit(tenant_id, user_id, "unit", unit.id, "assembled", old=old, new=unit.status)
+        # Tell the salesperson who sold it that their customer's bike is assembled + deliverable.
+        if was_owed_after_sale and self.notifications is not None:
+            seller = await self.repo.sold_by(unit.id)
+            if seller is not None:
+                await self.notifications.notify(
+                    tenant_id=tenant_id, event_type=N_EVENTS.BIKE_ASSEMBLED, severity="info",
+                    title=f"Bike {unit.chassis_number} is assembled",
+                    body="It's ready for delivery to the customer.", href=f"/motorcycles/{unit.id}",
+                    entity_type="unit", entity_id=unit.id, branch_id=unit.branch_id,
+                    actor_user_id=user_id, recipient_user_ids=[seller],
+                )
         return await self._unit_out(unit, with_events=True)
 
     async def transfer(self, *, tenant_id, user_id, unit_id, payload: TransferIn) -> UnitOut:
