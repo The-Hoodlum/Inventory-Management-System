@@ -336,6 +336,9 @@ export const salesApi = {
     price?: number | null;
     payments?: PaymentLineIn[];
     note?: string | null;
+    // Only meaningful when the unit is still unassembled: true (default) = the dealership
+    // assembles before delivery (queued); false = a reseller sale, delivered as-is.
+    assembly_required?: boolean;
   }) => api.post<BikeSaleResult>("/sales/bike-sale", body),
 
   // parts sales log (line-grain; fungible products only)

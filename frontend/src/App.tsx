@@ -5,6 +5,7 @@ import { AppShell } from "@/components/AppShell";
 import AdvisorPage from "@/pages/AdvisorPage";
 import AppLauncherPage from "@/pages/AppLauncherPage";
 import AssemblyPlannerPage from "@/pages/AssemblyPlannerPage";
+import AssemblyQueuePage from "@/pages/AssemblyQueuePage";
 import BikeIssueDetailPage from "@/pages/BikeIssueDetailPage";
 import BikeIssuesPage from "@/pages/BikeIssuesPage";
 import BikePosPage from "@/pages/BikePosPage";
@@ -88,6 +89,7 @@ export default function App() {
         <Route path="/bike-issues" element={<BikeIssuesPage />} />
         <Route path="/bike-issues/:id" element={<BikeIssueDetailPage />} />
         <Route path="/assembly-planner" element={<AssemblyPlannerPage />} />
+        <Route path="/assembly-queue" element={<AssemblyQueuePage />} />
         <Route path="/service-followup" element={<ServiceFollowUpPage />} />
         <Route path="/pos" element={<BikePosPage />} />
         <Route path="/parts-sales" element={<SparePartsSalesPage />} />

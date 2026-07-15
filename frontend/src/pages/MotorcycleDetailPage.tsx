@@ -45,6 +45,14 @@ export default function MotorcycleDetailPage() {
     onError: (e) => setErr(e instanceof ApiError ? e.message : "Transition failed."),
   });
 
+  // Record assembly as an independent fact — needed for a unit SOLD before assembly, where
+  // no status transition is available (sold is terminal) but assembly is still owed.
+  const assemble = useMutation({
+    mutationFn: () => motorcyclesApi.assemble(id),
+    onSuccess: invalidate,
+    onError: (e) => setErr(e instanceof ApiError ? e.message : "Could not mark assembled."),
+  });
+
   return (
     <DetailScaffold loading={isLoading} error={error} notFound={!isLoading && !data}>
       {data && (
@@ -55,7 +63,7 @@ export default function MotorcycleDetailPage() {
             status={data.status}
             backTo={{ href: "/motorcycles", label: "Motorcycles" }}
             actions={canManage ? (
-              <LifecycleActions unit={data} onTransition={(to) => transition.mutate(to)} onModal={setModal} busy={transition.isPending} />
+              <LifecycleActions unit={data} onTransition={(to) => transition.mutate(to)} onModal={setModal} onAssemble={() => assemble.mutate()} busy={transition.isPending || assemble.isPending} />
             ) : undefined}
             tabs={[
               { key: "identity", label: "Identity", content: <IdentityTab unit={data} canManage={canManage} onSaved={invalidate} /> },
@@ -98,13 +106,18 @@ function eventTitle(type: string, to?: string | null): string {
 // Reserve / sell / on_hold open modals (they need a customer, an invoice, or a reason);
 // the remaining legal moves (assembled/unassembled) are one-click. Illegal moves are
 // never offered — allowed_next comes from the server state machine.
-function LifecycleActions({ unit, onTransition, onModal, busy }: {
-  unit: MotoUnit; onTransition: (to: string) => void; onModal: (m: ActionModal) => void; busy: boolean;
+function LifecycleActions({ unit, onTransition, onModal, onAssemble, busy }: {
+  unit: MotoUnit; onTransition: (to: string) => void; onModal: (m: ActionModal) => void; onAssemble: () => void; busy: boolean;
 }) {
   const next = unit.allowed_next;
   const modalStatuses = ["reserved", "sold", "on_hold"];
   return (
     <>
+      {/* Sold before assembly and assembly still owed — no status move applies, so offer the
+          dedicated assemble action to record it and clear the queue. */}
+      {unit.assembly_pending && (
+        <Button variant="secondary" disabled={busy} onClick={onAssemble}>Mark assembled</Button>
+      )}
       {next.filter((s) => !modalStatuses.includes(s)).map((s) => (
         <Button key={s} variant="secondary" disabled={busy} onClick={() => onTransition(s)}>
           Mark {statusLabel(s)}
@@ -160,6 +173,8 @@ function LifecycleTab({ unit, canManage, onSaved }: { unit: MotoUnit; canManage:
   return (
     <div className="max-w-xl">
       <Row label="Status">{statusLabel(unit.status)}</Row>
+      <Row label="Assembled">{unit.assembled_date ? formatDate(unit.assembled_date) : "Not assembled"}</Row>
+      {unit.assembly_pending && <Row label="Assembly owed">Yes — sold before assembly</Row>}
       <Row label="Inspected">{unit.inspected ? "Yes" : "No"}</Row>
       {unit.status === "on_hold" ? (
         <Row label="Hold reason">{unit.hold_reason ?? "—"}</Row>

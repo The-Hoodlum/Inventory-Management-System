@@ -7,6 +7,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { useAuth } from "@/auth/AuthContext";
+import { AssemblyBadge } from "@/components/AssemblyBadge";
 import { Modal } from "@/components/Modal";
 import { type Column, type DataTableState, ListPage, initialTableState } from "@/components/ds";
 import { Button, StatusBadge } from "@/components/ui";
@@ -75,6 +76,7 @@ export default function MotorcyclesPage() {
     { key: "customer", header: "Customer", accessor: (u) => u.customer_name ?? "—", defaultHidden: true },
     { key: "registration", header: "Reg. no.", accessor: (u) => u.registration_number ?? "—", defaultHidden: true },
     { key: "status", header: "Status", accessor: (u) => u.status, render: (u) => <StatusBadge status={u.status} /> },
+    { key: "assembly", header: "Assembly", accessor: (u) => (u.assembly_pending ? "owed" : u.assembled_date ? "assembled" : "not_assembled"), render: (u) => <AssemblyBadge unit={u} />, defaultHidden: true },
   ];
 
   return (

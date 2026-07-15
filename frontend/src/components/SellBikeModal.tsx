@@ -2,20 +2,25 @@
 // price + customer, optionally take payment, and complete. Creates a branded invoice,
 // marks the unit sold, and (with payment) issues a receipt — one call to /sales/bike-sale.
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { AlertTriangle } from "lucide-react";
 import { useState } from "react";
 
+import { AssemblyBadge } from "@/components/AssemblyBadge";
 import { Modal } from "@/components/Modal";
 import { Button } from "@/components/ui";
 import { ApiError } from "@/lib/api";
 import { useCustomers } from "@/lib/customers";
 import { formatMoney } from "@/lib/format";
-import { motorcyclesApi } from "@/lib/motorcycles";
+import { assemblyState, type MotoUnit, motorcyclesApi } from "@/lib/motorcycles";
 import { type BikeSaleResult, salesApi } from "@/lib/sales";
 
 const INPUT = "w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500";
 const METHODS = ["cash", "card", "mobile_money", "bank_transfer", "cheque"] as const;
 
-interface PickedBike { id: string; chassis: string; engine: string | null; model: string | null; price: number }
+interface PickedBike {
+  id: string; chassis: string; engine: string | null; model: string | null; price: number;
+  assembled_date: string | null; assembly_pending: boolean;
+}
 
 export function SellBikeModal({ onClose, onSold }: { onClose: () => void; onSold?: (r: BikeSaleResult) => void }) {
   const customers = useCustomers();
@@ -26,6 +31,10 @@ export function SellBikeModal({ onClose, onSold }: { onClose: () => void; onSold
   const [takePayment, setTakePayment] = useState(true);
   const [method, setMethod] = useState<(typeof METHODS)[number]>("cash");
   const [amount, setAmount] = useState("");
+  // Selling before assembly: assemblyRequired = we assemble before delivery (queued);
+  // unchecked = reseller sale, delivered as-is.
+  const [assemblyRequired, setAssemblyRequired] = useState(true);
+  const [ackBeforeAssembly, setAckBeforeAssembly] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [done, setDone] = useState<BikeSaleResult | null>(null);
 
@@ -34,11 +43,13 @@ export function SellBikeModal({ onClose, onSold }: { onClose: () => void; onSold
     queryFn: () => motorcyclesApi.listUnits({ search: search.trim(), sold: false, page_size: 8 }),
     enabled: search.trim().length >= 2 && !bike,
   });
-  // Only units the lifecycle allows selling (assembled / reserved).
+  // Any unit the lifecycle allows selling — assembled, reserved OR unassembled (a bike can
+  // be sold before assembly; a reseller assembles it themselves).
   const sellable = (bikeQ.data?.items ?? []).filter((u) => u.allowed_next.includes("sold"));
 
   const priceNum = Number(price) || 0;
   const amountNum = Number(amount) || 0;
+  const beforeAssembly = bike ? assemblyState(bike) !== "assembled" : false;
 
   const sell = useMutation({
     mutationFn: () => salesApi.sellBike({
@@ -46,16 +57,22 @@ export function SellBikeModal({ onClose, onSold }: { onClose: () => void; onSold
       customer_id: customerId || null,
       price: priceNum,
       payments: takePayment && amountNum > 0 ? [{ method, amount: amountNum }] : [],
+      assembly_required: beforeAssembly ? assemblyRequired : true,
     }),
     onSuccess: (r) => { setDone(r); onSold?.(r); },
     onError: (e) => setErr(e instanceof ApiError ? e.message : "Could not complete the sale."),
   });
 
-  function pick(u: { id: string; chassis_number: string; engine_number: string | null; model_name: string | null; selling_price: number | null }) {
+  function pick(u: MotoUnit) {
     const p = Number(u.selling_price ?? 0);
-    setBike({ id: u.id, chassis: u.chassis_number, engine: u.engine_number, model: u.model_name, price: p });
+    setBike({
+      id: u.id, chassis: u.chassis_number, engine: u.engine_number, model: u.model_name, price: p,
+      assembled_date: u.assembled_date, assembly_pending: u.assembly_pending,
+    });
     setPrice(p ? String(p) : "");
     setAmount(p ? String(p) : "");
+    setAssemblyRequired(true);
+    setAckBeforeAssembly(false);
     setSearch("");
   }
 
@@ -80,7 +97,7 @@ export function SellBikeModal({ onClose, onSold }: { onClose: () => void; onSold
     );
   }
 
-  const valid = bike && priceNum > 0 && (!takePayment || amountNum > 0);
+  const valid = bike && priceNum > 0 && (!takePayment || amountNum > 0) && (!beforeAssembly || ackBeforeAssembly);
 
   return (
     <Modal title="Sell a bike" size="lg" onClose={onClose} footer={
@@ -101,6 +118,7 @@ export function SellBikeModal({ onClose, onSold }: { onClose: () => void; onSold
             <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
               <span className="font-mono text-[13px] text-slate-800">{bike.chassis}</span>
               <span className="text-xs text-slate-500">Engine {bike.engine ?? "—"} · {bike.model}</span>
+              <AssemblyBadge unit={bike} className="ml-1" />
               <button className="ml-auto text-xs text-slate-400 hover:text-red-600" onClick={() => setBike(null)}>change</button>
             </div>
           ) : (
@@ -109,9 +127,12 @@ export function SellBikeModal({ onClose, onSold }: { onClose: () => void; onSold
               {search.trim().length >= 2 && (
                 <div className="mt-1 max-h-40 overflow-y-auto rounded-lg border border-slate-200">
                   {sellable.map((u) => (
-                    <button key={u.id} className="flex w-full items-center justify-between px-3 py-1.5 text-left text-sm hover:bg-slate-50" onClick={() => pick(u)}>
+                    <button key={u.id} className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-sm hover:bg-slate-50" onClick={() => pick(u)}>
                       <span className="font-mono text-[13px]">{u.chassis_number}</span>
-                      <span className="text-xs text-slate-500">{u.model_name} · {formatMoney(Number(u.selling_price ?? 0), "ZMW")}</span>
+                      <span className="flex items-center gap-2 text-xs text-slate-500">
+                        <AssemblyBadge unit={u} />
+                        {u.model_name} · {formatMoney(Number(u.selling_price ?? 0), "ZMW")}
+                      </span>
                     </button>
                   ))}
                   {sellable.length === 0 && !bikeQ.isFetching && <div className="px-3 py-2 text-xs text-slate-400">No sellable bike matches.</div>}
@@ -120,6 +141,30 @@ export function SellBikeModal({ onClose, onSold }: { onClose: () => void; onSold
             </>
           )}
         </div>
+
+        {beforeAssembly && (
+          <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm">
+            <div className="flex items-start gap-2 font-medium text-amber-800">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>This bike isn't assembled yet — you're selling it before assembly.</span>
+            </div>
+            <label className="flex items-start gap-2 text-amber-900">
+              <input type="checkbox" className="mt-0.5" checked={assemblyRequired} onChange={(e) => setAssemblyRequired(e.target.checked)} />
+              <span>
+                We assemble it before delivery
+                <span className="block text-xs text-amber-700">
+                  {assemblyRequired
+                    ? "It'll be queued for assembly and can't be dispatched until it's assembled."
+                    : "Reseller sale — delivered as-is; the buyer assembles it. Nothing is queued."}
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-amber-900">
+              <input type="checkbox" className="mt-0.5" checked={ackBeforeAssembly} onChange={(e) => setAckBeforeAssembly(e.target.checked)} />
+              <span>I confirm selling this bike before it's assembled.</span>
+            </label>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <Field label="Price *">
