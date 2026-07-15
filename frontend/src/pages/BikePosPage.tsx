@@ -5,17 +5,18 @@
 // does NOT sell fungible parts — those have their own Spare Parts POS. Bike prices are
 // VAT-inclusive (VAT is extracted server-side; the customer pays the shown price).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bike, Check, Wrench } from "lucide-react";
+import { AlertTriangle, Bike, Check, Wrench } from "lucide-react";
 import { useState } from "react";
 
 import { useAuth } from "@/auth/AuthContext";
+import { AssemblyBadge } from "@/components/AssemblyBadge";
 import { PageHeader } from "@/components/PageHeader";
 import { emptyPaymentRow, type PaymentRow, PaymentRows, paymentRowsTotal, toPaymentLines } from "@/components/PaymentRows";
 import { Button, Card, Spinner } from "@/components/ui";
 import { ApiError } from "@/lib/api";
 import { useCustomers } from "@/lib/customers";
 import { formatDate, formatMoney } from "@/lib/format";
-import { type MotoUnit, motorcyclesApi, useMotoModels } from "@/lib/motorcycles";
+import { assemblyState, type MotoUnit, motorcyclesApi, useMotoModels } from "@/lib/motorcycles";
 import { useBranches } from "@/lib/refdata";
 import { type BikeSaleResult, salesApi } from "@/lib/sales";
 
@@ -43,11 +44,16 @@ export default function BikePosPage() {
   const [customerId, setCustomerId] = useState("");
   const [takePayment, setTakePayment] = useState(true);
   const [payRows, setPayRows] = useState<PaymentRow[]>([emptyPaymentRow("cash")]);
+  // Selling a bike before it is assembled: assemblyRequired = the dealership assembles it
+  // (queued + can't dispatch until done); unchecked = a reseller sale, delivered as-is.
+  const [assemblyRequired, setAssemblyRequired] = useState(true);
+  const [ackBeforeAssembly, setAckBeforeAssembly] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [done, setDone] = useState<BikeSaleResult | null>(null);
 
-  // Available-to-sell units. Only assembled + reserved units can be sold, so fetch those
-  // statuses server-side (a plain sold=false page would be swamped by unassembled stock).
+  // Available-to-sell units: assembled, reserved AND unassembled (bikes can be sold before
+  // assembly — resellers assemble them themselves). Fetch each status server-side and show
+  // the ready ones first; a plain sold=false page can't order by readiness.
   const common = {
     search: search.trim() || undefined,
     branch_id: branchId || undefined,
@@ -64,21 +70,31 @@ export default function BikePosPage() {
     queryFn: () => motorcyclesApi.listUnits({ ...common, status: "reserved" }),
     placeholderData: (p) => p,
   });
-  const unitsLoading = !assembledQ.data || !reservedQ.data;
-  const unitsFetching = assembledQ.isFetching || reservedQ.isFetching;
+  const unassembledQ = useQuery({
+    queryKey: ["bike-pos-units", "unassembled", search, branchId, modelId],
+    queryFn: () => motorcyclesApi.listUnits({ ...common, status: "unassembled" }),
+    placeholderData: (p) => p,
+  });
+  const unitsLoading = !assembledQ.data || !reservedQ.data || !unassembledQ.data;
+  const unitsFetching = assembledQ.isFetching || reservedQ.isFetching || unassembledQ.isFetching;
   const sellable = [
     ...(assembledQ.data?.items ?? []),
     ...(reservedQ.data?.items ?? []),
+    ...(unassembledQ.data?.items ?? []),
   ].filter((u) => u.allowed_next.includes("sold"));
 
   const priceNum = Number(price) || 0;
   const paidNum = paymentRowsTotal(payRows);
+  // Is the picked bike being sold before it is assembled?
+  const beforeAssembly = bike ? assemblyState(bike) !== "assembled" : false;
 
   function pick(u: MotoUnit) {
     setBike(u);
     const p = Number(u.selling_price ?? 0);
     setPrice(p ? String(p) : "");
     setPayRows([{ ...emptyPaymentRow("cash"), amount: p ? String(p) : "" }]);
+    setAssemblyRequired(true);
+    setAckBeforeAssembly(false);
     setErr(null);
   }
 
@@ -89,6 +105,7 @@ export default function BikePosPage() {
         customer_id: customerId || null,
         price: priceNum,
         payments: takePayment ? toPaymentLines(payRows) : [],
+        assembly_required: beforeAssembly ? assemblyRequired : true,
       }),
     onSuccess: (r) => {
       setDone(r);
@@ -96,6 +113,8 @@ export default function BikePosPage() {
       setPrice("");
       setPayRows([emptyPaymentRow("cash")]);
       setCustomerId("");
+      setAssemblyRequired(true);
+      setAckBeforeAssembly(false);
       void qc.invalidateQueries({ queryKey: ["bike-pos-units"] });
       void qc.invalidateQueries({ queryKey: ["bike-sales-log"] });
     },
@@ -109,7 +128,9 @@ export default function BikePosPage() {
   });
 
   const overpay = takePayment && paidNum > priceNum + 0.001;
-  const valid = bike && priceNum > 0 && (!takePayment || paidNum > 0) && !overpay;
+  const valid =
+    bike && priceNum > 0 && (!takePayment || paidNum > 0) && !overpay &&
+    (!beforeAssembly || ackBeforeAssembly);
 
   return (
     <div>
@@ -154,7 +175,7 @@ export default function BikePosPage() {
             ) : sellable.length === 0 ? (
               <div className="p-8 text-center text-sm text-slate-400">
                 <Bike className="mx-auto mb-2 h-6 w-6 text-slate-300" />
-                No available bikes match. Only assembled or reserved units can be sold.
+                No available bikes match. Assembled, reserved and unassembled units can all be sold.
               </div>
             ) : (
               <div className="max-h-[28rem] space-y-1.5 overflow-y-auto">
@@ -164,7 +185,7 @@ export default function BikePosPage() {
                     <button
                       key={u.id}
                       onClick={() => pick(u)}
-                      className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm transition ${
+                      className={`flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm transition ${
                         selected
                           ? "border-brand-500 bg-brand-50"
                           : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
@@ -177,8 +198,11 @@ export default function BikePosPage() {
                           {u.status === "reserved" ? " · reserved" : ""}
                         </span>
                       </span>
-                      <span className="ml-2 shrink-0 font-mono text-xs text-slate-600">
-                        {formatMoney(Number(u.selling_price ?? 0), "ZMW")}
+                      <span className="ml-auto flex shrink-0 items-center gap-2">
+                        <AssemblyBadge unit={u} />
+                        <span className="font-mono text-xs text-slate-600">
+                          {formatMoney(Number(u.selling_price ?? 0), "ZMW")}
+                        </span>
                       </span>
                     </button>
                   );
@@ -197,9 +221,47 @@ export default function BikePosPage() {
             ) : (
               <div className="flex-1 space-y-3">
                 <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-                  <div className="font-mono text-[13px] text-slate-800">{bike.chassis_number}</div>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="font-mono text-[13px] text-slate-800">{bike.chassis_number}</div>
+                    <AssemblyBadge unit={bike} />
+                  </div>
                   <div className="text-xs text-slate-500">{bikeLabel(bike)} · engine {bike.engine_number ?? "—"}</div>
                 </div>
+
+                {beforeAssembly && (
+                  <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm">
+                    <div className="flex items-start gap-2 font-medium text-amber-800">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>This bike isn't assembled yet — you're selling it before assembly.</span>
+                    </div>
+                    <label className="flex items-start gap-2 text-amber-900">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5"
+                        checked={assemblyRequired}
+                        onChange={(e) => setAssemblyRequired(e.target.checked)}
+                      />
+                      <span>
+                        We assemble it before delivery
+                        <span className="block text-xs text-amber-700">
+                          {assemblyRequired
+                            ? "It'll be queued for assembly and can't be dispatched until it's assembled."
+                            : "Reseller sale — delivered as-is; the buyer assembles it. Nothing is queued."}
+                        </span>
+                      </span>
+                    </label>
+                    <label className="flex items-start gap-2 text-amber-900">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5"
+                        checked={ackBeforeAssembly}
+                        onChange={(e) => setAckBeforeAssembly(e.target.checked)}
+                      />
+                      <span>I confirm selling this bike before it's assembled.</span>
+                    </label>
+                  </div>
+                )}
+
                 <label className="block text-sm">
                   <span className="mb-1 block font-medium text-slate-700">Price (VAT-inclusive) *</span>
                   <input type="number" min={0} className={`${INPUT} w-full`} value={price}

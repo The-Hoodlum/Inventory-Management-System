@@ -95,6 +95,11 @@ export interface MotoUnit {
   country_of_origin: string | null;
   status: UnitStatus;
   inspected: boolean;              // independent of status
+  // Assembly is an INDEPENDENT fact, not a sale status. assembled_date is when it was
+  // built; assembly_pending = it was SOLD before assembly and the dealership still owes
+  // assembly before delivery (a reseller sale leaves this false — the buyer assembles).
+  assembled_date: string | null;
+  assembly_pending: boolean;
   hold_reason: string | null;      // set while on_hold; kept for history after
   reserved_ref: string | null;
   reserved_so_number: string | null;
@@ -128,9 +133,26 @@ export interface UnitListParams {
   sold?: boolean;
   inspected?: boolean;
   registered?: boolean;
+  assembly_pending?: boolean;
   page?: number;
   page_size?: number;
 }
+
+// ---- assembly (an independent fact, surfaced across the sale + queue UIs) --
+export type AssemblyState = "assembled" | "owed" | "not_assembled";
+
+/** Where a unit sits on the assembly axis, independent of its sale status. */
+export function assemblyState(u: { assembled_date: string | null; assembly_pending: boolean }): AssemblyState {
+  if (u.assembly_pending) return "owed";        // sold before assembly — dealership still owes it
+  if (u.assembled_date) return "assembled";     // built
+  return "not_assembled";                       // in stock, still needs assembly (or a reseller sale)
+}
+
+export const ASSEMBLY_BADGE: Record<AssemblyState, { label: string; dot: string; cls: string }> = {
+  assembled:     { label: "Assembled",         dot: "🟢", cls: "bg-emerald-50 text-emerald-700 ring-emerald-200" },
+  not_assembled: { label: "Assembly required", dot: "🟡", cls: "bg-amber-50 text-amber-700 ring-amber-200" },
+  owed:          { label: "Awaiting assembly", dot: "🟠", cls: "bg-orange-50 text-orange-700 ring-orange-200" },
+};
 
 function qs(params: Record<string, unknown>): string {
   const p = new URLSearchParams();
@@ -170,6 +192,10 @@ export const motorcyclesApi = {
     api.post<MotoUnit>(`/motorcycles/units/${id}/sell`, body),
   transfer: (id: string, body: { to_branch_id: string; to_warehouse_id?: string; internal_location?: string; note?: string }) =>
     api.post<MotoUnit>(`/motorcycles/units/${id}/transfer`, body),
+  // Record that a unit has been assembled (independent of sale status): clears
+  // assembly_pending for a sold unit, or moves an in-stock unit unassembled -> assembled.
+  assemble: (id: string, body: { note?: string } = {}) =>
+    api.post<MotoUnit>(`/motorcycles/units/${id}/assemble`, body),
 };
 
 export interface MotoMetrics {
