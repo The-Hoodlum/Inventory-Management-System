@@ -118,6 +118,11 @@ class FakeRepo:
         self.calls["daily_summary"] = (day, ids, currency)
         return {"by_branch": []}
 
+    async def assembly_status(self, ids):
+        self.calls["assembly_status"] = (ids,)
+        return {"available": True, "waiting_for_assembly": 3, "unassembled_in_stock": 10,
+                "avg_assembly_days": 2.5, "queue": [{"chassis": "CH-1", "model": "HLX 125"}]}
+
 
 class ScriptedProvider(LLMProvider):
     """Calls the executor for a fixed plan of (tool, args), then returns `answer`."""
@@ -366,12 +371,20 @@ async def test_slow_moving_and_daily_summary_dispatch():
     assert repo.calls["daily_summary"][0] == dt.date(2026, 6, 21)
 
 
-async def test_assembly_status_is_honest_not_fabricated():
+async def test_assembly_status_dispatches_branch_scoped():
+    # Assembly is now a tracked fact; the tool dispatches to the repo (all accessible branches).
     repo = FakeRepo()
     _, provider = await _ask(repo, [("get_assembly_status", {})])
+    assert repo.calls["assembly_status"] == ([LUSAKA, NDOLA],)
     result = provider.results[0][1]
-    assert result["available"] is False
-    assert "assembly" in result["message"].lower()
+    assert result["available"] is True
+    assert result["waiting_for_assembly"] == 3 and result["unassembled_in_stock"] == 10
+
+
+async def test_assembly_status_named_branch_scopes():
+    repo = FakeRepo()
+    await _ask(repo, [("get_assembly_status", {"branch": "Lusaka"})])
+    assert repo.calls["assembly_status"] == ([LUSAKA],)
 
 
 async def test_conversation_is_logged():

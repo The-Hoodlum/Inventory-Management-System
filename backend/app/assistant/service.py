@@ -187,8 +187,7 @@ class AssistantService:
             d, derr = parse_date(args.get("date"), today)
             return {"error": derr} if derr else await self.repo.daily_summary(d, ids, currency)
         if name == "get_assembly_status":
-            return {"available": False,
-                    "message": "Assembly status is not tracked in the system yet."}
+            return await self.repo.assembly_status(ids)
         return {"error": f"Unknown tool '{name}'."}
 
     async def _create_order_request(

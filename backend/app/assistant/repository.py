@@ -23,6 +23,8 @@ from app.models import (
     AssistantMessage,
     Category,
     Inventory,
+    MotorcycleModel,
+    MotorcycleUnit,
     Permission,
     Product,
     PurchaseOrder,
@@ -566,4 +568,49 @@ class AssistantRepository:
             "revenue_is_estimate": True, "top_item": totals["top_item"], "best_branch": totals["best_branch"],
             "low_stock_count": low["count"], "pending_purchase_requests": pending["count"],
             "by_branch": branches["by_branch"],
+        }
+
+    async def assembly_status(self, warehouse_ids: list[uuid.UUID]) -> dict:
+        """Motorcycle assembly picture: bikes sold BEFORE assembly that still owe assembly
+        (with a sample of the queue), unassembled units still in stock, and the average
+        receipt->assembled lead time. Assembly is an independent fact (not a sale status).
+
+        Branch-scoped from the caller's accessible warehouses — motorcycles are tracked by
+        branch (a unit may have no warehouse but always a branch)."""
+        branch_ids = [
+            b for (b,) in (await self.session.execute(
+                select(Warehouse.branch_id).where(Warehouse.id.in_(warehouse_ids)).distinct()
+            )).all() if b is not None
+        ]
+
+        def scoped(stmt):
+            return stmt.where(MotorcycleUnit.branch_id.in_(branch_ids)) if branch_ids else stmt
+
+        waiting = int(await self.session.scalar(scoped(
+            select(func.count()).select_from(MotorcycleUnit).where(MotorcycleUnit.assembly_pending.is_(True))
+        )) or 0)
+        unassembled = int(await self.session.scalar(scoped(
+            select(func.count()).select_from(MotorcycleUnit).where(MotorcycleUnit.status == "unassembled")
+        )) or 0)
+        avg_days = await self.session.scalar(scoped(
+            select(cast(func.avg(MotorcycleUnit.assembled_date - MotorcycleUnit.date_received), Numeric)).where(
+                MotorcycleUnit.assembled_date.is_not(None),
+                MotorcycleUnit.date_received.is_not(None),
+                MotorcycleUnit.assembled_date >= MotorcycleUnit.date_received,
+            )
+        ))
+        rows = (await self.session.execute(scoped(
+            select(MotorcycleUnit.chassis_number, MotorcycleModel.name)
+            .select_from(MotorcycleUnit)
+            .outerjoin(MotorcycleModel, MotorcycleModel.id == MotorcycleUnit.model_id)
+            .where(MotorcycleUnit.assembly_pending.is_(True))
+            .order_by(MotorcycleUnit.updated_at.desc())
+            .limit(_MAX_ROWS)
+        ))).all()
+        return {
+            "available": True,
+            "waiting_for_assembly": waiting,          # sold before assembly, assembly owed
+            "unassembled_in_stock": unassembled,      # on hand, not yet assembled
+            "avg_assembly_days": round(_f(avg_days), 1) if avg_days is not None else None,
+            "queue": [{"chassis": ch, "model": mdl} for ch, mdl in rows],
         }

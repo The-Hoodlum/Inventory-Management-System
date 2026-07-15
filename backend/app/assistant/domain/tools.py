@@ -98,7 +98,10 @@ TOOL_SPECS: list[dict] = [
         "supplier, and lead time; factors in reorder point, safety stock, MOQ, and carton size.",
         {**_BRANCH}),
     _fn("get_assembly_status",
-        "Assembly/build status of products. (Assembly is NOT tracked in this system.)",
+        "Assembly/build status of serialized units: how many were SOLD before assembly and still "
+        "owe assembly (with a sample of that queue by serial number), how many unassembled units "
+        "are still in stock, and the average receipt-to-assembled lead time. Use for questions "
+        "like 'what's waiting for assembly?' or 'how many units are unassembled?'.",
         {**_BRANCH}),
     _fn("get_order_requests",
         "List branch order requests (requisitions), most recent first, optionally filtered by "
