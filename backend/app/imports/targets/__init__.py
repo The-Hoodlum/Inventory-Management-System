@@ -1,4 +1,5 @@
 """Import targets. Importing this package registers every built-in target."""
+from app.imports.targets import customer_delivery_notes as _customer_delivery_notes  # noqa: F401  (registers)
 from app.imports.targets import inventory as _inventory  # noqa: F401  (registers)
 from app.imports.targets import motorcycle_units as _motorcycle_units  # noqa: F401  (registers)
 from app.imports.targets import opening_balances as _opening_balances  # noqa: F401  (registers)

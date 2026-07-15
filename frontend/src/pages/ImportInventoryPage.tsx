@@ -28,6 +28,7 @@ const VIEW: Record<string, { path: string; label: string }> = {
   suppliers: { path: "/suppliers", label: "View suppliers" },
   warehouses: { path: "/warehouses", label: "View warehouses" },
   parts_sales_log: { path: "/sales-log", label: "View sales log" },
+  customer_delivery_notes: { path: "/customer-deliveries", label: "View deliveries" },
 };
 
 function errMessage(e: unknown): string {
