@@ -47,3 +47,14 @@ def test_invoice_pdf_tolerates_legacy_3tuple_bike():
     # An older 3-tuple bike (no assembly flag) must still render.
     out = build_invoice_pdf(_invoice(), bike=("CH-9", "RTR 200", 56000.0), currency="ZMW")
     assert isinstance(out, bytes) and out[:4] == b"%PDF"
+
+
+def test_invoice_pdf_bulk_multiple_bikes_renders():
+    # A bulk sale: several bikes on one invoice, one of them not yet assembled.
+    bikes = [
+        ("CH-1", "HLX 125", 20000.0, False),
+        ("CH-2", "RTR 200", 56000.0, True),
+        ("CH-3", "NtorQ", 24500.0, False),
+    ]
+    out = build_invoice_pdf(_invoice(grand_total_zmw=100500.0), bikes=bikes, currency="ZMW")
+    assert isinstance(out, bytes) and out[:4] == b"%PDF" and len(out) > 800

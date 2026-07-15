@@ -39,6 +39,9 @@ from app.sales.repository import SO_LINE_REF, SalesRepository
 from app.sales.schemas import (
     BikeSaleIn,
     BikeSaleResult,
+    BulkBikeSaleBikeOut,
+    BulkBikeSaleIn,
+    BulkBikeSaleResult,
     ConvertToOrder,
     CreditNoteCreate,
     CreditNoteOut,
@@ -670,6 +673,88 @@ class SalesService:
             invoice=await self._invoice_out(fresh), receipt=receipt_out,
         )
 
+    async def sell_bikes_bulk(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, payload: BulkBikeSaleIn, motorcycles,
+        allowed_branch_ids: frozenset[uuid.UUID] | None = None,
+    ) -> BulkBikeSaleResult:
+        """Sell SEVERAL bikes to one customer on ONE invoice, in one transaction. The whole
+        batch is validated up front (each unit sellable + in a permitted branch); then a
+        single bike-only invoice is raised for the COMBINED total (VAT inclusive, extracted
+        once), every unit is marked sold + linked to that invoice, and one set of payments
+        settles it. Any failure rolls the entire sale back — no partial invoice, no half-sold
+        batch. Revenue still lives on each unit's price_charged (summing to the total), so the
+        Sales Log is unchanged."""
+        from app.motorcycles.schemas import SellIn
+
+        customer_id = payload.customer_id or await self._walkin_customer(tenant_id, user_id)
+        if payload.customer_id:
+            await self._require_customer(payload.customer_id)
+
+        prepared: list[tuple] = []   # (unit, price, assembly_required)
+        seen: set[uuid.UUID] = set()
+        total = Decimal("0")
+        for ln in payload.lines:
+            if ln.unit_id in seen:
+                raise BusinessRuleError("A bike is listed more than once.")
+            seen.add(ln.unit_id)
+            unit = await motorcycles.get_unit(ln.unit_id)   # raises if missing
+            if allowed_branch_ids is not None:
+                for b in (unit.branch_id, payload.branch_id):
+                    if b is not None and b not in allowed_branch_ids:
+                        raise PermissionDeniedError("You are not assigned to that branch.")
+            if "sold" not in unit.allowed_next:
+                raise BusinessRuleError(
+                    f"Bike {unit.chassis_number} is {unit.status} and cannot be sold "
+                    "(an on-hold or already-sold unit can't be sold; clear the hold first)."
+                )
+            price = _d(ln.price) if ln.price is not None else _d(unit.selling_price)
+            if price <= 0:
+                raise BusinessRuleError(f"A selling price is required for bike {unit.chassis_number}.")
+            prepared.append((unit, price, ln.assembly_required))
+            total += price
+
+        branch_id = payload.branch_id or prepared[0][0].branch_id
+        currency = await self.repo.base_currency(tenant_id)
+        vat_rate = await self.repo.current_vat_rate(tenant_id)
+        amt = pricing.line_amounts(1, total, 0, vat_rate * Decimal("100"), pricing.INCLUSIVE)
+        invoice = Invoice(
+            tenant_id=tenant_id, invoice_number=await self.repo.number(tenant_id, "invoice", "INV"),
+            sales_order_id=None, delivery_note_id=None, customer_id=customer_id,
+            branch_id=branch_id, currency=currency, payment_terms="pos", status=S.INV_SENT,
+            subtotal=total, discount_total=Decimal("0"), net_total=amt["net"], tax_total=amt["vat"],
+            grand_total=total, vat_rate=vat_rate, fx_rate=Decimal("1"), grand_total_zmw=total,
+            amount_paid=Decimal("0"), created_by=user_id,
+        )
+        self.repo.session.add(invoice)
+        await self.repo.session.flush()
+
+        bikes_out: list[BulkBikeSaleBikeOut] = []
+        for unit, price, asm in prepared:
+            sold = await motorcycles.sell(
+                tenant_id=tenant_id, user_id=user_id, unit_id=unit.id,
+                payload=SellIn(invoice_id=invoice.id, customer_id=customer_id,
+                               price_charged=float(price), note=payload.note, assembly_required=asm),
+            )
+            bikes_out.append(BulkBikeSaleBikeOut(
+                unit_id=unit.id, chassis_number=unit.chassis_number, model_name=unit.model_name,
+                price=float(price), assembly_pending=sold.assembly_pending,
+            ))
+
+        receipt_out = None
+        if payload.payments:
+            receipt_out = await self.record_payment(
+                tenant_id=tenant_id, user_id=user_id,
+                payload=PaymentCreate(invoice_id=invoice.id, payments=payload.payments),
+                branch_id=branch_id,
+            )
+
+        await self._audit(tenant_id, user_id, "sales_invoice", invoice.id, "bike_sale_bulk", None, invoice.status)
+        fresh = await self.repo.get_invoice(invoice.id)
+        return BulkBikeSaleResult(
+            invoice=await self._invoice_out(fresh), bikes=bikes_out,
+            total=float(total), receipt=receipt_out,
+        )
+
     # ================================ void =============================== #
     async def void_invoice(
         self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, invoice_id: uuid.UUID,
@@ -847,10 +932,10 @@ class SalesService:
         from app.sales.pdf import build_invoice_pdf
 
         inv = await self.get_invoice(invoice_id)
-        bike = await self.repo.linked_bike(invoice_id)
+        bikes = await self.repo.linked_bikes(invoice_id)
         currency = await self.repo.base_currency(tenant_id)
         payments = await self.list_invoice_payments(invoice_id=invoice_id)
-        return build_invoice_pdf(inv, bike=bike, currency=currency, payments=payments), inv.invoice_number
+        return build_invoice_pdf(inv, bikes=bikes, currency=currency, payments=payments), inv.invoice_number
 
     async def list_invoice_payments(self, *, invoice_id: uuid.UUID) -> list[PaymentOut]:
         """The payment lines settled against an invoice (method / amount / reference /

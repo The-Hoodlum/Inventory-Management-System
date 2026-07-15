@@ -162,6 +162,21 @@ export interface BikeSaleResult {
   receipt: Receipt | null;
 }
 
+export interface BulkBikeSaleBike {
+  unit_id: string;
+  chassis_number: string;
+  model_name: string | null;
+  price: number;
+  assembly_pending: boolean;
+}
+
+export interface BulkBikeSaleResult {
+  invoice: Invoice;
+  bikes: BulkBikeSaleBike[];
+  total: number;
+  receipt: Receipt | null;
+}
+
 export const RETURN_REASONS: { value: string; label: string }[] = [
   { value: "damaged", label: "Damaged" },
   { value: "wrong_item", label: "Wrong Item" },
@@ -340,6 +355,15 @@ export const salesApi = {
     // assembles before delivery (queued); false = a reseller sale, delivered as-is.
     assembly_required?: boolean;
   }) => api.post<BikeSaleResult>("/sales/bike-sale", body),
+
+  // sell SEVERAL bikes to one customer on ONE invoice + one payment
+  sellBikesBulk: (body: {
+    customer_id?: string | null;
+    branch_id?: string | null;
+    lines: { unit_id: string; price?: number | null; assembly_required?: boolean }[];
+    payments?: PaymentLineIn[];
+    note?: string | null;
+  }) => api.post<BulkBikeSaleResult>("/sales/bike-sale/bulk", body),
 
   // parts sales log (line-grain; fungible products only)
   listPartsSales: (params: PartsSalesParams = {}) => {

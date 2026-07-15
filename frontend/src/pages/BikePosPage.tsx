@@ -1,11 +1,11 @@
-// Bike POS — a purpose-built point of sale for SERIALIZED motorcycles. Browse the units
-// available to sell (assembled / reserved), pick one by chassis, confirm price + customer,
-// optionally take payment, and complete via the existing bike-sale flow (POST
-// /sales/bike-sale): a branded invoice, the unit marked sold + linked, and a receipt. It
-// does NOT sell fungible parts — those have their own Spare Parts POS. Bike prices are
-// VAT-inclusive (VAT is extracted server-side; the customer pays the shown price).
+// Bike POS — a purpose-built point of sale for SERIALIZED motorcycles. Build a cart of one
+// or more bikes (assembled or unassembled) for ONE customer, confirm each price, optionally
+// take payment, and complete via POST /sales/bike-sale/bulk: a single branded invoice with
+// a line per bike, every unit marked sold + linked, and one receipt. Selling several bikes
+// to one customer is one transaction (all-or-nothing). It does NOT sell fungible parts —
+// those have their own Spare Parts POS. Bike prices are VAT-inclusive (extracted server-side).
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Bike, Check, Wrench } from "lucide-react";
+import { AlertTriangle, Bike, Check, Plus, Wrench, X } from "lucide-react";
 import { useState } from "react";
 
 import { useAuth } from "@/auth/AuthContext";
@@ -18,7 +18,7 @@ import { useCustomers } from "@/lib/customers";
 import { formatDate, formatMoney } from "@/lib/format";
 import { assemblyState, type MotoUnit, motorcyclesApi, useMotoModels } from "@/lib/motorcycles";
 import { useBranches } from "@/lib/refdata";
-import { type BikeSaleResult, salesApi } from "@/lib/sales";
+import { type BulkBikeSaleResult, salesApi } from "@/lib/sales";
 
 const INPUT =
   "rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500";
@@ -39,21 +39,20 @@ export default function BikePosPage() {
   const [search, setSearch] = useState("");
   const [branchId, setBranchId] = useState("");
   const [modelId, setModelId] = useState("");
-  const [bike, setBike] = useState<MotoUnit | null>(null);
-  const [price, setPrice] = useState("");
+  const [cart, setCart] = useState<MotoUnit[]>([]);
+  const [prices, setPrices] = useState<Record<string, string>>({});
   const [customerId, setCustomerId] = useState("");
   const [takePayment, setTakePayment] = useState(true);
   const [payRows, setPayRows] = useState<PaymentRow[]>([emptyPaymentRow("cash")]);
-  // Selling a bike before it is assembled: assemblyRequired = the dealership assembles it
+  // Selling bikes before they're assembled: assemblyRequired = the dealership assembles them
   // (queued + can't dispatch until done); unchecked = a reseller sale, delivered as-is.
   const [assemblyRequired, setAssemblyRequired] = useState(true);
   const [ackBeforeAssembly, setAckBeforeAssembly] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [done, setDone] = useState<BikeSaleResult | null>(null);
+  const [done, setDone] = useState<BulkBikeSaleResult | null>(null);
 
   // Available-to-sell units: assembled, reserved AND unassembled (bikes can be sold before
-  // assembly — resellers assemble them themselves). Fetch each status server-side and show
-  // the ready ones first; a plain sold=false page can't order by readiness.
+  // assembly). Fetch each status server-side and show the ready ones first.
   const common = {
     search: search.trim() || undefined,
     branch_id: branchId || undefined,
@@ -83,38 +82,52 @@ export default function BikePosPage() {
     ...(unassembledQ.data?.items ?? []),
   ].filter((u) => u.allowed_next.includes("sold"));
 
-  const priceNum = Number(price) || 0;
+  const inCart = new Set(cart.map((u) => u.id));
+  const total = cart.reduce((sum, u) => sum + (Number(prices[u.id]) || 0), 0);
   const paidNum = paymentRowsTotal(payRows);
-  // Is the picked bike being sold before it is assembled?
-  const beforeAssembly = bike ? assemblyState(bike) !== "assembled" : false;
+  const beforeAssembly = cart.some((u) => assemblyState(u) !== "assembled");
+  const allPriced = cart.every((u) => (Number(prices[u.id]) || 0) > 0);
+  const overpay = takePayment && paidNum > total + 0.001;
+  const valid =
+    cart.length > 0 && allPriced && (!takePayment || paidNum > 0) && !overpay &&
+    (!beforeAssembly || ackBeforeAssembly);
 
-  function pick(u: MotoUnit) {
-    setBike(u);
-    const p = Number(u.selling_price ?? 0);
-    setPrice(p ? String(p) : "");
-    setPayRows([{ ...emptyPaymentRow("cash"), amount: p ? String(p) : "" }]);
+  function toggle(u: MotoUnit) {
+    setErr(null);
+    if (inCart.has(u.id)) {
+      setCart((c) => c.filter((x) => x.id !== u.id));
+      return;
+    }
+    setCart((c) => [...c, u]);
+    setPrices((p) => ({ ...p, [u.id]: p[u.id] ?? (u.selling_price ? String(u.selling_price) : "") }));
+    setAckBeforeAssembly(false);
+  }
+  function remove(id: string) {
+    setCart((c) => c.filter((x) => x.id !== id));
+  }
+  function clearSale() {
+    setCart([]);
+    setPrices({});
+    setCustomerId("");
+    setPayRows([emptyPaymentRow("cash")]);
     setAssemblyRequired(true);
     setAckBeforeAssembly(false);
-    setErr(null);
   }
 
   const sell = useMutation({
     mutationFn: () =>
-      salesApi.sellBike({
-        unit_id: bike!.id,
+      salesApi.sellBikesBulk({
         customer_id: customerId || null,
-        price: priceNum,
+        lines: cart.map((u) => ({
+          unit_id: u.id,
+          price: Number(prices[u.id]) || 0,
+          assembly_required: assemblyState(u) !== "assembled" ? assemblyRequired : true,
+        })),
         payments: takePayment ? toPaymentLines(payRows) : [],
-        assembly_required: beforeAssembly ? assemblyRequired : true,
       }),
     onSuccess: (r) => {
       setDone(r);
-      setBike(null);
-      setPrice("");
-      setPayRows([emptyPaymentRow("cash")]);
-      setCustomerId("");
-      setAssemblyRequired(true);
-      setAckBeforeAssembly(false);
+      clearSale();
       void qc.invalidateQueries({ queryKey: ["bike-pos-units"] });
       void qc.invalidateQueries({ queryKey: ["bike-sales-log"] });
     },
@@ -127,16 +140,11 @@ export default function BikePosPage() {
     enabled: canSeeLog,
   });
 
-  const overpay = takePayment && paidNum > priceNum + 0.001;
-  const valid =
-    bike && priceNum > 0 && (!takePayment || paidNum > 0) && !overpay &&
-    (!beforeAssembly || ackBeforeAssembly);
-
   return (
     <div>
       <PageHeader
         title="Bike POS"
-        description="Sell a specific motorcycle by chassis. Prices are VAT-inclusive; completing the sale marks the unit sold, issues a branded invoice and (with payment) a receipt."
+        description="Sell one or more motorcycles to a customer by chassis. Prices are VAT-inclusive; completing the sale marks the units sold and issues one branded invoice (with payment, a receipt)."
       />
 
       {!canSell ? (
@@ -180,13 +188,13 @@ export default function BikePosPage() {
             ) : (
               <div className="max-h-[28rem] space-y-1.5 overflow-y-auto">
                 {sellable.map((u) => {
-                  const selected = bike?.id === u.id;
+                  const picked = inCart.has(u.id);
                   return (
                     <button
                       key={u.id}
-                      onClick={() => pick(u)}
+                      onClick={() => toggle(u)}
                       className={`flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm transition ${
-                        selected
+                        picked
                           ? "border-brand-500 bg-brand-50"
                           : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
                       }`}
@@ -203,6 +211,9 @@ export default function BikePosPage() {
                         <span className="font-mono text-xs text-slate-600">
                           {formatMoney(Number(u.selling_price ?? 0), "ZMW")}
                         </span>
+                        {picked
+                          ? <Check className="h-4 w-4 text-brand-600" />
+                          : <Plus className="h-4 w-4 text-slate-400" />}
                       </span>
                     </button>
                   );
@@ -211,62 +222,22 @@ export default function BikePosPage() {
             )}
           </Card>
 
-          {/* Sell panel */}
+          {/* Cart / sell panel */}
           <Card className="flex flex-col p-4">
-            <div className="mb-2 text-sm font-semibold text-slate-800">Sell</div>
-            {!bike ? (
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-sm font-semibold text-slate-800">Sale</span>
+              {cart.length > 0 && (
+                <span className="rounded-pill bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700">
+                  {cart.length} bike{cart.length === 1 ? "" : "s"}
+                </span>
+              )}
+            </div>
+            {cart.length === 0 ? (
               <div className="flex-1 rounded-lg bg-slate-50 px-3 py-8 text-center text-sm text-slate-400">
-                Pick a bike on the left to start a sale.
+                Add bikes from the left to build the sale.
               </div>
             ) : (
               <div className="flex-1 space-y-3">
-                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="font-mono text-[13px] text-slate-800">{bike.chassis_number}</div>
-                    <AssemblyBadge unit={bike} />
-                  </div>
-                  <div className="text-xs text-slate-500">{bikeLabel(bike)} · engine {bike.engine_number ?? "—"}</div>
-                </div>
-
-                {beforeAssembly && (
-                  <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm">
-                    <div className="flex items-start gap-2 font-medium text-amber-800">
-                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                      <span>This bike isn't assembled yet — you're selling it before assembly.</span>
-                    </div>
-                    <label className="flex items-start gap-2 text-amber-900">
-                      <input
-                        type="checkbox"
-                        className="mt-0.5"
-                        checked={assemblyRequired}
-                        onChange={(e) => setAssemblyRequired(e.target.checked)}
-                      />
-                      <span>
-                        We assemble it before delivery
-                        <span className="block text-xs text-amber-700">
-                          {assemblyRequired
-                            ? "It'll be queued for assembly and can't be dispatched until it's assembled."
-                            : "Reseller sale — delivered as-is; the buyer assembles it. Nothing is queued."}
-                        </span>
-                      </span>
-                    </label>
-                    <label className="flex items-start gap-2 text-amber-900">
-                      <input
-                        type="checkbox"
-                        className="mt-0.5"
-                        checked={ackBeforeAssembly}
-                        onChange={(e) => setAckBeforeAssembly(e.target.checked)}
-                      />
-                      <span>I confirm selling this bike before it's assembled.</span>
-                    </label>
-                  </div>
-                )}
-
-                <label className="block text-sm">
-                  <span className="mb-1 block font-medium text-slate-700">Price (VAT-inclusive) *</span>
-                  <input type="number" min={0} className={`${INPUT} w-full`} value={price}
-                    onChange={(e) => setPrice(e.target.value)} />
-                </label>
                 <label className="block text-sm">
                   <span className="mb-1 block font-medium text-slate-700">Customer</span>
                   <select className={`${INPUT} w-full`} value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
@@ -274,22 +245,81 @@ export default function BikePosPage() {
                     {(customers.data?.items ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </label>
+
+                {/* Cart lines */}
+                <div className="max-h-64 space-y-1.5 overflow-y-auto">
+                  {cart.map((u) => (
+                    <div key={u.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="min-w-0">
+                          <span className="block font-mono text-[13px] text-slate-800">{u.chassis_number}</span>
+                          <span className="block truncate text-xs text-slate-500">{bikeLabel(u)}</span>
+                        </span>
+                        <span className="flex shrink-0 items-center gap-2">
+                          <AssemblyBadge unit={u} />
+                          <button onClick={() => remove(u.id)} title="Remove" className="text-slate-400 hover:text-red-600">
+                            <X className="h-4 w-4" />
+                          </button>
+                        </span>
+                      </div>
+                      <label className="mt-1.5 flex items-center gap-2 text-xs text-slate-500">
+                        Price (VAT-incl.)
+                        <input
+                          type="number" min={0}
+                          className={`${INPUT} w-32 text-right`}
+                          value={prices[u.id] ?? ""}
+                          onChange={(e) => setPrices((p) => ({ ...p, [u.id]: e.target.value }))}
+                        />
+                      </label>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex items-center justify-between border-t border-slate-200 pt-2 text-sm">
+                  <span className="font-medium text-slate-700">Total</span>
+                  <span className="font-mono font-semibold text-slate-900">{formatMoney(total, "ZMW")}</span>
+                </div>
+
+                {beforeAssembly && (
+                  <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm">
+                    <div className="flex items-start gap-2 font-medium text-amber-800">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>Some bikes in this sale aren't assembled yet — you're selling them before assembly.</span>
+                    </div>
+                    <label className="flex items-start gap-2 text-amber-900">
+                      <input type="checkbox" className="mt-0.5" checked={assemblyRequired} onChange={(e) => setAssemblyRequired(e.target.checked)} />
+                      <span>
+                        We assemble them before delivery
+                        <span className="block text-xs text-amber-700">
+                          {assemblyRequired
+                            ? "They'll be queued for assembly and can't be dispatched until assembled."
+                            : "Reseller sale — delivered as-is; the buyer assembles them. Nothing is queued."}
+                        </span>
+                      </span>
+                    </label>
+                    <label className="flex items-start gap-2 text-amber-900">
+                      <input type="checkbox" className="mt-0.5" checked={ackBeforeAssembly} onChange={(e) => setAckBeforeAssembly(e.target.checked)} />
+                      <span>I confirm selling these bikes before they're assembled.</span>
+                    </label>
+                  </div>
+                )}
+
                 <label className="flex items-center gap-2 text-sm text-slate-700">
                   <input type="checkbox" checked={takePayment} onChange={(e) => setTakePayment(e.target.checked)} />
                   Take payment now
                 </label>
                 {takePayment && (
                   <div className="space-y-2">
-                    <PaymentRows rows={payRows} onChange={setPayRows} fillAmount={priceNum} fillLabel="Full price" />
+                    <PaymentRows rows={payRows} onChange={setPayRows} fillAmount={total} fillLabel="Full total" />
                     <div className="flex justify-between text-xs text-slate-500">
                       <span>Collecting</span>
-                      <span className="font-mono">{formatMoney(paidNum, "ZMW")} of {formatMoney(priceNum, "ZMW")}</span>
+                      <span className="font-mono">{formatMoney(paidNum, "ZMW")} of {formatMoney(total, "ZMW")}</span>
                     </div>
                     {overpay ? (
-                      <div className="text-sm text-red-600">Payments exceed the bike price.</div>
-                    ) : priceNum > 0 && paidNum > 0 && paidNum < priceNum ? (
+                      <div className="text-sm text-red-600">Payments exceed the total.</div>
+                    ) : total > 0 && paidNum > 0 && paidNum < total ? (
                       <div className="text-xs text-amber-600">
-                        Balance {formatMoney(priceNum - paidNum, "ZMW")} left outstanding — the invoice stays partially paid.
+                        Balance {formatMoney(total - paidNum, "ZMW")} left outstanding — the invoice stays partially paid.
                       </div>
                     ) : null}
                   </div>
@@ -312,14 +342,24 @@ export default function BikePosPage() {
       {done && (
         <Card className="mx-auto mt-4 max-w-md p-5 text-sm">
           <div className="mb-2 flex items-center gap-2 text-emerald-700">
-            <Check className="h-5 w-5" /><span className="font-semibold">Bike sold</span>
+            <Check className="h-5 w-5" /><span className="font-semibold">
+              {done.bikes.length} bike{done.bikes.length === 1 ? "" : "s"} sold
+            </span>
           </div>
-          <div className="mb-2 rounded-lg bg-emerald-50 px-3 py-2 text-emerald-800">
-            <b>{done.chassis_number}</b>{done.model_name ? ` · ${done.model_name}` : ""} marked sold.
+          <div className="mb-2 space-y-1 rounded-lg bg-emerald-50 px-3 py-2 text-emerald-800">
+            {done.bikes.map((b) => (
+              <div key={b.unit_id} className="flex items-center justify-between gap-2">
+                <span className="font-mono text-[13px]">{b.chassis_number}</span>
+                <span className="flex items-center gap-2">
+                  {b.assembly_pending && <span className="text-xs text-orange-700">🟠 to assemble</span>}
+                  <span className="font-mono">{formatMoney(b.price, "ZMW")}</span>
+                </span>
+              </div>
+            ))}
           </div>
           <div className="flex justify-between"><span className="text-slate-500">Invoice</span>
             <span className="font-mono">{done.invoice.invoice_number}</span></div>
-          <div className="flex justify-between"><span className="text-slate-500">Amount</span>
+          <div className="flex justify-between"><span className="text-slate-500">Total</span>
             <span className="font-mono">{formatMoney(Number(done.invoice.grand_total_zmw ?? done.invoice.grand_total), "ZMW")}</span></div>
           {done.receipt ? (
             <div className="flex justify-between"><span className="text-slate-500">Receipt</span>

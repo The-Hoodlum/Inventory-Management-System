@@ -69,8 +69,13 @@ class _InvPdf(FPDF):
 
 
 def build_invoice_pdf(
-    inv: InvoiceOut, *, bike: tuple | None = None, currency: str = "", payments: list | None = None
+    inv: InvoiceOut, *, bikes: list | None = None, bike: tuple | None = None,
+    currency: str = "", payments: list | None = None,
 ) -> bytes:
+    # ``bikes`` = every serialized bike on the invoice (one for a single sale, several for a
+    # bulk sale). ``bike`` is the legacy single-tuple form, still accepted.
+    if bikes is None:
+        bikes = [bike] if bike is not None else []
     cur = currency or inv.currency or ""
     pdf = _InvPdf(orientation="P", unit="mm", format="A4")
     pdf.company_name = settings.company_name
@@ -122,11 +127,12 @@ def build_invoice_pdf(
     pdf.set_font("Helvetica", "", 8.5)
     pdf.set_draw_color(*_LINE)
     rows: list[tuple[str, float, float, float]] = []
-    bike_assembly_pending = False
-    if bike is not None:
+    pending_chassis: list[str] = []
+    for b in bikes:
         # 4-tuple (chassis, model, price, assembly_pending); tolerate older 3-tuples.
-        chassis, model_name, price, *rest = bike
-        bike_assembly_pending = bool(rest[0]) if rest else False
+        chassis, model_name, price, *rest = b
+        if rest and bool(rest[0]):
+            pending_chassis.append(str(chassis))
         rows.append((f"Motorcycle - {model_name or 'unit'} (chassis {chassis})", 1.0, float(price), float(price)))
     for ln_ in inv.lines:
         desc = ln_.description or ln_.name or ln_.sku or ""
@@ -145,12 +151,13 @@ def build_invoice_pdf(
             pdf.cell(width, 6, text_value, border="B", align=align)
         pdf.ln(6)
 
-    # ---- Bike sold before assembly: flag that it is not yet assembled ----
-    if bike_assembly_pending:
+    # ---- Bikes sold before assembly: flag that they are not yet assembled ----
+    if pending_chassis:
         pdf.ln(1)
         pdf.set_font("Helvetica", "B", 8.5)
         pdf.set_text_color(0xB4, 0x53, 0x09)   # amber
-        pdf.cell(0, 5, _s("Assembly status: NOT YET ASSEMBLED - to be assembled before delivery."), ln=1)
+        which = "" if len(pending_chassis) == len(rows) else " (" + ", ".join(pending_chassis) + ")"
+        pdf.cell(0, 5, _s(f"Assembly status: NOT YET ASSEMBLED{which} - to be assembled before delivery."), ln=1)
         pdf.set_text_color(*_INK)
 
     # ---- Totals (billed ZMW payable) with the VAT broken out. net/vat are stored in the

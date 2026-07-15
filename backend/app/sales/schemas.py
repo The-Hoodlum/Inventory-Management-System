@@ -403,6 +403,40 @@ class BikeSaleResult(BaseModel):
     receipt: ReceiptOut | None = None
 
 
+class BikeSaleLineIn(BaseModel):
+    """One bike in a bulk sale."""
+
+    unit_id: uuid.UUID
+    price: float | None = Field(default=None, ge=0)   # defaults to the unit's selling price
+    assembly_required: bool = True                    # only bites when sold before assembly
+
+
+class BulkBikeSaleIn(BaseModel):
+    """Sell SEVERAL serialized bikes to ONE customer on ONE invoice: a line per bike, one
+    set of (split) payments against the combined total, one receipt."""
+
+    customer_id: uuid.UUID | None = None      # omitted -> the walk-in customer
+    branch_id: uuid.UUID | None = None
+    lines: list[BikeSaleLineIn] = Field(min_length=1)
+    payments: list[PaymentLineIn] = []        # empty -> invoice only (pay later)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class BulkBikeSaleBikeOut(BaseModel):
+    unit_id: uuid.UUID
+    chassis_number: str
+    model_name: str | None = None
+    price: float
+    assembly_pending: bool = False
+
+
+class BulkBikeSaleResult(BaseModel):
+    invoice: InvoiceOut
+    bikes: list[BulkBikeSaleBikeOut]
+    total: float
+    receipt: ReceiptOut | None = None
+
+
 class QuotationConvertResult(BaseModel):
     """Converting a quotation without re-entry: any part lines become one sales order; any
     bike lines are sold (one bike invoice each) through the bike-sale flow."""
