@@ -30,6 +30,7 @@ export interface CustomerDeliveryLine {
   chassis_number: string | null;
   engine_number: string | null;
   model_name: string | null;
+  assembly_pending: boolean;   // bike sold before assembly — dispatch is blocked without a manager override
   qty: number;
   settled_qty: number;
   returned_qty: number;
@@ -88,8 +89,11 @@ export const customerDeliveryApi = {
     api.get<CustomerDelivery[]>(`/customer-deliveries${qs(params)}`),
   get: (id: string) => api.get<CustomerDelivery>(`/customer-deliveries/${id}`),
   create: (body: CreateCustomerDeliveryBody) => api.post<CustomerDelivery>("/customer-deliveries", body),
-  deliver: (id: string, received_by?: string) =>
-    api.post<CustomerDelivery>(`/customer-deliveries/${id}/deliver`, { received_by: received_by ?? null }),
+  deliver: (id: string, opts: { received_by?: string | null; override_unassembled?: boolean } = {}) =>
+    api.post<CustomerDelivery>(`/customer-deliveries/${id}/deliver`, {
+      received_by: opts.received_by ?? null,
+      override_unassembled: opts.override_unassembled ?? false,
+    }),
   settle: (id: string, body: SettleCustomerDeliveryBody) =>
     api.post<CustomerDelivery>(`/customer-deliveries/${id}/settle`, body),
   cancel: (id: string, reason?: string) =>

@@ -134,6 +134,16 @@ class CustomerDeliveryRepository:
         )
         return {uid: mid for uid, mid in rows}
 
+    async def unit_assembly_flags(self, unit_ids) -> dict[uuid.UUID, bool]:
+        """unit_id -> assembly_pending (sold before assembly, assembly still owed)."""
+        wanted = [v for v in {*unit_ids} if v is not None]
+        if not wanted:
+            return {}
+        rows = await self.session.execute(
+            select(MotorcycleUnit.id, MotorcycleUnit.assembly_pending).where(MotorcycleUnit.id.in_(wanted))
+        )
+        return {uid: bool(pending) for uid, pending in rows}
+
     async def invoice_number(self, invoice_id: uuid.UUID | None) -> str | None:
         if invoice_id is None:
             return None

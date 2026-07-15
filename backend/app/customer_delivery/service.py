@@ -108,11 +108,38 @@ class CustomerDeliveryService:
         return await self._out(cd)
 
     # ------------------------------- deliver --------------------------------- #
-    async def deliver(self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, delivery_id: uuid.UUID, received_by: str | None) -> CustomerDeliveryOut:
+    async def deliver(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, delivery_id: uuid.UUID,
+        received_by: str | None, override_unassembled: bool = False, can_override: bool = False,
+    ) -> CustomerDeliveryOut:
         cd = await self._require(await self.repo.get(delivery_id, lock=True))
         if cd.status != S.DRAFT:
             raise BusinessRuleError(f"Only a draft delivery can be dispatched (status={cd.status}).")
         if cd.delivery_mode == S.SALE:
+            # A bike SOLD before assembly isn't built yet — block the physical handover unless a
+            # manager overrides (consignment is exempt; the reseller assembles it themselves).
+            pending = await self.repo.unit_assembly_flags([ln.unit_id for ln in cd.lines if ln.line_kind == "motorcycle"])
+            owed = [ln for ln in cd.lines if ln.line_kind == "motorcycle" and pending.get(ln.unit_id)]
+            if owed:
+                chassis = ", ".join(ln.chassis_number or str(ln.unit_id) for ln in owed)
+                if not override_unassembled:
+                    raise BusinessRuleError(
+                        f"Cannot dispatch — not yet assembled: {chassis}. A manager can override to release it.",
+                        details={"assembly_pending_units": [str(ln.unit_id) for ln in owed]},
+                    )
+                if not can_override:
+                    raise BusinessRuleError(
+                        "Dispatching a bike before assembly needs a manager (sales.manage) override.",
+                        details={"assembly_pending_units": [str(ln.unit_id) for ln in owed]},
+                    )
+                # Authorized override — record it against each bike (the assembly obligation
+                # stands; this only authorizes releasing it before assembly).
+                for ln in owed:
+                    self.repo.session.add(MotorcycleUnitEvent(
+                        tenant_id=tenant_id, unit_id=ln.unit_id, event_type="dispatched_unassembled",
+                        reference_type="customer_delivery", reference_id=cd.id,
+                        note=f"Dispatched before assembly (manager override) — {cd.delivery_number}", user_id=user_id,
+                    ))
             # Proof of handover — the sale already deducted; nothing moves here.
             cd.status = S.DELIVERED
         else:  # consignment — hold parts + consign bikes, no deduction
@@ -261,6 +288,7 @@ class CustomerDeliveryService:
         prod = await self.repo.product_index([ln.product_id for ln in cd.lines])
         unit_models = await self.repo.unit_model_ids([ln.unit_id for ln in cd.lines])
         model_names = await self.repo.model_names(list(unit_models.values()))
+        assembly = await self.repo.unit_assembly_flags([ln.unit_id for ln in cd.lines])
         lines = []
         for ln in cd.lines:
             sku, name = prod.get(ln.product_id, (None, None))
@@ -268,7 +296,8 @@ class CustomerDeliveryService:
             lines.append(CustomerDeliveryLineOut(
                 id=ln.id, line_kind=ln.line_kind, product_id=ln.product_id, sku=sku, name=name,
                 unit_id=ln.unit_id, chassis_number=ln.chassis_number, engine_number=ln.engine_number,
-                model_name=model_name, qty=_f(ln.qty), settled_qty=_f(ln.settled_qty),
+                model_name=model_name, assembly_pending=bool(assembly.get(ln.unit_id)),
+                qty=_f(ln.qty), settled_qty=_f(ln.settled_qty),
                 returned_qty=_f(ln.returned_qty), sold_invoice_id=ln.sold_invoice_id, remarks=ln.remarks,
             ))
         return CustomerDeliveryOut(
