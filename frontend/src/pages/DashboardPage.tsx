@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, PackageCheck } from "lucide-react";
 import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Link } from "react-router-dom";
 
 import { useAuth } from "@/auth/AuthContext";
 import { PageHeader } from "@/components/PageHeader";
@@ -138,6 +139,30 @@ export default function DashboardPage() {
             <StatCard label="Reserved" value={formatNumber(moto.data.reserved)} tone="warning" hint="Held for a customer" />
             <StatCard label="Sold" value={formatNumber(moto.data.sold)} hint="Delivered / registered incl." />
           </div>
+          {(moto.data.waiting_for_assembly > 0 || moto.data.unassembled_in_stock > 0) && (
+            <div className="mt-4">
+              <div className="mb-2 flex items-center justify-between">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Assembly</h3>
+                {moto.data.waiting_for_assembly > 0 && (
+                  <Link to="/assembly-queue" className="text-xs font-medium text-brand-600 hover:underline">View queue →</Link>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+                <StatCard
+                  label="Awaiting assembly"
+                  value={formatNumber(moto.data.waiting_for_assembly)}
+                  tone={moto.data.waiting_for_assembly > 0 ? "warning" : "positive"}
+                  hint="Sold before assembly, still owed"
+                />
+                <StatCard label="Unassembled in stock" value={formatNumber(moto.data.unassembled_in_stock)} hint="On hand, not yet assembled" />
+                <StatCard
+                  label="Avg assembly time"
+                  value={moto.data.avg_assembly_days != null ? `${moto.data.avg_assembly_days} d` : "—"}
+                  hint="Receipt → assembled"
+                />
+              </div>
+            </div>
+          )}
         </div>
       )}
 

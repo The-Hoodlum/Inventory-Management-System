@@ -194,6 +194,10 @@ class MetricsOut(BaseModel):
     sold: int = 0
     cancelled: int = 0
     by_status: dict[str, int] = {}
+    # Assembly axis (independent of sale status).
+    waiting_for_assembly: int = 0     # sold before assembly, assembly still owed
+    unassembled_in_stock: int = 0     # on hand, not yet assembled
+    avg_assembly_days: float | None = None   # avg receipt -> assembly lead time
 
 
 class UnitEventOut(BaseModel):

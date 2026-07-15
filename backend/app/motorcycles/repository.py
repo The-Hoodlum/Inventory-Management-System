@@ -262,6 +262,41 @@ class MotorcycleRepository:
         rows = await self.session.execute(stmt)
         return {status: int(count) for status, count in rows.all()}
 
+    async def assembly_rollup(
+        self, *, branch_id: uuid.UUID | None = None, branch_ids: Sequence[uuid.UUID] | None = None
+    ) -> dict[str, float | int]:
+        """Assembly-axis roll-up (independent of sale status): how many bikes are sold-but-owed
+        assembly, how many unassembled units sit in stock, and the average days from receipt to
+        assembly. Same branch scoping as status_counts."""
+        def _scope(stmt):
+            if branch_id is not None:
+                stmt = stmt.where(MotorcycleUnit.branch_id == branch_id)
+            if branch_ids is not None:
+                stmt = stmt.where(MotorcycleUnit.branch_id.in_(list(branch_ids)))
+            return stmt
+
+        waiting = await self.session.scalar(
+            _scope(select(func.count()).select_from(MotorcycleUnit).where(MotorcycleUnit.assembly_pending.is_(True)))
+        )
+        unassembled = await self.session.scalar(
+            _scope(select(func.count()).select_from(MotorcycleUnit).where(MotorcycleUnit.status == "unassembled"))
+        )
+        # Postgres: date - date -> integer days. Only genuine builds (assembled on/after receipt).
+        avg_days = await self.session.scalar(
+            _scope(
+                select(func.avg(MotorcycleUnit.assembled_date - MotorcycleUnit.date_received)).where(
+                    MotorcycleUnit.assembled_date.is_not(None),
+                    MotorcycleUnit.date_received.is_not(None),
+                    MotorcycleUnit.assembled_date >= MotorcycleUnit.date_received,
+                )
+            )
+        )
+        return {
+            "waiting_for_assembly": int(waiting or 0),
+            "unassembled_in_stock": int(unassembled or 0),
+            "avg_assembly_days": round(float(avg_days), 1) if avg_days is not None else None,
+        }
+
     # ============================ unit events =========================== #
     async def add_event(self, **kwargs) -> MotorcycleUnitEvent:
         event = MotorcycleUnitEvent(**kwargs)
