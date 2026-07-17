@@ -83,6 +83,7 @@ services:
       - ./database/sql/sales_void.sql:/docker-entrypoint-initdb.d/50_sales_void.sql:ro
       - ./database/sql/quotation_bikes.sql:/docker-entrypoint-initdb.d/51_quotation_bikes.sql:ro
       - ./database/sql/notifications.sql:/docker-entrypoint-initdb.d/52_notifications.sql:ro
+      - ./database/sql/notification_prefs.sql:/docker-entrypoint-initdb.d/53_notification_prefs.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-inventory}"]
       interval: 5s

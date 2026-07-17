@@ -36,8 +36,14 @@ export interface NotificationsResponse {
   signals: OperationalSignal[];
 }
 
+export interface NotificationPrefs {
+  whatsapp_push: boolean;
+}
+
 export const notificationsApi = {
   list: () => api.get<NotificationsResponse>("/notifications"),
+  getPrefs: () => api.get<NotificationPrefs>("/notifications/prefs"),
+  setPrefs: (body: NotificationPrefs) => api.put<NotificationPrefs>("/notifications/prefs", body),
   // Full inbox: more items, optionally unread-only.
   listInbox: (unreadOnly = false) =>
     api.get<NotificationsResponse>(`/notifications?limit=100${unreadOnly ? "&unread_only=true" : ""}`),

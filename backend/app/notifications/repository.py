@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     Notification,
+    NotificationPref,
     Permission,
     RolePermission,
     User,
@@ -77,16 +78,36 @@ class NotificationRepository:
         await self.session.flush()
         return int(res.rowcount or 0)
 
-    async def phones_for_users(self, user_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, str]:
-        """WhatsApp number per user who has registered one (the opt-in for push). RLS-scoped."""
+    async def phones_for_push(self, user_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, str]:
+        """WhatsApp number per user who (a) registered one — the opt-in — AND (b) hasn't turned
+        the push off in their preferences (no pref row = default on). RLS-scoped."""
         wanted = [u for u in {*user_ids} if u is not None]
         if not wanted:
             return {}
         rows = await self.session.execute(
             select(WhatsAppIdentity.user_id, WhatsAppIdentity.phone)
-            .where(WhatsAppIdentity.user_id.in_(wanted))
+            .outerjoin(NotificationPref, NotificationPref.user_id == WhatsAppIdentity.user_id)
+            .where(
+                WhatsAppIdentity.user_id.in_(wanted),
+                func.coalesce(NotificationPref.whatsapp_push, True).is_(True),
+            )
         )
         return {uid: phone for uid, phone in rows}
+
+    # ------------------------------ preferences ------------------------ #
+    async def get_pref(self, user_id: uuid.UUID) -> NotificationPref | None:
+        return await self.session.get(NotificationPref, user_id)
+
+    async def upsert_pref(self, tenant_id: uuid.UUID, user_id: uuid.UUID, *, whatsapp_push: bool) -> NotificationPref:
+        pref = await self.session.get(NotificationPref, user_id)
+        if pref is None:
+            pref = NotificationPref(tenant_id=tenant_id, user_id=user_id, whatsapp_push=whatsapp_push)
+            self.session.add(pref)
+        else:
+            pref.whatsapp_push = whatsapp_push
+            pref.updated_at = _now()
+        await self.session.flush()
+        return pref
 
     async def recipients_with_permission(
         self, permission_code: str, *, branch_id: uuid.UUID | None = None

@@ -32,3 +32,11 @@ class NotificationsResponse(BaseModel):
     badge_count: int                      # unread stored + number of live signals
     items: list[NotificationOut] = []     # stored (unread + recent), newest first
     signals: list[OperationalSignal] = []  # computed operational alerts
+
+
+class NotificationPrefsOut(BaseModel):
+    whatsapp_push: bool = True   # receive the WhatsApp push of critical events
+
+
+class NotificationPrefsIn(BaseModel):
+    whatsapp_push: bool

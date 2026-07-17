@@ -110,7 +110,7 @@ class NotificationService:
     async def _push_whatsapp(self, recipient_ids, title: str, body: str | None) -> None:
         try:
             ids = [u for u in {*recipient_ids} if u is not None]
-            phones = await self.repo.phones_for_users(ids)
+            phones = await self.repo.phones_for_push(ids)
             if not phones:
                 return
             text = f"🔔 {title}" + (f"\n{body}" if body else "")
@@ -141,3 +141,12 @@ class NotificationService:
 
     async def mark_all_read(self, user_id: uuid.UUID) -> int:
         return await self.repo.mark_all_read(user_id)
+
+    # ---------------------------- preferences -------------------------- #
+    async def get_prefs(self, user_id: uuid.UUID) -> dict:
+        pref = await self.repo.get_pref(user_id)
+        return {"whatsapp_push": pref.whatsapp_push if pref is not None else True}
+
+    async def set_prefs(self, tenant_id: uuid.UUID, user_id: uuid.UUID, *, whatsapp_push: bool) -> dict:
+        pref = await self.repo.upsert_pref(tenant_id, user_id, whatsapp_push=whatsapp_push)
+        return {"whatsapp_push": pref.whatsapp_push}

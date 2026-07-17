@@ -42,6 +42,12 @@ export default function NotificationsPage() {
   const markRead = useMutation({ mutationFn: notificationsApi.markRead, onSuccess: invalidate });
   const markAll = useMutation({ mutationFn: notificationsApi.markAllRead, onSuccess: invalidate });
 
+  const prefs = useQuery({ queryKey: ["notification-prefs"], queryFn: notificationsApi.getPrefs });
+  const setPref = useMutation({
+    mutationFn: notificationsApi.setPrefs,
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["notification-prefs"] }),
+  });
+
   const items = data?.items ?? [];
   const unread = data?.unread_count ?? 0;
 
@@ -56,6 +62,23 @@ export default function NotificationsPage() {
           </Button>
         ) : undefined}
       />
+
+      {/* Preferences */}
+      <Card className="mb-4 flex flex-wrap items-center justify-between gap-3 p-4">
+        <div>
+          <div className="text-sm font-medium text-content">WhatsApp alerts</div>
+          <div className="text-xs text-muted">Also send me a WhatsApp message for critical notifications (needs a registered number).</div>
+        </div>
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-content-muted">
+          <input
+            type="checkbox"
+            checked={prefs.data?.whatsapp_push ?? true}
+            disabled={prefs.isLoading || setPref.isPending}
+            onChange={(e) => setPref.mutate({ whatsapp_push: e.target.checked })}
+          />
+          {prefs.data?.whatsapp_push ?? true ? "On" : "Off"}
+        </label>
+      </Card>
 
       <div className="mb-4 flex items-center gap-2">
         {([["all", "All"], ["unread", "Unread"]] as const).map(([key, label]) => {
