@@ -33,6 +33,7 @@ import MotorcycleSetupPage from "@/pages/MotorcycleSetupPage";
 import MovementsPage from "@/pages/MovementsPage";
 import NewPurchaseOrderPage from "@/pages/NewPurchaseOrderPage";
 import NotFoundPage from "@/pages/NotFoundPage";
+import NotificationsPage from "@/pages/NotificationsPage";
 import OrderRequestsPage from "@/pages/OrderRequestsPage";
 import PendingPaymentsPage from "@/pages/PendingPaymentsPage";
 import ProductsPage from "@/pages/ProductsPage";
@@ -66,6 +67,7 @@ export default function App() {
         <Route path="/" element={<Navigate to="/apps" replace />} />
         <Route path="/apps" element={<AppLauncherPage />} />
         <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/notifications" element={<NotificationsPage />} />
         <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />
         <Route path="/purchase-orders/new" element={<NewPurchaseOrderPage />} />
         <Route path="/purchase-orders/:id" element={<PurchaseOrderDetailPage />} />

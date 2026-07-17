@@ -19,8 +19,11 @@ from app.notifications.signals import operational_signals
 router = APIRouter()
 
 
-async def _bell(user: CurrentUser, db: AsyncSession, svc: NotificationService, limit: int = 30) -> NotificationsResponse:
-    items = await svc.list_for_user(user.id, limit=limit)
+async def _bell(
+    user: CurrentUser, db: AsyncSession, svc: NotificationService,
+    limit: int = 30, unread_only: bool = False,
+) -> NotificationsResponse:
+    items = await svc.list_for_user(user.id, limit=limit, unread_only=unread_only)
     unread = await svc.unread_count(user.id)
     signals = await operational_signals(db, user.permissions)
     return NotificationsResponse(
@@ -31,11 +34,12 @@ async def _bell(user: CurrentUser, db: AsyncSession, svc: NotificationService, l
 @router.get("", response_model=NotificationsResponse)
 async def list_notifications(
     limit: int = Query(default=30, ge=1, le=100),
+    unread_only: bool = Query(default=False),
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     svc: NotificationService = Depends(get_notification_service),
 ) -> NotificationsResponse:
-    return await _bell(user, db, svc, limit)
+    return await _bell(user, db, svc, limit, unread_only)
 
 
 @router.post("/{notification_id}/read", response_model=NotificationsResponse)

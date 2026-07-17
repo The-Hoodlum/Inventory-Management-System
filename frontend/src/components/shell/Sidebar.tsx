@@ -5,6 +5,7 @@ import { clsx } from "clsx";
 import {
   Award,
   BarChart3,
+  Bell,
   Bike,
   Boxes,
   Building2,
@@ -60,6 +61,7 @@ const GROUPS: NavGroup[] = [
     items: [
       { to: "/apps", label: "App Launcher", icon: LayoutGrid, permission: "dashboard.read" },
       { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, permission: "dashboard.read" },
+      { to: "/notifications", label: "Notifications", icon: Bell, permission: "dashboard.read" },
       { to: "/reports", label: "Reports", icon: BarChart3, permission: "report.read" },
     ],
   },

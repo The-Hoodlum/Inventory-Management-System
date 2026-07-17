@@ -21,6 +21,7 @@ from app.models import (
     User,
     UserBranchAccess,
     UserRole,
+    WhatsAppIdentity,
 )
 
 
@@ -37,13 +38,13 @@ class NotificationRepository:
             self.session.add_all(list(rows))
             await self.session.flush()
 
-    async def list_for_user(self, user_id: uuid.UUID, *, limit: int = 30) -> list[Notification]:
-        rows = await self.session.scalars(
-            select(Notification)
-            .where(Notification.recipient_user_id == user_id)
-            .order_by(Notification.created_at.desc())
-            .limit(limit)
-        )
+    async def list_for_user(
+        self, user_id: uuid.UUID, *, limit: int = 30, unread_only: bool = False
+    ) -> list[Notification]:
+        stmt = select(Notification).where(Notification.recipient_user_id == user_id)
+        if unread_only:
+            stmt = stmt.where(Notification.read_at.is_(None))
+        rows = await self.session.scalars(stmt.order_by(Notification.created_at.desc()).limit(limit))
         return list(rows.all())
 
     async def unread_count(self, user_id: uuid.UUID) -> int:
@@ -75,6 +76,17 @@ class NotificationRepository:
         )
         await self.session.flush()
         return int(res.rowcount or 0)
+
+    async def phones_for_users(self, user_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, str]:
+        """WhatsApp number per user who has registered one (the opt-in for push). RLS-scoped."""
+        wanted = [u for u in {*user_ids} if u is not None]
+        if not wanted:
+            return {}
+        rows = await self.session.execute(
+            select(WhatsAppIdentity.user_id, WhatsAppIdentity.phone)
+            .where(WhatsAppIdentity.user_id.in_(wanted))
+        )
+        return {uid: phone for uid, phone in rows}
 
     async def recipients_with_permission(
         self, permission_code: str, *, branch_id: uuid.UUID | None = None

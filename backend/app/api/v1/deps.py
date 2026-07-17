@@ -298,10 +298,11 @@ def get_customer_delivery_service(db: AsyncSession = Depends(get_db)):
 
 def get_notification_service(db: AsyncSession = Depends(get_db)):
     # Event-driven, per-recipient notifications. Producers call emit(); the bell/inbox read.
+    # The WhatsApp adapter powers opt-in push of critical events (mock until Cloud API is set).
     from app.notifications.repository import NotificationRepository
     from app.notifications.service import NotificationService
 
-    return NotificationService(NotificationRepository(db))
+    return NotificationService(NotificationRepository(db), build_whatsapp_adapter(settings))
 
 
 def get_issuance_service(db: AsyncSession = Depends(get_db)):
