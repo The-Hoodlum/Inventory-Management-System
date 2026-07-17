@@ -52,6 +52,7 @@ from app.models.motorcycle import (
     MotorcycleVariant,
 )
 from app.models.notification import Notification
+from app.models.notification_pref import NotificationPref
 from app.models.order_request import (
     RequestAudit,
     RequestHeader,
@@ -107,7 +108,7 @@ __all__ = [
     "CustomerDelivery", "CustomerDeliveryLine",
     "BikeIssue", "BikeIssueLine",
     "AssemblyTarget",
-    "Notification",
+    "Notification", "NotificationPref",
     "MotorcycleServicePlan", "MotorcycleServiceRecord",
     "PartsSale",
 ]

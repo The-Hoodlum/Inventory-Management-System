@@ -12,11 +12,32 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import CurrentUser, get_current_user, get_db, get_notification_service
-from app.notifications.schemas import NotificationsResponse
+from app.notifications.schemas import (
+    NotificationPrefsIn,
+    NotificationPrefsOut,
+    NotificationsResponse,
+)
 from app.notifications.service import NotificationService
 from app.notifications.signals import operational_signals
 
 router = APIRouter()
+
+
+@router.get("/prefs", response_model=NotificationPrefsOut)
+async def get_prefs(
+    user: CurrentUser = Depends(get_current_user),
+    svc: NotificationService = Depends(get_notification_service),
+) -> NotificationPrefsOut:
+    return NotificationPrefsOut(**await svc.get_prefs(user.id))
+
+
+@router.put("/prefs", response_model=NotificationPrefsOut)
+async def set_prefs(
+    payload: NotificationPrefsIn,
+    user: CurrentUser = Depends(get_current_user),
+    svc: NotificationService = Depends(get_notification_service),
+) -> NotificationPrefsOut:
+    return NotificationPrefsOut(**await svc.set_prefs(user.tenant_id, user.id, whatsapp_push=payload.whatsapp_push))
 
 
 async def _bell(
