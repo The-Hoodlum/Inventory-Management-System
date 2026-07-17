@@ -38,6 +38,9 @@ export interface NotificationsResponse {
 
 export const notificationsApi = {
   list: () => api.get<NotificationsResponse>("/notifications"),
+  // Full inbox: more items, optionally unread-only.
+  listInbox: (unreadOnly = false) =>
+    api.get<NotificationsResponse>(`/notifications?limit=100${unreadOnly ? "&unread_only=true" : ""}`),
   markRead: (id: string) => api.post<NotificationsResponse>(`/notifications/${id}/read`),
   markAllRead: () => api.post<NotificationsResponse>("/notifications/read-all"),
 };

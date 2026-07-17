@@ -19,11 +19,15 @@ from app.notifications.schemas import NotificationOut
 
 logger = get_logger(__name__)
 _SEVERITIES = {"info", "warning", "critical"}
+# Which severities also push to WhatsApp (for recipients who registered a number). Kept
+# conservative — only the most urgent events reach someone's phone.
+_PUSH_SEVERITIES = {"critical"}
 
 
 class NotificationService:
-    def __init__(self, repo: NotificationRepository) -> None:
+    def __init__(self, repo: NotificationRepository, whatsapp=None) -> None:
         self.repo = repo
+        self.whatsapp = whatsapp   # optional WhatsAppAdapter for opt-in push; None -> in-app only
 
     # ------------------------------- emit ------------------------------ #
     async def emit(
@@ -79,6 +83,8 @@ class NotificationService:
         holder of ``permission`` in ``branch_id``, minus the actor) and store one row each —
         all inside a SAVEPOINT so a notification failure can NEVER roll back the caller's
         business transaction. Returns rows created (0 on any problem; logged, not raised)."""
+        recipients: list[uuid.UUID] = []
+        created = 0
         try:
             async with self.repo.session.begin_nested():
                 recipients = list(recipient_user_ids or [])
@@ -87,7 +93,7 @@ class NotificationService:
                         permission=permission, branch_id=branch_id,
                         exclude=[actor_user_id] if actor_user_id else None,
                     )
-                return await self.emit(
+                created = await self.emit(
                     tenant_id=tenant_id, event_type=event_type, title=title, severity=severity,
                     body=body, href=href, entity_type=entity_type, entity_id=entity_id,
                     branch_id=branch_id, actor_user_id=actor_user_id, recipient_user_ids=recipients,
@@ -95,10 +101,29 @@ class NotificationService:
         except Exception:  # noqa: BLE001 — a notification must never break the producer
             logger.warning("notification_emit_failed", extra={"event_type": event_type})
             return 0
+        # Opt-in WhatsApp push for the most urgent events — a side channel, outside the DB
+        # savepoint and fully best-effort (the adapter itself swallows delivery errors).
+        if created and severity in _PUSH_SEVERITIES and self.whatsapp is not None:
+            await self._push_whatsapp(recipients, title, body)
+        return created
+
+    async def _push_whatsapp(self, recipient_ids, title: str, body: str | None) -> None:
+        try:
+            ids = [u for u in {*recipient_ids} if u is not None]
+            phones = await self.repo.phones_for_users(ids)
+            if not phones:
+                return
+            text = f"🔔 {title}" + (f"\n{body}" if body else "")
+            for phone in set(phones.values()):
+                await self.whatsapp.send(to=phone, text=text)
+        except Exception:  # noqa: BLE001 — push is best-effort
+            logger.warning("notification_push_failed")
 
     # ------------------------------- reads ----------------------------- #
-    async def list_for_user(self, user_id: uuid.UUID, *, limit: int = 30) -> list[NotificationOut]:
-        rows = await self.repo.list_for_user(user_id, limit=limit)
+    async def list_for_user(
+        self, user_id: uuid.UUID, *, limit: int = 30, unread_only: bool = False
+    ) -> list[NotificationOut]:
+        rows = await self.repo.list_for_user(user_id, limit=limit, unread_only=unread_only)
         return [
             NotificationOut(
                 id=n.id, event_type=n.event_type, severity=n.severity, title=n.title,

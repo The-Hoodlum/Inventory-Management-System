@@ -114,6 +114,12 @@ export function NotificationsBell() {
               ))}
             </ul>
           )}
+          <button
+            onClick={() => { navigate("/notifications"); close(); }}
+            className="block w-full border-t border-line px-3 py-2 text-center text-xs font-medium text-brand-600 hover:bg-canvas"
+          >
+            See all notifications
+          </button>
         </div>
       )}
     </Popover>
