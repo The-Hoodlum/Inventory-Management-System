@@ -20,6 +20,7 @@ import {
   Hammer,
   FileText,
   History,
+  Landmark,
   LayoutDashboard,
   LayoutGrid,
   LineChart,
@@ -80,6 +81,12 @@ const GROUPS: NavGroup[] = [
       { to: "/assembly-planner", label: "Assembly Planner", icon: Hammer, permission: "motorcycle.read" },
       { to: "/assembly-queue", label: "Assembly Queue", icon: PackageCheck, permission: "motorcycle.read" },
       { to: "/service-followup", label: "Service Follow-up", icon: CalendarClock, permission: "motorcycle.read" },
+    ],
+  },
+  {
+    label: "Finance",
+    items: [
+      { to: "/finance/accounts", label: "Accounts", icon: Landmark, permission: "finance.read" },
     ],
   },
   {

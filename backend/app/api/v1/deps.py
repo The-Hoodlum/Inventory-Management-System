@@ -377,6 +377,16 @@ def get_dashboard_service(db: AsyncSession = Depends(get_db)) -> DashboardServic
     return DashboardService(DashboardRepository(db))
 
 
+def get_finance_service(db: AsyncSession = Depends(get_db)):
+    # Cash book / treasury: accounts + the append-only movement ledger + the single
+    # derived-balance calculation. Every money movement is one append-only entry (never a
+    # stored balance); corrections are reversals. Runs on the request session/transaction.
+    from app.finance.repository import FinanceRepository
+    from app.finance.service import FinanceService
+
+    return FinanceService(FinanceRepository(db), AuditRepository(db))
+
+
 def get_reports_service(db: AsyncSession = Depends(get_db)) -> ReportsService:
     return ReportsService(ReportsRepository(db))
 

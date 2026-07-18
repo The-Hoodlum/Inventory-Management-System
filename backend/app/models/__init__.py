@@ -16,6 +16,7 @@ from app.models.catalog import (
     SupplierProduct,
 )
 from app.models.customer import Customer, CustomerAddress
+from app.models.finance import AccountMovement, FinancialAccount
 from app.models.dispatch import (
     CustomerDelivery,
     CustomerDeliveryLine,
@@ -111,4 +112,5 @@ __all__ = [
     "Notification", "NotificationPref",
     "MotorcycleServicePlan", "MotorcycleServiceRecord",
     "PartsSale",
+    "FinancialAccount", "AccountMovement",
 ]

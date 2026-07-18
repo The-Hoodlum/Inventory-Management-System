@@ -31,6 +31,7 @@ _BRANCH_REFERENCES: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ("returns", ("branch_id",), "returns"),
     ("credit_notes", ("branch_id",), "credit notes"),
     ("user_branch_access", ("branch_id",), "user assignments"),
+    ("financial_accounts", ("branch_id",), "finance accounts"),
 )
 
 

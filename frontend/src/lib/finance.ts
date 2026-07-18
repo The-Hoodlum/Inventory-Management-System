@@ -1,0 +1,62 @@
+// Finance API — accounts + derived balances (PR 1 of the cash book / treasury module).
+// A balance is always DERIVED (opening + IN - OUT) and returned on read; it can never be
+// set. Reads need finance.read; account admin needs finance.account.manage. Accounts are
+// DEACTIVATED (is_active=false), never deleted — there is no delete endpoint.
+import { api } from "@/lib/api";
+
+export type AccountType = "CASH" | "BANK" | "MOBILE_MONEY" | "CUSTODY";
+
+export interface FinanceAccount {
+  id: string;
+  tenant_id: string;
+  branch_id: string | null;
+  branch_name: string | null;
+  name: string;
+  type: AccountType;
+  currency: string;
+  opening_balance: string;
+  opening_as_of: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  // Present on list / get (AccountBalanceOut) — the derived position.
+  total_in: string;
+  total_out: string;
+  balance: string;
+}
+
+export interface AccountCreateInput {
+  name: string;
+  type: AccountType;
+  branch_id?: string | null;
+  currency?: string;
+  opening_balance?: string;
+  opening_as_of?: string | null;
+}
+
+export interface AccountUpdateInput {
+  name?: string;
+  is_active?: boolean;
+}
+
+export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
+  CASH: "Cash in hand",
+  BANK: "Bank",
+  MOBILE_MONEY: "Mobile money",
+  CUSTODY: "Custody",
+};
+
+export const financeApi = {
+  listAccounts: (params: { branch_id?: string; active_only?: boolean; type?: string } = {}) => {
+    const p = new URLSearchParams();
+    if (params.branch_id) p.set("branch_id", params.branch_id);
+    if (params.active_only) p.set("active_only", "true");
+    if (params.type) p.set("type", params.type);
+    const qs = p.toString();
+    return api.get<FinanceAccount[]>(`/finance/accounts${qs ? `?${qs}` : ""}`);
+  },
+  getAccount: (id: string) => api.get<FinanceAccount>(`/finance/accounts/${id}`),
+  createAccount: (body: AccountCreateInput) => api.post<FinanceAccount>("/finance/accounts", body),
+  updateAccount: (id: string, body: AccountUpdateInput) =>
+    api.patch<FinanceAccount>(`/finance/accounts/${id}`, body),
+};
