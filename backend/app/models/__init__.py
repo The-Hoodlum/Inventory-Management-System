@@ -16,7 +16,6 @@ from app.models.catalog import (
     SupplierProduct,
 )
 from app.models.customer import Customer, CustomerAddress
-from app.models.finance import AccountMovement, FinancialAccount
 from app.models.dispatch import (
     CustomerDelivery,
     CustomerDeliveryLine,
@@ -25,6 +24,7 @@ from app.models.dispatch import (
     Issuance,
     IssuanceLine,
 )
+from app.models.finance import AccountMovement, FinancialAccount
 from app.models.identity import (
     AuditLog,
     Permission,
