@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response, status
 
 from app.api.v1.deps import (
     CurrentUser,
@@ -115,14 +115,19 @@ async def set_payment_mapping(
     )
 
 
-@router.delete("/payment-mappings/{mapping_id}", status_code=204)
+@router.delete(
+    "/payment-mappings/{mapping_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+)
 async def delete_payment_mapping(
     mapping_id: uuid.UUID,
     request: Request,
     user: CurrentUser = Depends(require_permission(P.FINANCE_ACCOUNT_MANAGE)),
     svc: FinanceService = Depends(get_finance_service),
-) -> None:
+) -> Response:
     await svc.delete_mapping(
         tenant_id=user.tenant_id, user_id=user.id, mapping_id=mapping_id,
         allowed_branch_ids=_allowed(user), ip=_ip(request),
     )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
