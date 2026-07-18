@@ -7,3 +7,8 @@ from __future__ import annotations
 BIKE_SOLD_BEFORE_ASSEMBLY = "bike.sold_before_assembly"
 BIKE_ASSEMBLED = "bike.assembled"
 BIKE_DISPATCHED_UNASSEMBLED = "bike.dispatched_unassembled"
+
+# Approvals & inventory (event versions of the computed bell signals)
+ORDER_REQUEST_PENDING = "order_request.pending"      # a requisition awaits approval
+PO_PENDING_APPROVAL = "po.pending_approval"          # a purchase order awaits approval
+INVENTORY_LOW_STOCK = "inventory.low_stock"          # an item just crossed its reorder point
