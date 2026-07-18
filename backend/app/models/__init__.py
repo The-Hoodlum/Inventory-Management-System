@@ -26,6 +26,9 @@ from app.models.dispatch import (
 )
 from app.models.finance import (
     AccountMovement,
+    Expense,
+    ExpenseAttachment,
+    ExpenseCategory,
     FinancePaymentAccountMap,
     FinancialAccount,
 )
@@ -117,4 +120,5 @@ __all__ = [
     "MotorcycleServicePlan", "MotorcycleServiceRecord",
     "PartsSale",
     "FinancialAccount", "AccountMovement", "FinancePaymentAccountMap",
+    "ExpenseCategory", "Expense", "ExpenseAttachment",
 ]

@@ -96,3 +96,71 @@ class MovementOut(BaseModel):
     created_by: uuid.UUID | None
     created_at: dt.datetime
     reversal_of: uuid.UUID | None
+
+
+# ------------------------------ expenses --------------------------------- #
+class CategoryCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+
+
+class CategoryUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    is_active: bool | None = None
+
+
+class CategoryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    is_active: bool
+
+
+class ExpenseCreate(BaseModel):
+    account_id: uuid.UUID
+    branch_id: uuid.UUID | None = None  # defaults to the account's branch
+    amount: Decimal = Field(gt=0)
+    expense_date: dt.date
+    category_id: uuid.UUID | None = None
+    payee: str | None = Field(default=None, max_length=256)
+    description: str | None = None
+    reference_no: str | None = Field(default=None, max_length=128)
+
+
+class ExpenseUpdate(BaseModel):
+    # Metadata only. Amount and account are NOT editable — changing what an expense cost
+    # means voiding it (reversing the OUT) and recording a fresh one.
+    category_id: uuid.UUID | None = None
+    payee: str | None = Field(default=None, max_length=256)
+    description: str | None = None
+    reference_no: str | None = Field(default=None, max_length=128)
+    expense_date: dt.date | None = None
+
+
+class ExpenseVoid(BaseModel):
+    reason: str = Field(min_length=1, max_length=512)
+
+
+class ExpenseOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    branch_id: uuid.UUID | None
+    branch_name: str | None = None
+    account_id: uuid.UUID
+    account_name: str | None = None
+    amount: Decimal
+    expense_date: dt.date
+    category_id: uuid.UUID | None
+    category_name: str | None = None
+    payee: str | None
+    description: str | None
+    reference_no: str | None
+    status: str
+    recorded_by: uuid.UUID | None
+    void_reason: str | None
+    voided_by: uuid.UUID | None
+    voided_at: dt.datetime | None
+    has_attachment: bool = False
+    created_at: dt.datetime

@@ -16,6 +16,9 @@ from sqlalchemy import func, select
 from app.models import (
     AccountMovement,
     Branch,
+    Expense,
+    ExpenseAttachment,
+    ExpenseCategory,
     FinancePaymentAccountMap,
     FinancialAccount,
 )
@@ -211,3 +214,96 @@ class FinanceRepository:
     async def delete_mapping(self, row: FinancePaymentAccountMap) -> None:
         await self.session.delete(row)
         await self.session.flush()
+
+    # ------------------------- expense categories ------------------------ #
+    async def add_category(self, category: ExpenseCategory) -> ExpenseCategory:
+        self.session.add(category)
+        await self.session.flush()
+        return category
+
+    async def get_category(self, category_id: uuid.UUID) -> ExpenseCategory | None:
+        return await self.session.get(ExpenseCategory, category_id)
+
+    async def category_by_name(self, name: str) -> ExpenseCategory | None:
+        res = await self.session.execute(
+            select(ExpenseCategory).where(func.lower(ExpenseCategory.name) == name.lower())
+        )
+        return res.scalar_one_or_none()
+
+    async def list_categories(self, *, active_only: bool = False) -> list[ExpenseCategory]:
+        stmt = select(ExpenseCategory)
+        if active_only:
+            stmt = stmt.where(ExpenseCategory.is_active.is_(True))
+        stmt = stmt.order_by(ExpenseCategory.name)
+        res = await self.session.execute(stmt)
+        return list(res.scalars().all())
+
+    async def category_name_map(self) -> dict[uuid.UUID, str]:
+        res = await self.session.execute(select(ExpenseCategory.id, ExpenseCategory.name))
+        return {cid: name for cid, name in res.all()}
+
+    # ------------------------------ expenses ----------------------------- #
+    async def add_expense(self, expense: Expense) -> Expense:
+        self.session.add(expense)
+        await self.session.flush()
+        return expense
+
+    async def get_expense(self, expense_id: uuid.UUID) -> Expense | None:
+        return await self.session.get(Expense, expense_id)
+
+    async def list_expenses(
+        self, *, branch_ids: Sequence[uuid.UUID] | None, category_id: uuid.UUID | None = None,
+        account_id: uuid.UUID | None = None, status: str | None = None,
+        date_from: dt.date | None = None, date_to: dt.date | None = None,
+    ) -> list[Expense]:
+        stmt = select(Expense)
+        if branch_ids is not None:
+            stmt = stmt.where(Expense.branch_id.in_(list(branch_ids)))
+        if category_id is not None:
+            stmt = stmt.where(Expense.category_id == category_id)
+        if account_id is not None:
+            stmt = stmt.where(Expense.account_id == account_id)
+        if status is not None:
+            stmt = stmt.where(Expense.status == status)
+        if date_from is not None:
+            stmt = stmt.where(Expense.expense_date >= date_from)
+        if date_to is not None:
+            stmt = stmt.where(Expense.expense_date <= date_to)
+        stmt = stmt.order_by(Expense.expense_date.desc(), Expense.created_at.desc())
+        res = await self.session.execute(stmt)
+        return list(res.scalars().all())
+
+    # ---------------------------- attachments ---------------------------- #
+    async def get_attachment(self, expense_id: uuid.UUID) -> ExpenseAttachment | None:
+        res = await self.session.execute(
+            select(ExpenseAttachment).where(ExpenseAttachment.expense_id == expense_id)
+        )
+        return res.scalar_one_or_none()
+
+    async def upsert_attachment(
+        self, *, tenant_id: uuid.UUID, expense_id: uuid.UUID, filename: str,
+        content_type: str | None, data: bytes, uploaded_by: uuid.UUID | None,
+    ) -> ExpenseAttachment:
+        existing = await self.get_attachment(expense_id)
+        if existing is not None:
+            existing.filename = filename
+            existing.content_type = content_type
+            existing.data = data
+            existing.uploaded_by = uploaded_by
+            await self.session.flush()
+            return existing
+        row = ExpenseAttachment(
+            tenant_id=tenant_id, expense_id=expense_id, filename=filename,
+            content_type=content_type, data=data, uploaded_by=uploaded_by,
+        )
+        self.session.add(row)
+        await self.session.flush()
+        return row
+
+    async def attachment_expense_ids(self, expense_ids: Sequence[uuid.UUID]) -> set[uuid.UUID]:
+        if not expense_ids:
+            return set()
+        res = await self.session.execute(
+            select(ExpenseAttachment.expense_id).where(ExpenseAttachment.expense_id.in_(list(expense_ids)))
+        )
+        return set(res.scalars().all())

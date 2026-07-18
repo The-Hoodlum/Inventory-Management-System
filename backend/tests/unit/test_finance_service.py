@@ -17,9 +17,15 @@ from decimal import Decimal
 import pytest
 
 from app.core.exceptions import BusinessRuleError, PermissionDeniedError
-from app.finance.schemas import AccountCreate, AccountUpdate
+from app.finance.schemas import AccountCreate, AccountUpdate, ExpenseCreate
 from app.finance.service import FinanceService, derive_balance
-from app.models import AccountMovement, FinancePaymentAccountMap, FinancialAccount
+from app.models import (
+    AccountMovement,
+    Expense,
+    ExpenseCategory,
+    FinancePaymentAccountMap,
+    FinancialAccount,
+)
 from tests.conftest import FakeAuditRepo
 
 TENANT = uuid.uuid4()
@@ -36,6 +42,9 @@ class _FakeFinanceRepo:
         self.accounts: dict[uuid.UUID, FinancialAccount] = {}
         self.movements: list[AccountMovement] = []
         self.mappings: list[FinancePaymentAccountMap] = []
+        self.categories: dict[uuid.UUID, ExpenseCategory] = {}
+        self.expenses: dict[uuid.UUID, Expense] = {}
+        self.attachments: dict[uuid.UUID, object] = {}
 
         class _S:
             async def flush(self_inner) -> None:
@@ -117,6 +126,56 @@ class _FakeFinanceRepo:
         row.id = uuid.uuid4()
         self.mappings.append(row)
         return row
+
+    # categories
+    async def add_category(self, category):
+        if category.id is None:
+            category.id = uuid.uuid4()
+        if category.is_active is None:
+            category.is_active = True
+        self.categories[category.id] = category
+        return category
+
+    async def get_category(self, category_id):
+        return self.categories.get(category_id)
+
+    async def category_by_name(self, name):
+        return next((c for c in self.categories.values() if c.name.lower() == name.lower()), None)
+
+    async def list_categories(self, *, active_only=False):
+        return [c for c in self.categories.values() if not active_only or c.is_active]
+
+    async def category_name_map(self):
+        return {cid: c.name for cid, c in self.categories.items()}
+
+    # expenses
+    async def add_expense(self, expense):
+        if expense.id is None:
+            expense.id = uuid.uuid4()
+        expense.created_at = dt.datetime.now(dt.UTC)
+        if expense.status is None:
+            expense.status = "recorded"
+        self.expenses[expense.id] = expense
+        return expense
+
+    async def get_expense(self, expense_id):
+        return self.expenses.get(expense_id)
+
+    async def list_expenses(self, *, branch_ids, **f):
+        out = list(self.expenses.values())
+        if branch_ids is not None:
+            out = [e for e in out if e.branch_id in branch_ids]
+        return out
+
+    async def get_attachment(self, expense_id):
+        return self.attachments.get(expense_id)
+
+    async def upsert_attachment(self, **kwargs):
+        self.attachments[kwargs["expense_id"]] = kwargs
+        return kwargs
+
+    async def attachment_expense_ids(self, expense_ids):
+        return {eid for eid in expense_ids if eid in self.attachments}
 
 
 def _svc():
@@ -318,3 +377,64 @@ async def test_mapping_rejects_foreign_branch_account():
     with pytest.raises(BusinessRuleError):
         await svc.set_mapping(tenant_id=TENANT, user_id=USER, branch_id=BRANCH_A,
                               method="bank_transfer", account_id=bank_b.id)
+
+
+# -------------------------------- expenses -------------------------------- #
+async def test_expense_posts_out_reducing_balance_by_exactly_amount():
+    svc = _svc()
+    cash = await svc.create_account(
+        tenant_id=TENANT, user_id=USER,
+        data=AccountCreate(name="Cash", type="CASH", branch_id=BRANCH_A, opening_balance=Decimal("1000")))
+    cat = await svc.create_category(tenant_id=TENANT, user_id=USER, name="Fuel")
+    exp = await svc.create_expense(
+        tenant_id=TENANT, user_id=USER,
+        data=ExpenseCreate(account_id=cash.id, amount=Decimal("300"),
+                           expense_date=dt.date(2026, 7, 19), category_id=cat.id, payee="Total"))
+    assert exp.status == "recorded"
+    assert await svc.account_balance(cash.id) == Decimal("700")  # 1000 - 300
+
+
+async def test_void_expense_restores_balance_and_is_idempotent():
+    svc = _svc()
+    cash = await svc.create_account(
+        tenant_id=TENANT, user_id=USER,
+        data=AccountCreate(name="Cash", type="CASH", branch_id=BRANCH_A, opening_balance=Decimal("500")))
+    exp = await svc.create_expense(
+        tenant_id=TENANT, user_id=USER,
+        data=ExpenseCreate(account_id=cash.id, amount=Decimal("200"), expense_date=dt.date(2026, 7, 19)))
+    assert await svc.account_balance(cash.id) == Decimal("300")
+    voided = await svc.void_expense(tenant_id=TENANT, user_id=USER, expense_id=exp.id, reason="wrong")
+    assert voided.status == "voided"
+    assert await svc.account_balance(cash.id) == Decimal("500")  # OUT reversed, not deleted
+    with pytest.raises(BusinessRuleError):
+        await svc.void_expense(tenant_id=TENANT, user_id=USER, expense_id=exp.id, reason="again")
+
+
+async def test_expense_requires_a_branch():
+    svc = _svc()
+    custody = await svc.create_account(
+        tenant_id=TENANT, user_id=USER, data=AccountCreate(name="HQ", type="CUSTODY", branch_id=None))
+    # Tenant-wide account + no branch given -> can't scope the expense.
+    with pytest.raises(BusinessRuleError):
+        await svc.create_expense(
+            tenant_id=TENANT, user_id=USER,
+            data=ExpenseCreate(account_id=custody.id, amount=Decimal("50"), expense_date=dt.date(2026, 7, 19)))
+
+
+async def test_expense_branch_scoping_blocks_foreign_account():
+    svc = _svc()
+    cash_b = await svc.create_account(
+        tenant_id=TENANT, user_id=USER, data=AccountCreate(name="Cash B", type="CASH", branch_id=BRANCH_B))
+    with pytest.raises(PermissionDeniedError):
+        await svc.create_expense(
+            tenant_id=TENANT, user_id=USER,
+            data=ExpenseCreate(account_id=cash_b.id, amount=Decimal("50"), expense_date=dt.date(2026, 7, 19)),
+            allowed_branch_ids=frozenset({BRANCH_A}))
+
+
+async def test_duplicate_category_rejected():
+    from app.core.exceptions import ConflictError
+    svc = _svc()
+    await svc.create_category(tenant_id=TENANT, user_id=USER, name="Rent")
+    with pytest.raises(ConflictError):
+        await svc.create_category(tenant_id=TENANT, user_id=USER, name="rent")
