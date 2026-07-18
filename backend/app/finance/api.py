@@ -17,7 +17,14 @@ from app.api.v1.deps import (
     resolve_branch_scope,
 )
 from app.core.permissions import P
-from app.finance.schemas import AccountBalanceOut, AccountCreate, AccountOut, AccountUpdate
+from app.finance.schemas import (
+    AccountBalanceOut,
+    AccountCreate,
+    AccountOut,
+    AccountUpdate,
+    PaymentMappingOut,
+    PaymentMappingSet,
+)
 from app.finance.service import FinanceService
 
 router = APIRouter()
@@ -79,5 +86,43 @@ async def update_account(
 ) -> AccountOut:
     return await svc.update_account(
         tenant_id=user.tenant_id, user_id=user.id, account_id=account_id, data=payload,
+        allowed_branch_ids=_allowed(user), ip=_ip(request),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Money-in: per-branch payment-method -> account mapping
+# --------------------------------------------------------------------------- #
+@router.get("/payment-mappings", response_model=list[PaymentMappingOut])
+async def list_payment_mappings(
+    user: CurrentUser = Depends(require_permission(P.FINANCE_READ)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> list[PaymentMappingOut]:
+    return await svc.list_mappings(allowed_branch_ids=_allowed(user))
+
+
+@router.put("/payment-mappings", response_model=PaymentMappingOut)
+async def set_payment_mapping(
+    payload: PaymentMappingSet,
+    request: Request,
+    user: CurrentUser = Depends(require_permission(P.FINANCE_ACCOUNT_MANAGE)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> PaymentMappingOut:
+    return await svc.set_mapping(
+        tenant_id=user.tenant_id, user_id=user.id, branch_id=payload.branch_id,
+        method=payload.method, account_id=payload.account_id,
+        allowed_branch_ids=_allowed(user), ip=_ip(request),
+    )
+
+
+@router.delete("/payment-mappings/{mapping_id}", status_code=204)
+async def delete_payment_mapping(
+    mapping_id: uuid.UUID,
+    request: Request,
+    user: CurrentUser = Depends(require_permission(P.FINANCE_ACCOUNT_MANAGE)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> None:
+    await svc.delete_mapping(
+        tenant_id=user.tenant_id, user_id=user.id, mapping_id=mapping_id,
         allowed_branch_ids=_allowed(user), ip=_ip(request),
     )

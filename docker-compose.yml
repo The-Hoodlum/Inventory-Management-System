@@ -85,6 +85,7 @@ services:
       - ./database/sql/notifications.sql:/docker-entrypoint-initdb.d/52_notifications.sql:ro
       - ./database/sql/notification_prefs.sql:/docker-entrypoint-initdb.d/53_notification_prefs.sql:ro
       - ./database/sql/finance_accounts.sql:/docker-entrypoint-initdb.d/54_finance_accounts.sql:ro
+      - ./database/sql/finance_payment_mapping.sql:/docker-entrypoint-initdb.d/55_finance_payment_mapping.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-inventory}"]
       interval: 5s

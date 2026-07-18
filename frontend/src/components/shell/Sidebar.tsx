@@ -16,6 +16,7 @@ import {
   Container,
   Contact,
   CircleDollarSign,
+  CreditCard,
   HandHelping,
   Hammer,
   FileText,
@@ -87,6 +88,7 @@ const GROUPS: NavGroup[] = [
     label: "Finance",
     items: [
       { to: "/finance/accounts", label: "Accounts", icon: Landmark, permission: "finance.read" },
+      { to: "/finance/payment-setup", label: "Payment Setup", icon: CreditCard, permission: "finance.read" },
     ],
   },
   {

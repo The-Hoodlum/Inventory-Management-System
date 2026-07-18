@@ -272,11 +272,13 @@ def get_inventory_service(db: AsyncSession = Depends(get_db)) -> InventoryServic
 
 def get_sales_service(db: AsyncSession = Depends(get_db)) -> SalesService:
     # Sales delegates every stock movement to the inventory service (single write path),
-    # so it is wired with one — sharing the request session/transaction.
+    # and every money movement to the finance service (append-only account ledger) — both
+    # share the request session/transaction, so a failure in either rolls the sale back.
     return SalesService(
         SalesRepository(db),
         AuditRepository(db),
         get_inventory_service(db),
+        get_finance_service(db),
     )
 
 

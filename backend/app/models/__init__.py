@@ -24,7 +24,11 @@ from app.models.dispatch import (
     Issuance,
     IssuanceLine,
 )
-from app.models.finance import AccountMovement, FinancialAccount
+from app.models.finance import (
+    AccountMovement,
+    FinancePaymentAccountMap,
+    FinancialAccount,
+)
 from app.models.identity import (
     AuditLog,
     Permission,
@@ -112,5 +116,5 @@ __all__ = [
     "Notification", "NotificationPref",
     "MotorcycleServicePlan", "MotorcycleServiceRecord",
     "PartsSale",
-    "FinancialAccount", "AccountMovement",
+    "FinancialAccount", "AccountMovement", "FinancePaymentAccountMap",
 ]

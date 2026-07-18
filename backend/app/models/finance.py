@@ -25,6 +25,19 @@ ACCOUNT_TYPES = ("CASH", "BANK", "MOBILE_MONEY", "CUSTODY")
 DIRECTION_IN = "IN"
 DIRECTION_OUT = "OUT"
 
+# Sales payment methods that can be mapped to an account (mirrors sales PaymentLineIn).
+PAYMENT_METHODS = ("cash", "card", "mobile_money", "bank_transfer", "cheque", "store_credit")
+# The account type each method most naturally posts to (a UI hint only; the actual account
+# is whatever the tenant maps — nothing is hard-coded in the posting path).
+DEFAULT_METHOD_ACCOUNT_TYPE = {
+    "cash": "CASH",
+    "mobile_money": "MOBILE_MONEY",
+    "bank_transfer": "BANK",
+    "card": "BANK",
+    "cheque": "BANK",
+    "store_credit": "CUSTODY",
+}
+
 
 class FinancialAccount(Base):
     """A finance account (cash in hand, a bank account, a mobile-money wallet, or a
@@ -68,3 +81,19 @@ class AccountMovement(Base):
     created_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
     reversal_of: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("account_movements.id", ondelete="RESTRICT"), nullable=True)
+
+
+class FinancePaymentAccountMap(Base):
+    """Per-branch mapping of a sales payment method to the finance account it posts to.
+    Tenant CONFIGURATION (editable/removable), not a financial record. Once a branch has
+    any mapping, an unmapped method on a payment fails loudly rather than dropping money."""
+
+    __tablename__ = "finance_payment_account_map"
+
+    id: Mapped[uuid.UUID] = mapped_column(_UUID, primary_key=True, server_default=text("gen_random_uuid()"))
+    tenant_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    branch_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("branches.id", ondelete="CASCADE"), nullable=False)
+    method: Mapped[str] = mapped_column(Text, nullable=False)
+    account_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("financial_accounts.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
