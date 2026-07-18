@@ -49,9 +49,23 @@ def _f(v) -> float:
 
 
 class OrderRequestService:
-    def __init__(self, repo: OrderRequestRepository, audit: AuditRepository) -> None:
+    def __init__(self, repo: OrderRequestRepository, audit: AuditRepository, notifications=None) -> None:
         self.repo = repo
         self.audit = audit
+        self.notifications = notifications   # optional NotificationService; None -> no notifications
+
+    async def _notify_pending(self, tenant_id, header, actor_id) -> None:
+        if self.notifications is None:
+            return
+        from app.notifications import events as N_EVENTS
+        # Not branch-scoped: order-request "branch_id" is a LOCATION id, not a branch, and
+        # approvers (admins/managers) act across locations — so tell every approver.
+        await self.notifications.notify(
+            tenant_id=tenant_id, event_type=N_EVENTS.ORDER_REQUEST_PENDING, severity="info",
+            title=f"Order request {header.request_number} awaits approval",
+            href="/order-requests", entity_type="order_request", entity_id=header.id,
+            actor_user_id=actor_id, permission="order_request.approve",
+        )
 
     # ------------------------------- create ---------------------------- #
     async def create(
@@ -94,6 +108,8 @@ class OrderRequestService:
             lines=[ln.model_dump() for ln in payload.lines], status=new_status,
         )
         await self._audit(tenant_id, header.id, user_id, "created", None, new_status)
+        if new_status == S.PENDING:
+            await self._notify_pending(tenant_id, header, user_id)
         return await self._to_out(header)
 
     # ------------------------------- submit ---------------------------- #
@@ -108,6 +124,7 @@ class OrderRequestService:
         header.status = S.PENDING
         await self.repo.session.flush()
         await self._audit(tenant_id, header.id, actor_id, "submitted", S.DRAFT, S.PENDING)
+        await self._notify_pending(tenant_id, header, actor_id)
         return await self._to_out(header)
 
     # ------------------------------ approve ---------------------------- #

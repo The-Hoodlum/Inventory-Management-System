@@ -266,6 +266,7 @@ def get_inventory_service(db: AsyncSession = Depends(get_db)) -> InventoryServic
         WarehouseRepository(db),
         AuditRepository(db),
         ReservationRepository(db),
+        get_notification_service(db),
     )
 
 
@@ -368,6 +369,7 @@ def get_procurement_service(db: AsyncSession = Depends(get_db)) -> ProcurementSe
         InventoryRepository(db),
         AuditRepository(db),
         EmailService.from_settings(),
+        get_notification_service(db),
     )
 
 
@@ -437,7 +439,7 @@ def get_tenant_service(db: AsyncSession = Depends(get_db)) -> TenantSettingsServ
 
 
 def get_order_request_service(db: AsyncSession = Depends(get_db)) -> OrderRequestService:
-    return OrderRequestService(OrderRequestRepository(db), AuditRepository(db))
+    return OrderRequestService(OrderRequestRepository(db), AuditRepository(db), get_notification_service(db))
 
 
 def get_motorcycle_service(db: AsyncSession = Depends(get_db)) -> MotorcycleService:

@@ -58,11 +58,12 @@ _ACTION_AUDIT: dict[POAction, str] = {
 
 
 class ProcurementService:
-    def __init__(self, procurement_repo, inventory_repo, audit_repo, email_service=None) -> None:
+    def __init__(self, procurement_repo, inventory_repo, audit_repo, email_service=None, notifications=None) -> None:
         self.repo: ProcurementRepository = procurement_repo
         self.inventory = inventory_repo
         self.audit = audit_repo
         self.email: EmailService = email_service or EmailService.from_settings()
+        self.notifications = notifications   # optional NotificationService; None -> no notifications
 
     # =============================== helpers =============================== #
     @staticmethod
@@ -297,6 +298,15 @@ class ProcurementService:
             changes={"po_number": po.po_number, "from": from_status, "to": po.status,
                      "comment": comment}, ip=ip,
         )
+        # A PO that just entered the approval queue -> tell the approvers (po.approve).
+        if po.status == POStatus.PENDING_APPROVAL.value and self.notifications is not None:
+            from app.notifications import events as N_EVENTS
+            await self.notifications.notify(
+                tenant_id=tenant, event_type=N_EVENTS.PO_PENDING_APPROVAL, severity="info",
+                title=f"Purchase order {po.po_number} awaits approval",
+                href="/purchase-orders", entity_type="purchase_order", entity_id=po.id,
+                actor_user_id=actor, permission="po.approve",
+            )
         return self._po_out(po, await self.repo.lines_for(po.id))
 
     async def submit(self, **kw) -> POOut:

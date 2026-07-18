@@ -41,6 +41,7 @@ class InventoryService:
         warehouses: WarehouseRepository,
         audit: AuditRepository,
         reservations: ReservationRepository | None = None,
+        notifications=None,
     ) -> None:
         self.inventory = inventory
         self.products = products
@@ -48,6 +49,8 @@ class InventoryService:
         self.audit = audit
         # Optional: only required for reservation-aware issues (sales delivery / POS).
         self.reservations = reservations
+        # Optional NotificationService — fires a one-time low-stock alert on a down-crossing.
+        self.notifications = notifications
 
     # ----------------------------- helpers ----------------------------- #
     async def _require_product(self, product_id: uuid.UUID) -> None:
@@ -249,7 +252,33 @@ class InventoryService:
                 extra={"reason": req.reason, "ip": ip},
             )
             affected.append(inv)
+            if self.notifications is not None:
+                await self._notify_low_stock(
+                    tenant_id, user_id, line.product_id, req.warehouse_id, inv, line.quantity)
         return affected
+
+    async def _notify_low_stock(self, tenant_id, user_id, product_id, warehouse_id, inv, issued_qty) -> None:
+        """Fire ONE low-stock alert when this issue just took available across the product's
+        reorder point (down-crossing only, so it doesn't repeat on every subsequent issue).
+        Best-effort — the notification service isolates any failure from the stock write."""
+        product = await self.products.get(product_id)
+        rop = getattr(product, "reorder_point", None) if product is not None else None
+        if rop is None:
+            return
+        after = _available(inv)
+        before = after + Decimal(issued_qty)
+        if not (before > rop and after <= rop):
+            return   # not a fresh crossing
+        wh = await self.warehouses.get(warehouse_id)
+        from app.notifications import events as N_EVENTS
+        name = getattr(product, "name", None) or getattr(product, "sku", None) or "an item"
+        await self.notifications.notify(
+            tenant_id=tenant_id, event_type=N_EVENTS.INVENTORY_LOW_STOCK, severity="warning",
+            title=f"Low stock: {name}",
+            body=f"{after:g} left — at or below the reorder point ({Decimal(rop):g}).",
+            href="/reorder", entity_type="product", entity_id=product_id,
+            branch_id=getattr(wh, "branch_id", None), actor_user_id=user_id, permission="reorder.read",
+        )
 
     # ------------------- issue against a reservation ------------------- #
     async def issue_against_reservation(
