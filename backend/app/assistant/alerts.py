@@ -40,6 +40,58 @@ def build_daily_summary_message(s: dict) -> str:
     return head + "\n" + "\n".join(body)
 
 
+_MAX_SOLD_LINES = 8
+
+
+def build_branch_daily_report(d: dict, *, currency: str = "") -> str:
+    """A branch's day: what sold, how it was paid for, and what else happened.
+
+    Figures come from the authoritative invoice-based sales aggregation, so this always
+    agrees with the Daily/Monthly Sales Report page. Sections are omitted rather than
+    printed empty — a quiet day should read short, not padded with zeros."""
+    ccy = currency
+    lines = [f"📊 *{d['branch']} — {d['date']}*"]
+
+    sold = d.get("sold") or []
+    if sold:
+        lines.append(f"*Sold* ({len(sold)} line(s)):")
+        for s in sold[:_MAX_SOLD_LINES]:
+            what = s.get("description") or s.get("ref") or "item"
+            qty = s.get("qty") or 0
+            qty_txt = f" x{int(qty)}" if float(qty) == int(qty) else f" x{qty:g}"
+            lines.append(f"  - {what}{qty_txt}: {ccy} {float(s.get('gross') or 0):,.2f}")
+        hidden = len(sold) - min(len(sold), _MAX_SOLD_LINES)
+        if hidden > 0:
+            lines.append(f"  ...and {hidden} more line(s)")
+    else:
+        lines.append("*Sold:* nothing today")
+
+    payments = d.get("payments") or []
+    if payments:
+        lines.append("*Money in:*")
+        for p in payments:
+            method = str(p.get("method", "")).replace("_", " ").title()
+            lines.append(f"  - {method}: {ccy} {float(p.get('amount') or 0):,.2f}")
+    lines.append(
+        f"*Totals:* sold {ccy} {float(d.get('gross_total') or 0):,.2f} | "
+        f"collected {ccy} {float(d.get('collected_total') or 0):,.2f}"
+    )
+    outstanding = float(d.get("outstanding_total") or 0)
+    if outstanding > 0:
+        lines.append(f"  ⚠️ Outstanding: {ccy} {outstanding:,.2f}")
+
+    activity = [
+        (d.get("order_requests", 0), "order request(s)"),
+        (d.get("transfers", 0), "transfer(s)"),
+        (d.get("issuances", 0), "issuance(s)"),
+        (d.get("bike_issues", 0), "bike issue(s)"),
+    ]
+    busy = [f"{n} {label}" for n, label in activity if n]
+    if busy:
+        lines.append("*Activity:* " + ", ".join(busy))
+    return "\n".join(lines)
+
+
 def build_weekly_report_message(perf: dict) -> str:
     ccy = perf.get("currency", "")
     lines = [f"📊 *Weekly report* {perf['period']}"]
@@ -86,15 +138,56 @@ def build_pending_pr_message(pending: dict) -> str | None:
     return f"📝 *{pending['count']} purchase request(s)* awaiting approval:\n" + "\n".join(lines)
 
 
+_MAX_REQUEST_ITEMS = 5      # per request, before "…and N more items"
+_MAX_DETAILED_REQUESTS = 3  # beyond this, fall back to one-liners so the message stays readable
+
+
+def _qty(value) -> str:
+    """Whole numbers without a trailing .0 — '10' not '10.0'."""
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return "?"
+    return str(int(f)) if f == int(f) else f"{f:g}"
+
+
+def _request_block(r: dict) -> list[str]:
+    """One request rendered with its requester, purpose and actual lines."""
+    purpose = str(r.get("purpose") or "request").replace("_", " ")
+    head = f"*{r['request_number']}* — {purpose}"
+    who = r.get("requested_by")
+    where = r.get("branch")
+    origin = " · ".join(x for x in (who, where) if x)
+    block = [head] + ([f"  From: {origin}"] if origin else [])
+    items = r.get("items") or []
+    for it in items[:_MAX_REQUEST_ITEMS]:
+        block.append(f"  - {it['name']} x {_qty(it['qty'])}")
+    hidden = len(items) - min(len(items), _MAX_REQUEST_ITEMS)
+    if hidden > 0:
+        block.append(f"  ...and {hidden} more item(s)")
+    if not items:
+        block.append(f"  ({r.get('item_count', 0)} item(s))")
+    return block
+
+
 def build_order_requests_message(pending: dict) -> str | None:
+    """Requisitions awaiting approval, WITH what was actually requested.
+
+    An approver should be able to decide from the message; listing only a request number
+    and an item count forced them into the app to find out what was being asked for. A few
+    requests are shown in full; beyond that it degrades to one-liners so a busy day doesn't
+    produce an unreadable wall of text."""
     reqs = pending.get("requests", [])
     if not reqs:
         return None
-    lines = [f"- {r['request_number']} ({r['branch']}): {r['item_count']} item(s)"
-             for r in reqs[:_MAX_BULLETS]]
-    more = len(reqs) - len(lines)
+    lines: list[str] = []
+    for r in reqs[:_MAX_DETAILED_REQUESTS]:
+        lines += _request_block(r)
+    for r in reqs[_MAX_DETAILED_REQUESTS:_MAX_BULLETS]:
+        lines.append(f"*{r['request_number']}* ({r['branch']}): {r['item_count']} item(s)")
+    more = len(reqs) - min(len(reqs), _MAX_BULLETS)
     if more > 0:
-        lines.append(f"...and {more} more")
+        lines.append(f"...and {more} more request(s)")
     return (f"📝 *{pending['count']} order request(s)* awaiting approval — reply "
             f"\"approve REQ-…\" or \"reject REQ-…\":\n" + "\n".join(lines))
 

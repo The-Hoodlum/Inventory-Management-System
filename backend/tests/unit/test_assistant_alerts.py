@@ -139,3 +139,101 @@ def test_bike_stock_alert_is_due_every_cycle():
     settings = SimpleNamespace(assistant_daily_summary_hour=18, assistant_weekly_report_weekday=0)
     kinds = due_alert_kinds(dt.datetime(2026, 7, 19, 9, 0), settings)
     assert "bike_stock" in kinds
+
+
+# ------------------- order requests: the requested items ------------------- #
+def _req(num, *, items, who="Joyce (Cashier)", branch="Lusaka Shop", purpose="shelf_replenishment"):
+    return {"request_number": num, "branch": branch, "purpose": purpose,
+            "requested_by": who, "item_count": len(items), "items": items}
+
+
+def test_order_request_message_shows_who_asked_and_what_for():
+    msg = build_order_requests_message({"count": 1, "requests": [
+        _req("REQ-2026-0031", items=[
+            {"name": "Brake pads CG125", "qty": 10.0},
+            {"name": "Chain lube 400ml", "qty": 6.0},
+        ])
+    ]})
+    assert "REQ-2026-0031" in msg
+    assert "shelf replenishment" in msg                      # purpose, underscores humanised
+    assert "Joyce (Cashier)" in msg and "Lusaka Shop" in msg
+    assert "Brake pads CG125 x 10" in msg              # whole qty, no trailing .0
+    assert "Chain lube 400ml x 6" in msg
+    assert "approve REQ-" in msg                       # the reply flow is preserved
+
+
+def test_order_request_message_truncates_long_item_lists():
+    items = [{"name": f"Part {i}", "qty": 1} for i in range(9)]
+    msg = build_order_requests_message({"count": 1, "requests": [_req("REQ-1", items=items)]})
+    assert "Part 0 x 1" in msg
+    assert "...and 4 more item(s)" in msg              # 9 items, 5 shown
+
+
+def test_order_request_message_degrades_to_one_liners_when_busy():
+    """Many pending requests must not produce an unreadable wall of text."""
+    reqs = [_req(f"REQ-{i}", items=[{"name": "Widget", "qty": 2}]) for i in range(6)]
+    msg = build_order_requests_message({"count": 6, "requests": reqs})
+    # First few in full detail, the rest summarised.
+    assert "Widget x 2" in msg
+    assert "REQ-5" in msg and "1 item(s)" in msg
+
+
+def test_order_request_message_handles_a_request_with_no_lines():
+    msg = build_order_requests_message({"count": 1, "requests": [_req("REQ-EMPTY", items=[])]})
+    assert "REQ-EMPTY" in msg and "0 item(s)" in msg
+
+
+# --------------------------- branch daily digest --------------------------- #
+def _digest(**over):
+    base = {
+        "branch": "Lusaka", "date": "2026-07-19",
+        "sold": [{"kind": "part", "ref": "BP-01", "description": "Brake pads CG125", "qty": 2, "gross": 300.0},
+                 {"kind": "bike", "ref": "CH-9", "description": "TVS HLX125", "qty": 1, "gross": 18000.0}],
+        "payments": [{"method": "cash", "amount": 15000.0},
+                     {"method": "mobile_money", "amount": 3300.0}],
+        "gross_total": 18300.0, "collected_total": 18300.0, "outstanding_total": 0.0,
+        "order_requests": 2, "transfers": 1, "issuances": 0, "bike_issues": 3,
+    }
+    base.update(over)
+    return base
+
+
+def test_branch_daily_report_covers_sales_payments_and_activity():
+    from app.assistant.alerts import build_branch_daily_report
+
+    msg = build_branch_daily_report(_digest(), currency="ZMW")
+    assert "Lusaka" in msg and "2026-07-19" in msg
+    assert "Brake pads CG125 x2" in msg and "TVS HLX125 x1" in msg      # what sold
+    assert "Cash: ZMW 15,000.00" in msg                                  # by method
+    assert "Mobile Money: ZMW 3,300.00" in msg
+    assert "18,300.00" in msg                                            # totals
+    # Zero-count activity is omitted, non-zero is listed.
+    assert "2 order request(s)" in msg and "1 transfer(s)" in msg and "3 bike issue(s)" in msg
+    assert "issuance(s)" not in msg
+
+
+def test_branch_daily_report_flags_outstanding_money():
+    from app.assistant.alerts import build_branch_daily_report
+
+    msg = build_branch_daily_report(_digest(collected_total=10000.0, outstanding_total=8300.0), currency="ZMW")
+    assert "Outstanding: ZMW 8,300.00" in msg
+
+
+def test_branch_daily_report_reads_short_on_a_quiet_day():
+    from app.assistant.alerts import build_branch_daily_report
+
+    msg = build_branch_daily_report(
+        _digest(sold=[], payments=[], gross_total=0.0, collected_total=0.0, outstanding_total=0.0,
+                order_requests=0, transfers=0, issuances=0, bike_issues=0),
+        currency="ZMW")
+    assert "nothing today" in msg
+    assert "Money in" not in msg and "Activity" not in msg   # empty sections omitted, not zero-padded
+
+
+def test_branch_daily_report_truncates_a_long_sales_list():
+    from app.assistant.alerts import build_branch_daily_report
+
+    sold = [{"kind": "part", "ref": f"P{i}", "description": f"Part {i}", "qty": 1, "gross": 10.0}
+            for i in range(12)]
+    msg = build_branch_daily_report(_digest(sold=sold), currency="ZMW")
+    assert "...and 4 more line(s)" in msg    # 12 lines, 8 shown
