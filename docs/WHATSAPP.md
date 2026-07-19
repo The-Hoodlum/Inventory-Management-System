@@ -65,6 +65,10 @@ Still on **WhatsApp → API Setup**, copy:
 | **WhatsApp Business Account ID** | `WHATSAPP_BUSINESS_ACCOUNT_ID` |
 | **Temporary access token** | `WHATSAPP_ACCESS_TOKEN` (see the warning below) |
 
+Also grab the **App Secret** — **Settings → Basic → App secret → Show** — into
+`WHATSAPP_APP_SECRET`. This is what authenticates inbound webhooks; without it the endpoint
+accepts any payload that reaches the URL (see [Webhook authentication](#webhook-authentication)).
+
 ⚠️ **The temporary token expires in 24 hours.** Fine for testing, useless in production.
 For a permanent token:
 
@@ -102,6 +106,7 @@ WHATSAPP_PHONE_NUMBER_ID=123456789012345
 WHATSAPP_BUSINESS_ACCOUNT_ID=123456789012345
 WHATSAPP_ACCESS_TOKEN=EAAG...your-permanent-token
 WHATSAPP_VERIFY_TOKEN=the-random-string-you-generated
+WHATSAPP_APP_SECRET=your-meta-app-secret                          # authenticates webhooks
 WHATSAPP_DEFAULT_TENANT_ID=00000000-0000-0000-0000-000000000000   # from Step 3
 
 # Needed only for inbound Q&A (outbound alerts work without it)
@@ -216,23 +221,38 @@ in.
 
 ---
 
-## Security note — verify the webhook signature
+## Webhook authentication
 
-The webhook endpoint is **unauthenticated by design** (Meta calls it), and it currently does
-**not** verify the `X-Hub-Signature-256` header. Anyone who learns the URL could post a
-crafted payload and cause a reply to be sent to a number they choose.
+The webhook carries no bearer token (Meta calls it), so inbound payloads are authenticated
+by **HMAC-SHA256 over the raw request body**, compared in constant time against Meta's
+`X-Hub-Signature-256` header. This is what stops someone who learns the URL from posting a
+crafted payload and making the bot reply to a number of their choosing.
 
-Until signature verification is added, reduce the exposure:
+**Set `WHATSAPP_APP_SECRET`** (Step 2) to enable it. Behaviour:
 
-- [ ] Restrict `/api/v1/whatsapp/webhook` at your reverse proxy to
-      [Meta's published IP ranges](https://developers.facebook.com/docs/graph-api/webhooks/getting-started).
-- [ ] Keep `WHATSAPP_VERIFY_TOKEN` and the access token in a secret manager.
-- [ ] Remember replies only ever go to a number the payload names, and only linked numbers
-      (Step 6) get data — an unlinked number gets a refusal.
+| `WHATSAPP_APP_SECRET` | Inbound webhook |
+|---|---|
+| Set (production) | Verified. Bad/missing/replayed-over-tampered-body signature → **403**, nothing processed. |
+| Unset | Verification **disabled** — any payload reaching the URL is processed. Local/mock only. |
 
-The fix is small and worth doing: compute HMAC-SHA256 of the raw request body with the app
-secret and compare against the header in `app/integrations/whatsapp/router.py` before
-processing.
+Verify it's on after deploying:
+
+```bash
+# No signature -> must be 403 once WHATSAPP_APP_SECRET is set
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+  https://your-domain/api/v1/whatsapp/webhook \
+  -H 'Content-Type: application/json' -d '{"entry":[]}'
+```
+
+Remaining hardening:
+
+- [ ] Keep `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN` and the access token in a secret
+      manager — never in shell history or git.
+- [ ] Optionally also restrict the path at your reverse proxy to
+      [Meta's published IP ranges](https://developers.facebook.com/docs/graph-api/webhooks/getting-started)
+      (defence in depth; the HMAC is the real control).
+- [ ] Rotating the app secret in Meta invalidates in-flight webhooks — update `.env.prod`
+      and restart `api` in the same change window.
 
 ---
 
@@ -248,3 +268,4 @@ processing.
 | Assistant replies it's unavailable | `ASSISTANT_ENABLED=false` or no `OPENAI_API_KEY` | Set both, restart `api` |
 | Alerts don't arrive | Outside the 24-hour window, or user opted out | See the 24-hour window section; check `whatsapp_push` pref |
 | `whatsapp_cloud_send_failed` in logs | Expired token / bad phone id / window closed | Regenerate a permanent token (Step 2) |
+| Meta reports webhook delivery failures; logs show `whatsapp_bad_signature` (403) | `WHATSAPP_APP_SECRET` wrong or from a different Meta app | Re-copy it from Settings → Basic → App secret, restart `api` |

@@ -7,10 +7,14 @@ which return None so the caller ignores them.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
+import hmac
 
 from app.integrations.channel import InboundMessage
 
 CHANNEL = "whatsapp"
+SIGNATURE_HEADER = "X-Hub-Signature-256"
+_SIG_PREFIX = "sha256="
 
 
 def verify_subscription(*, mode: str | None, token: str | None, challenge: str | None,
@@ -20,6 +24,26 @@ def verify_subscription(*, mode: str | None, token: str | None, challenge: str |
     if mode == "subscribe" and verify_token and token == verify_token:
         return challenge or ""
     return None
+
+
+def verify_signature(*, body: bytes, header: str | None, app_secret: str | None) -> bool:
+    """Authenticate an inbound webhook: HMAC-SHA256 of the RAW request body keyed with the
+    Meta app secret must equal the ``X-Hub-Signature-256`` header (``sha256=<hex>``).
+
+    The webhook is necessarily unauthenticated (Meta calls it), so this is what stops a
+    third party who learns the URL from posting a crafted payload and making the bot reply
+    to a number of their choosing.
+
+    Returns True when the request is authentic. When ``app_secret`` is not configured this
+    returns True (verification disabled) — that keeps mock/local setups working; production
+    should always set WHATSAPP_APP_SECRET. Compared in constant time.
+    """
+    if not app_secret:
+        return True                      # not configured -> verification disabled
+    if not header or not header.startswith(_SIG_PREFIX):
+        return False
+    expected = hmac.new(app_secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, header[len(_SIG_PREFIX):].strip())
 
 
 def _to_datetime(ts) -> dt.datetime | None:

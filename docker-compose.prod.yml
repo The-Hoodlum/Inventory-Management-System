@@ -64,6 +64,9 @@ services:
       WHATSAPP_BUSINESS_ACCOUNT_ID: ${WHATSAPP_BUSINESS_ACCOUNT_ID:-}
       WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
       WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:-}
+      # Meta app secret — authenticates inbound webhooks (X-Hub-Signature-256 over the raw
+      # body). Unset -> that check is DISABLED. Always set it in production.
+      WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET:-}
       WHATSAPP_API_BASE_URL: ${WHATSAPP_API_BASE_URL:-https://graph.facebook.com/v23.0}
       # Required to ROUTE inbound messages — without it webhooks are acknowledged, not answered.
       WHATSAPP_DEFAULT_TENANT_ID: ${WHATSAPP_DEFAULT_TENANT_ID:-}
