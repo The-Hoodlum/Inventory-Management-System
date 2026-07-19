@@ -54,6 +54,29 @@ def build_weekly_report_message(perf: dict) -> str:
     return "\n".join(lines)
 
 
+def build_bike_stock_message(low: list[dict]) -> str | None:
+    """Model/colours at or below their reorder point. ``low`` comes from
+    MotorcycleService.low_stock_bikes — the single source for the threshold logic; this
+    only renders it. Out-of-stock rows are called out explicitly, since "0 left" is the
+    line a manager needs to see first."""
+    if not low:
+        return None
+    lines = []
+    for r in low[:_MAX_BULLETS]:
+        name = r.get("model") or "Motorcycle"
+        if r.get("colour"):
+            name += f" ({r['colour']})"
+        where = f" - {r['branch']}" if r.get("branch") else ""
+        if int(r.get("available", 0)) <= 0:
+            lines.append(f"- {name}{where}: *OUT OF STOCK*")
+        else:
+            lines.append(f"- {name}{where}: *{r['available']}* left / reorder {r['reorder_point']}")
+    more = len(low) - len(lines)
+    if more > 0:
+        lines.append(f"...and {more} more")
+    return f"🏍️ *Bike stock running low* — {len(low)} model/colour(s):\n" + "\n".join(lines)
+
+
 def build_pending_pr_message(pending: dict) -> str | None:
     reqs = pending.get("requests", [])
     if not reqs:
@@ -80,7 +103,7 @@ def due_alert_kinds(now: dt.datetime, settings) -> set[str]:
     """Which alert kinds are due at ``now``. Low-stock, pending POs, and pending order
     requests run every cycle; the daily summary fires at the closing hour; the weekly
     report on its weekday + hour."""
-    kinds = {"low_stock", "pending_pr", "order_requests"}
+    kinds = {"low_stock", "pending_pr", "order_requests", "bike_stock"}
     if now.hour == settings.assistant_daily_summary_hour:
         kinds.add("daily")
         if now.weekday() == settings.assistant_weekly_report_weekday:
@@ -101,12 +124,21 @@ class AlertService:
             await self.adapter.send(to=phone, text=message)
         return len(phones)
 
-    async def run_due(self, kinds: set[str], *, currency: str, today: dt.date) -> dict[str, int]:
-        """Build + broadcast each due alert. Returns {kind: recipients_messaged}."""
+    async def run_due(
+        self, kinds: set[str], *, currency: str, today: dt.date,
+        low_bikes: list[dict] | None = None,
+    ) -> dict[str, int]:
+        """Build + broadcast each due alert. Returns {kind: recipients_messaged}.
+
+        ``low_bikes`` is supplied by the caller (the scheduler) from
+        MotorcycleService.low_stock_bikes, so the model/colour threshold logic lives in one
+        place rather than being reimplemented here."""
         ids = await self.repo.all_warehouse_ids()
         sent: dict[str, int] = {}
         if "low_stock" in kinds:
             sent["low_stock"] = await self._broadcast(build_low_stock_message(await self.repo.low_stock(ids)))
+        if "bike_stock" in kinds and low_bikes:
+            sent["bike_stock"] = await self._broadcast(build_bike_stock_message(low_bikes))
         if "pending_pr" in kinds:
             msg = build_pending_pr_message(await self.repo.pending_purchase_requests(ids))
             sent["pending_pr"] = await self._broadcast(msg)

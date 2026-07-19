@@ -41,6 +41,7 @@ MODULES=(
   bike_issues assembly_targets motorcycle_country_of_origin product_location motorcycle_service parts_sales vat sales_void quotation_bikes
   notifications notification_prefs
   finance_accounts finance_payment_mapping finance_expenses finance_transfers_handovers
+  motorcycle_reorder_points
 )
 for m in "${MODULES[@]}"; do
   echo "[init] module: $m"

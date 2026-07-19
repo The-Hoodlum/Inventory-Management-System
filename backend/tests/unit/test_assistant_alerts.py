@@ -58,9 +58,9 @@ def test_order_requests_message_or_none():
 
 
 def test_due_alert_kinds_windows():
-    # low_stock + pending POs + pending order requests always due
+    # low_stock + bike stock + pending POs + pending order requests always due
     base = due_alert_kinds(dt.datetime(2026, 6, 23, 9, 0), _SETTINGS)  # Tue 09:00
-    assert base == {"low_stock", "pending_pr", "order_requests"}
+    assert base == {"low_stock", "pending_pr", "order_requests", "bike_stock"}
     # closing hour -> add daily
     at_close = due_alert_kinds(dt.datetime(2026, 6, 23, 17, 0), _SETTINGS)  # Tue 17:00
     assert "daily" in at_close and "weekly" not in at_close
@@ -108,3 +108,34 @@ async def test_alert_service_broadcasts_to_recipients():
     assert sent["daily"] == 2 and sent["weekly"] == 2
     # 4 messages (low/order_requests/daily/weekly) x 2 recipients = 8 deliveries
     assert len(adapter.sent) == 8
+
+
+# ----------------------------- bike stock alert ---------------------------- #
+def test_bike_stock_message_lists_low_and_out_of_stock():
+    from app.assistant.alerts import build_bike_stock_message
+
+    msg = build_bike_stock_message([
+        {"model": "TVS HLX125", "colour": "Black", "branch": "Lusaka", "available": 0, "reorder_point": 3},
+        {"model": "TVS HLX125", "colour": "Metallic Red", "branch": "Lusaka", "available": 1, "reorder_point": 3},
+    ])
+    assert msg is not None
+    # Zero must read as OUT OF STOCK, not "0 left" — it's the line that matters most.
+    assert "OUT OF STOCK" in msg and "TVS HLX125 (Black)" in msg
+    assert "*1* left / reorder 3" in msg and "Metallic Red" in msg
+    assert "Lusaka" in msg
+
+
+def test_bike_stock_message_is_silent_when_nothing_is_low():
+    from app.assistant.alerts import build_bike_stock_message
+
+    assert build_bike_stock_message([]) is None
+
+
+def test_bike_stock_alert_is_due_every_cycle():
+    from types import SimpleNamespace
+
+    from app.assistant.alerts import due_alert_kinds
+
+    settings = SimpleNamespace(assistant_daily_summary_hour=18, assistant_weekly_report_weekday=0)
+    kinds = due_alert_kinds(dt.datetime(2026, 7, 19, 9, 0), settings)
+    assert "bike_stock" in kinds
