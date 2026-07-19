@@ -146,6 +146,18 @@ class Settings(BaseSettings):
     # mapping is a later step). The chat /ask path is unaffected by this.
     whatsapp_default_tenant_id: str | None = None
 
+    # Approved message templates. Meta allows free-form text ONLY within 24 hours of the
+    # recipient's last inbound message, so anything the SYSTEM initiates (the nightly digest,
+    # stock alerts, a sale at 8am) needs a template that Meta has approved in advance.
+    # Each is BLANK by default -> that alert keeps sending free-form text, exactly as before.
+    # Set a name only once the template is approved; see docs/WHATSAPP.md for the bodies to
+    # submit and the parameter order each one expects.
+    whatsapp_template_language: str = "en"
+    whatsapp_template_bike_sold: str = ""       # 6 params: branch, bike, price, customer, payment, invoice
+    whatsapp_template_daily_summary: str = ""   # 5 params: branch, date, sold, payments, activity
+    whatsapp_template_stock_alert: str = ""     # 4 params: branch, kind, count, detail
+    whatsapp_template_notification: str = ""    # 2 params: title, body — the generic fallback
+
     # --- External intelligence providers (production feeds; all OPTIONAL, inert by default) ---
     # Each provider is off until enabled; enabling one lets ingest/the scheduler pull
     # from it and convert results into intelligence signals (which already feed risk,

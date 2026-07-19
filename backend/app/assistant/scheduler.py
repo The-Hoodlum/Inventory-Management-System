@@ -73,7 +73,8 @@ class AlertScheduler:
         resolved by role within the branch, then filtered to those who registered a WhatsApp
         number and have not opted out. Best-effort: a delivery failure never breaks the cycle.
         """
-        from app.assistant.alerts import build_branch_daily_report
+        from app.assistant.alerts import build_branch_daily_report, build_branch_daily_report_params
+        from app.assistant.whatsapp import deliver
         from app.notifications.repository import NotificationRepository
         from app.reports.digest import DailyDigestService
         from app.reports.repository import ReportsRepository
@@ -92,8 +93,15 @@ class AlertScheduler:
                 if not phones:
                     continue
                 message = build_branch_daily_report(d, currency=currency)
+                # The digest is business-initiated and typically fires at closing time, long
+                # after anyone last messaged the bot — so it goes out as a template when one
+                # is configured, otherwise free-form (which only in-window staff receive).
+                params = build_branch_daily_report_params(d, currency=currency)
                 for phone in set(phones.values()):
-                    await adapter.send(to=phone, text=message)
+                    await deliver(
+                        adapter, to=phone, text=message,
+                        template=self._settings.whatsapp_template_daily_summary, params=params,
+                    )
                     sent += 1
         except Exception:  # noqa: BLE001 — a digest must never break the alert cycle
             logger.warning("branch_digest_failed")

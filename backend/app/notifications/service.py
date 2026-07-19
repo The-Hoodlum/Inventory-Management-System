@@ -10,8 +10,9 @@ Read helpers back the bell + inbox: list, unread count, mark one/all read.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.models import Notification
 from app.notifications.repository import NotificationRepository
@@ -90,6 +91,7 @@ class NotificationService:
         entity_type: str | None = None, entity_id: uuid.UUID | None = None,
         branch_id: uuid.UUID | None = None, actor_user_id: uuid.UUID | None = None,
         push: bool | None = None,
+        template: str | None = None, template_params: Sequence[object] | None = None,
     ) -> int:
         """Best-effort emit for a PRODUCER: resolve recipients (an explicit set, and/or every
         holder of ``permission``, and/or everyone with ``role`` — all within ``branch_id`` and
@@ -103,6 +105,12 @@ class NotificationService:
           False -> in-app only, even if critical.
         Keeping this separate from ``severity`` means "how loud is this?" and "should it
         leave the app?" stay independent — a sale is genuinely `info`, not `critical`.
+
+        ``template``/``template_params`` name an approved Meta template for the push. Events
+        the system raises on its own schedule (a sale logged first thing in the morning) fall
+        outside Meta's 24-hour window, where free-form text is simply not delivered. Producers
+        with a purpose-built template pass it; everything else uses the generic one, and with
+        none configured the push stays free-form exactly as it is today.
         """
         recipients: list[uuid.UUID] = []
         created = 0
@@ -130,18 +138,27 @@ class NotificationService:
         # (the adapter itself swallows delivery errors).
         should_push = (severity in _PUSH_SEVERITIES) if push is None else push
         if created and should_push and self.whatsapp is not None:
-            await self._push_whatsapp(recipients, title, body)
+            await self._push_whatsapp(recipients, title, body, template, template_params)
         return created
 
-    async def _push_whatsapp(self, recipient_ids, title: str, body: str | None) -> None:
+    async def _push_whatsapp(
+        self, recipient_ids, title: str, body: str | None,
+        template: str | None = None, params: Sequence[object] | None = None,
+    ) -> None:
+        from app.assistant.whatsapp import deliver
+
         try:
             ids = [u for u in {*recipient_ids} if u is not None]
             phones = await self.repo.phones_for_push(ids)
             if not phones:
                 return
             text = f"🔔 {title}" + (f"\n{body}" if body else "")
+            name = template or settings.whatsapp_template_notification
+            # The generic template takes (title, body); a producer-supplied one brings its own
+            # positional values, which must match that template's variable count.
+            values = params if template and params is not None else (title, body or "-")
             for phone in set(phones.values()):
-                await self.whatsapp.send(to=phone, text=text)
+                await deliver(self.whatsapp, to=phone, text=text, template=name, params=values)
         except Exception:  # noqa: BLE001 — push is best-effort
             logger.warning("notification_push_failed")
 

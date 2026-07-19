@@ -200,14 +200,95 @@ you. This adapter sends free-form text (`type: "text"`), so:
   Outside the window Meta rejects the send. It is **best-effort**: the failure is logged
   (`whatsapp_cloud_send_failed`) and never breaks the business operation that triggered it.
 
-**Practical workaround:** ask staff to send any message (e.g. "hi") at the start of their
-shift, which opens the window for the day.
+**Quick workaround:** ask staff to send any message (e.g. "hi") at the start of their shift,
+which opens the window for the day.
 
-**Proper fix (not yet implemented):** send an **approved message template** for
-business-initiated alerts. Create templates under **WhatsApp → Message templates** (approval
-takes minutes to a day), then extend `CloudWhatsAppAdapter.send` to post a `type: "template"`
-payload for pushes. Track this before relying on alerts reaching people who haven't messaged
-in.
+**Proper fix:** approved message templates — see the next section. The code is in place; it
+needs templates approved in *your* Meta account.
+
+---
+
+## Step 8 — Message templates (delivery outside the 24-hour window)
+
+Templates are the only messages Meta delivers to someone who has **not** written to you
+recently. The sending path is built: set a template name and that alert switches from
+free-form text to the approved template. **Leave a name blank and that alert behaves exactly
+as it does today** — nothing breaks while you wait for approval.
+
+### 8.1 Create the templates
+
+**Meta Business Suite → WhatsApp Manager → Message templates → Create template.**
+For each one below: **Category = Utility**, **Language = English**, paste the body verbatim.
+
+> Meta rejects a body made *only* of variables — the fixed wording around them matters, so
+> don't trim it. Approval usually takes minutes, occasionally a day.
+
+**1. `daily_summary`** — the per-branch closing report (5 variables)
+
+```
+Daily summary for {{1}} on {{2}}.
+Sold: {{3}}.
+Money in: {{4}}.
+Activity: {{5}}.
+Open the app for the full breakdown.
+```
+Sample values for Meta's review form: `Lusaka` · `2026-07-20` ·
+`4 line(s) totalling ZMW 62,000.00` · `Cash ZMW 40,000.00, Mobile Money ZMW 12,000.00` ·
+`2 order request(s), 1 transfer(s)`
+
+**2. `bike_sold`** — a motorcycle sale, in real time (6 variables)
+
+```
+Bike sold: {{1}} for {{2}}.
+Customer: {{3}}, {{4}}.
+Invoice {{5}}. Payment: {{6}}.
+```
+Sample values: `HLX 125 (Red)` · `ZMW 24,500.00` · `John Banda (+260977123456)` ·
+`Plot 42, Kabwata, Lusaka` · `INV-2026-0417` · `ZMW 10,000.00 via cash; ZMW 14,500.00 outstanding`
+
+**3. `system_alert`** — the generic one; carries low stock, bike colours below their reorder
+point, pending order requests and PO approvals (2 variables)
+
+```
+{{1}}
+{{2}}
+Sent by your inventory system. Open the app to act on this.
+```
+Sample values: `Low stock: 6 item(s) below reorder point` ·
+`Brake pad set: 2 left (reorder at 10)`
+
+### 8.2 Switch them on
+
+Once each shows **Approved**, add its name to `.env.prod` and restart:
+
+```bash
+WHATSAPP_TEMPLATE_LANGUAGE=en
+WHATSAPP_TEMPLATE_DAILY_SUMMARY=daily_summary
+WHATSAPP_TEMPLATE_BIKE_SOLD=bike_sold
+WHATSAPP_TEMPLATE_NOTIFICATION=system_alert
+```
+
+```bash
+docker compose -f docker-compose.prod.yml up -d api
+```
+
+Enable them **one at a time** and confirm each arrives before adding the next — that way a
+rejected or misnamed template is obvious immediately.
+
+### 8.3 Rules worth knowing
+
+- **The variable count must match exactly.** Six values into a five-variable template fails
+  the whole send. If you edit a template's body in Meta, update the matching builder in
+  `app/assistant/alerts.py` / `app/sales/service.py`.
+- **No newlines, tabs, or blank values in variables** — Meta rejects them. `template_param()`
+  flattens whitespace and substitutes `-` for empties automatically, so this is handled; keep
+  using it if you add a template.
+- Templates carry a **summary**, not the full detail — a variable can't hold a multi-line
+  breakdown. The message points people at the app, which is where the detail lives.
+- **Failures are logged, never raised.** Look for `whatsapp_cloud_send_failed` with
+  `kind=template`; the log includes Meta's own reason (wrong name, wrong language, wrong
+  parameter count are the common three).
+- Utility templates are charged per message — check current pricing for your country.
 
 ---
 
