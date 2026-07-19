@@ -108,10 +108,13 @@ def _vat_line_kwargs(ln) -> dict:
 class SalesService:
     def __init__(
         self, repo: SalesRepository, audit: AuditRepository, inventory: InventoryService,
-        finance=None,
+        finance=None, notifications=None,
     ) -> None:
         self.repo = repo
         self.audit = audit
+        # Optional NotificationService — pushes a completed bike sale to the branch's
+        # managers in real time. Best-effort: it can never break the sale.
+        self.notifications = notifications
         # Stock moves ONLY through the inventory service — the single source of truth
         # for qty_on_hand, the ledger, the audit trail, and demand. Sales never mutates
         # inventory itself.
@@ -608,6 +611,51 @@ class SalesService:
         await self.repo.session.flush()
         return walkin.id
 
+    # ------------------- bike-sale notification (branch managers) -------- #
+    async def _notify_bike_sale(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, branch_id, invoice, customer_id,
+        bikes: list[tuple[str, str | None, Decimal]], payments,
+    ) -> None:
+        """Tell the branch's managers a bike was sold, with the detail they'd otherwise have
+        to open the app for: what went out, for how much, to whom, and how it was paid.
+
+        ``bikes`` is [(chassis, model_name, price)]. Pushed to WhatsApp explicitly (push=True)
+        rather than by inflating severity — a sale is routine `info`, just worth knowing.
+        Best-effort throughout: the notification service isolates any failure from the sale.
+        """
+        if self.notifications is None:
+            return
+        from app.notifications import events as N_EVENTS
+
+        names = await self.repo.customer_names([customer_id]) if customer_id else {}
+        customer = names.get(customer_id) or "Walk-in customer"
+        currency = await self.repo.base_currency(tenant_id)
+        total = sum((p for _c, _m, p in bikes), Decimal("0"))
+
+        if len(bikes) == 1:
+            chassis, model, price = bikes[0]
+            title = f"Bike sold: {model or 'Motorcycle'} — {currency} {_f(price):,.2f}"
+            first = f"Chassis {chassis}"
+        else:
+            title = f"{len(bikes)} bikes sold — {currency} {_f(total):,.2f}"
+            first = "; ".join(f"{m or 'Motorcycle'} ({c})" for c, m, _p in bikes[:4])
+            if len(bikes) > 4:
+                first += f" …+{len(bikes) - 4} more"
+        lines = [first, f"Customer: {customer}", f"Invoice: {invoice.invoice_number}"]
+        if payments:
+            paid = ", ".join(
+                f"{str(p.method).replace('_', ' ')} {currency} {_f(p.amount):,.2f}" for p in payments
+            )
+            lines.append(f"Paid: {paid}")
+        else:
+            lines.append("Paid: unpaid (invoice issued)")
+        await self.notifications.notify(
+            tenant_id=tenant_id, event_type=N_EVENTS.BIKE_SOLD, severity="info", push=True,
+            title=title, body="\n".join(lines), href="/sales",
+            entity_type="invoice", entity_id=invoice.id, branch_id=branch_id,
+            actor_user_id=user_id, role="Branch Manager",
+        )
+
     # ============================= sell a bike ========================== #
     async def sell_bike(
         self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, payload: BikeSaleIn, motorcycles,
@@ -682,6 +730,11 @@ class SalesService:
             )
 
         await self._audit(tenant_id, user_id, "sales_invoice", invoice.id, "bike_sale", None, invoice.status)
+        await self._notify_bike_sale(
+            tenant_id=tenant_id, user_id=user_id, branch_id=payload.branch_id or unit.branch_id,
+            invoice=invoice, customer_id=customer_id,
+            bikes=[(unit.chassis_number, unit.model_name, price)], payments=payload.payments,
+        )
         fresh = await self.repo.get_invoice(invoice.id)
         return BikeSaleResult(
             unit_id=payload.unit_id, chassis_number=unit.chassis_number, model_name=unit.model_name,
@@ -764,6 +817,12 @@ class SalesService:
             )
 
         await self._audit(tenant_id, user_id, "sales_invoice", invoice.id, "bike_sale_bulk", None, invoice.status)
+        await self._notify_bike_sale(
+            tenant_id=tenant_id, user_id=user_id, branch_id=branch_id, invoice=invoice,
+            customer_id=customer_id,
+            bikes=[(u.chassis_number, u.model_name, p) for u, p, _a in prepared],
+            payments=payload.payments,
+        )
         fresh = await self.repo.get_invoice(invoice.id)
         return BulkBikeSaleResult(
             invoice=await self._invoice_out(fresh), bikes=bikes_out,

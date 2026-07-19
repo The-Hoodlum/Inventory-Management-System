@@ -72,26 +72,51 @@ class NotificationService:
         drop = {u for u in (exclude or []) if u is not None}
         return [u for u in ids if u not in drop]
 
+    async def resolve_recipients_by_role(
+        self, *, role: str, branch_id: uuid.UUID | None = None,
+        exclude: Iterable[uuid.UUID] | None = None,
+    ) -> list[uuid.UUID]:
+        """Users to notify for a named ROLE (+ optional branch) — for audiences defined by
+        job rather than by a permission code (e.g. 'Branch Manager')."""
+        ids = await self.repo.recipients_with_role(role, branch_id=branch_id)
+        drop = {u for u in (exclude or []) if u is not None}
+        return [u for u in ids if u not in drop]
+
     async def notify(
         self, *, tenant_id: uuid.UUID, event_type: str, title: str,
-        permission: str | None = None, recipient_user_ids: Iterable[uuid.UUID] | None = None,
+        permission: str | None = None, role: str | None = None,
+        recipient_user_ids: Iterable[uuid.UUID] | None = None,
         severity: str = "info", body: str | None = None, href: str | None = None,
         entity_type: str | None = None, entity_id: uuid.UUID | None = None,
         branch_id: uuid.UUID | None = None, actor_user_id: uuid.UUID | None = None,
+        push: bool | None = None,
     ) -> int:
-        """Best-effort emit for a PRODUCER: resolve recipients (an explicit set and/or every
-        holder of ``permission`` in ``branch_id``, minus the actor) and store one row each —
-        all inside a SAVEPOINT so a notification failure can NEVER roll back the caller's
-        business transaction. Returns rows created (0 on any problem; logged, not raised)."""
+        """Best-effort emit for a PRODUCER: resolve recipients (an explicit set, and/or every
+        holder of ``permission``, and/or everyone with ``role`` — all within ``branch_id`` and
+        minus the actor) and store one row each — inside a SAVEPOINT so a notification failure
+        can NEVER roll back the caller's business transaction. Returns rows created (0 on any
+        problem; logged, not raised).
+
+        ``push`` controls the WhatsApp side channel explicitly:
+          None  -> fall back to severity (critical only), the historic behaviour;
+          True  -> push regardless of severity (for routine-but-wanted events like a sale);
+          False -> in-app only, even if critical.
+        Keeping this separate from ``severity`` means "how loud is this?" and "should it
+        leave the app?" stay independent — a sale is genuinely `info`, not `critical`.
+        """
         recipients: list[uuid.UUID] = []
         created = 0
         try:
             async with self.repo.session.begin_nested():
                 recipients = list(recipient_user_ids or [])
+                exclude = [actor_user_id] if actor_user_id else None
                 if permission is not None:
                     recipients += await self.resolve_recipients(
-                        permission=permission, branch_id=branch_id,
-                        exclude=[actor_user_id] if actor_user_id else None,
+                        permission=permission, branch_id=branch_id, exclude=exclude,
+                    )
+                if role is not None:
+                    recipients += await self.resolve_recipients_by_role(
+                        role=role, branch_id=branch_id, exclude=exclude,
                     )
                 created = await self.emit(
                     tenant_id=tenant_id, event_type=event_type, title=title, severity=severity,
@@ -101,9 +126,10 @@ class NotificationService:
         except Exception:  # noqa: BLE001 — a notification must never break the producer
             logger.warning("notification_emit_failed", extra={"event_type": event_type})
             return 0
-        # Opt-in WhatsApp push for the most urgent events — a side channel, outside the DB
-        # savepoint and fully best-effort (the adapter itself swallows delivery errors).
-        if created and severity in _PUSH_SEVERITIES and self.whatsapp is not None:
+        # WhatsApp push — a side channel, outside the DB savepoint and fully best-effort
+        # (the adapter itself swallows delivery errors).
+        should_push = (severity in _PUSH_SEVERITIES) if push is None else push
+        if created and should_push and self.whatsapp is not None:
             await self._push_whatsapp(recipients, title, body)
         return created
 
