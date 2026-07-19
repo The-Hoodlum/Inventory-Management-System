@@ -32,8 +32,8 @@ def test_draw_company_block_stays_within_width_and_advances_y():
     y0 = pdf.get_y()
     end = pdf_branding.draw_company_block(
         pdf, 15, y0, 90,
-        ("ZAMOTO TVS", "4999 North End, Cairo Road, Opposite ZRA Headquarters, Lusaka",
-         "info@zamototvs.com", "+260 772211111", None, ""),
+        ("Example Trading Ltd", "1 Very Long Street Name, Some District, A City, A Country",
+         "info@example.com", "+000 000000000", None, ""),
     )
     assert end > y0                      # advanced below the block
     assert pdf.get_x() <= 15 + 90 + 1    # never bled past the column width
@@ -52,3 +52,36 @@ def test_place_logo_draws_scaled_to_fit(tmp_path, monkeypatch):
     # height binds at 15 -> width 22.5. Height returned should be the 15mm cap.
     assert 0 < h <= 15
     assert bytes(pdf.output()).startswith(b"%PDF")
+
+
+# ------------------------- tax identifier on documents --------------------- #
+def test_company_contact_lines_include_the_tax_id_when_configured(monkeypatch):
+    """The label is configurable (TPIN / VAT No. / TIN) so the core stays country-agnostic."""
+    from app.core import pdf_branding as pb
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "company_address", "1 Main Rd", raising=False)
+    monkeypatch.setattr(settings, "company_email", "info@example.com", raising=False)
+    monkeypatch.setattr(settings, "company_phone", "+260 1", raising=False)
+    monkeypatch.setattr(settings, "company_tax_label", "TPIN", raising=False)
+    monkeypatch.setattr(settings, "company_tax_id", "2003807414", raising=False)
+
+    assert "TPIN: 2003807414" in pb.company_contact_lines()
+
+
+def test_tax_line_is_absent_until_an_id_is_set(monkeypatch):
+    """A tenant that hasn't configured one prints no empty label."""
+    from app.core import pdf_branding as pb
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "company_tax_id", "", raising=False)
+    assert all("TPIN" not in ln and "Tax ID" not in ln for ln in pb.company_contact_lines())
+
+
+def test_company_name_is_included_only_when_asked(monkeypatch):
+    from app.core import pdf_branding as pb
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "company_name", "Example Trading Ltd", raising=False)
+    assert pb.company_contact_lines(include_name=True)[0] == "Example Trading Ltd"
+    assert "Example Trading Ltd" not in pb.company_contact_lines()

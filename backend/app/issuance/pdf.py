@@ -8,7 +8,7 @@ from typing import Any
 from fpdf import FPDF
 
 from app.core.config import settings
-from app.core.pdf_branding import draw_company_block, place_logo
+from app.core.pdf_branding import company_contact_lines, draw_company_block, place_logo
 from app.issuance.schemas import IssuanceOut
 
 _CONTENT_W = 180.0
@@ -76,7 +76,7 @@ def build_issuance_pdf(iss: IssuanceOut) -> bytes:
     pdf.set_text_color(*_MUTED)
     left_bottom = draw_company_block(
         pdf, 15, pdf.get_y(), 90,
-        (settings.company_address, settings.company_email, settings.company_phone),
+        company_contact_lines(),
     )
 
     pdf.set_xy(115, top_y)

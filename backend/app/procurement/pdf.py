@@ -83,7 +83,8 @@ def build_purchase_order_pdf(
     pdf.set_text_color(*_MUTED)
     company_bottom = draw_company_block(
         pdf, 15, pdf.get_y(), 90,
-        (company.get("name"), company.get("address"), company.get("email"), company.get("phone")),
+        (company.get("name"), company.get("address"), company.get("email"),
+         company.get("phone"), company.get("tax")),
     )
 
     # PO meta block on the right

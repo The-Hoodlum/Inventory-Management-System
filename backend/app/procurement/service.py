@@ -458,11 +458,17 @@ class ProcurementService:
                 }
             )
 
+        # Same block every other document prints (address/email/phone + tax id), so a PO
+        # can't drift from the rest of the paperwork.
+        from app.core.pdf_branding import company_contact_lines
+
+        _addr, _email, _phone, _tax = company_contact_lines()
         company = {
             "name": settings.company_name,
-            "address": settings.company_address,
-            "email": settings.company_email,
-            "phone": settings.company_phone,
+            "address": _addr,
+            "email": _email,
+            "phone": _phone,
+            "tax": _tax,
         }
         supplier_d = {
             "name": getattr(supplier, "name", "") if supplier else "",
