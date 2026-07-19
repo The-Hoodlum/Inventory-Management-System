@@ -17,19 +17,23 @@ from app.api.v1.deps import (
     require_permission,
     resolve_branch_scope,
 )
+from app.core.exceptions import BusinessRuleError
 from app.core.permissions import P
 from app.finance.schemas import (
     AccountBalanceOut,
     AccountCreate,
     AccountOut,
+    AccountStatementOut,
     AccountUpdate,
     CategoryCreate,
     CategoryOut,
     CategoryUpdate,
+    DayBookOut,
     ExpenseCreate,
     ExpenseOut,
     ExpenseUpdate,
     ExpenseVoid,
+    FinanceDashboardOut,
     HandoverConfirm,
     HandoverCreate,
     HandoverOut,
@@ -40,6 +44,8 @@ from app.finance.schemas import (
     TransferOut,
 )
 from app.finance.service import FinanceService
+
+_MAX_RANGE_DAYS = 400
 
 router = APIRouter()
 
@@ -421,3 +427,91 @@ async def handover_slip_pdf(
     return Response(
         content=pdf, media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{name}.pdf"'})
+
+
+# --------------------------------------------------------------------------- #
+# Dashboard, account statement, day book / cash position
+# --------------------------------------------------------------------------- #
+def _range(date_from: dt.date | None, date_to: dt.date | None) -> tuple[dt.date, dt.date]:
+    today = dt.date.today()
+    date_to = date_to or today
+    date_from = date_from or (date_to - dt.timedelta(days=30))
+    if date_from > date_to:
+        raise BusinessRuleError("date_from must not be after date_to.")
+    if (date_to - date_from).days > _MAX_RANGE_DAYS:
+        raise BusinessRuleError("The date range is too large.")
+    return date_from, date_to
+
+
+@router.get("/dashboard", response_model=FinanceDashboardOut)
+async def dashboard(
+    date_from: dt.date | None = Query(default=None),
+    date_to: dt.date | None = Query(default=None),
+    branch_id: uuid.UUID | None = Query(default=None),
+    user: CurrentUser = Depends(require_permission(P.FINANCE_READ)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> FinanceDashboardOut:
+    df, dto = _range(date_from, date_to)
+    scope = resolve_branch_scope(user, branch_id)
+    allowed = None if scope is None else frozenset(scope)
+    return await svc.dashboard(allowed_branch_ids=allowed, date_from=df, date_to=dto)
+
+
+@router.get("/accounts/{account_id}/statement", response_model=AccountStatementOut)
+async def account_statement(
+    account_id: uuid.UUID,
+    date_from: dt.date | None = Query(default=None),
+    date_to: dt.date | None = Query(default=None),
+    user: CurrentUser = Depends(require_permission(P.FINANCE_READ)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> AccountStatementOut:
+    df, dto = _range(date_from, date_to)
+    return await svc.account_statement(
+        account_id=account_id, date_from=df, date_to=dto, allowed_branch_ids=_allowed(user))
+
+
+@router.get("/accounts/{account_id}/statement.pdf")
+async def account_statement_pdf(
+    account_id: uuid.UUID,
+    date_from: dt.date | None = Query(default=None),
+    date_to: dt.date | None = Query(default=None),
+    user: CurrentUser = Depends(require_permission(P.FINANCE_READ)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> Response:
+    df, dto = _range(date_from, date_to)
+    pdf, name = await svc.account_statement_pdf(
+        account_id=account_id, date_from=df, date_to=dto, allowed_branch_ids=_allowed(user))
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="{name}.pdf"'})
+
+
+@router.get("/day-book", response_model=DayBookOut)
+async def day_book(
+    period: str = Query(default="daily"),
+    date: dt.date | None = Query(default=None),
+    branch_id: uuid.UUID | None = Query(default=None),
+    user: CurrentUser = Depends(require_permission(P.FINANCE_READ)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> DayBookOut:
+    if period not in ("daily", "monthly"):
+        raise BusinessRuleError("period must be daily or monthly.")
+    scope = resolve_branch_scope(user, branch_id)
+    allowed = None if scope is None else frozenset(scope)
+    return await svc.day_book(allowed_branch_ids=allowed, period=period, on=date or dt.date.today())
+
+
+@router.get("/day-book.pdf")
+async def day_book_pdf(
+    period: str = Query(default="daily"),
+    date: dt.date | None = Query(default=None),
+    branch_id: uuid.UUID | None = Query(default=None),
+    user: CurrentUser = Depends(require_permission(P.FINANCE_READ)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> Response:
+    if period not in ("daily", "monthly"):
+        raise BusinessRuleError("period must be daily or monthly.")
+    scope = resolve_branch_scope(user, branch_id)
+    allowed = None if scope is None else frozenset(scope)
+    pdf, name = await svc.day_book_pdf(allowed_branch_ids=allowed, period=period, on=date or dt.date.today())
+    return Response(content=pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="{name}.pdf"'})

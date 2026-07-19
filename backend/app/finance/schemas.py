@@ -248,3 +248,72 @@ class HandoverOut(BaseModel):
     reverse_reason: str | None
     has_attachment: bool = False
     created_at: dt.datetime
+
+
+# ------------------- dashboard / statement / day book -------------------- #
+class MoneyInByAccount(BaseModel):
+    account_id: uuid.UUID
+    account_name: str | None
+    amount: Decimal
+
+
+class FinanceDashboardOut(BaseModel):
+    date_from: dt.date
+    date_to: dt.date
+    accounts: list[AccountBalanceOut]      # current balance per account (KPI cards)
+    money_in: Decimal                      # operational money in (sale payments) for the period
+    expenses_out: Decimal
+    handovers_out: Decimal
+    transfers_out: Decimal
+    net_movement: Decimal                  # all IN - all OUT across scoped accounts
+    money_in_by_account: list[MoneyInByAccount]
+
+
+class StatementRow(BaseModel):
+    id: uuid.UUID
+    occurred_at: dt.datetime
+    description: str | None
+    category: str | None
+    reference_type: str | None
+    reference_id: uuid.UUID | None
+    direction: Direction
+    amount: Decimal
+    in_amount: Decimal
+    out_amount: Decimal
+    running_balance: Decimal
+
+
+class AccountStatementOut(BaseModel):
+    account_id: uuid.UUID
+    account_name: str | None
+    currency: str
+    date_from: dt.date
+    date_to: dt.date
+    opening_balance: Decimal
+    rows: list[StatementRow]
+    total_in: Decimal
+    total_out: Decimal
+    closing_balance: Decimal
+
+
+class DayBookBranchRow(BaseModel):
+    branch_id: uuid.UUID | None
+    branch_name: str | None
+    opening: Decimal
+    money_in: Decimal
+    expenses: Decimal
+    handovers: Decimal
+    transfers_in: Decimal
+    transfers_out: Decimal
+    other_in: Decimal
+    other_out: Decimal
+    closing: Decimal
+
+
+class DayBookOut(BaseModel):
+    period: str
+    label: str
+    date_from: dt.date
+    date_to: dt.date
+    rows: list[DayBookBranchRow]
+    totals: DayBookBranchRow

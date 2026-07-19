@@ -8,6 +8,7 @@ import {
   BarChart3,
   Bell,
   Bike,
+  BookOpen,
   Boxes,
   Building2,
   CalendarClock,
@@ -32,6 +33,7 @@ import {
   Receipt,
   RefreshCcw,
   Rewind,
+  ScrollText,
   Send,
   Settings,
   ShieldAlert,
@@ -90,7 +92,10 @@ const GROUPS: NavGroup[] = [
   {
     label: "Finance",
     items: [
+      { to: "/finance", label: "Finance Dashboard", icon: LayoutDashboard, permission: "finance.read" },
       { to: "/finance/accounts", label: "Accounts", icon: Landmark, permission: "finance.read" },
+      { to: "/finance/statement", label: "Statement", icon: ScrollText, permission: "finance.read" },
+      { to: "/finance/day-book", label: "Day Book", icon: BookOpen, permission: "finance.read" },
       { to: "/finance/expenses", label: "Expenses", icon: Wallet, permission: "finance.read" },
       { to: "/finance/transfers", label: "Transfers", icon: ArrowLeftRight, permission: "finance.read" },
       { to: "/finance/handovers", label: "Cash Handovers", icon: HandCoins, permission: "finance.read" },

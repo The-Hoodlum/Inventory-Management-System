@@ -26,14 +26,20 @@ from app.finance.schemas import (
     AccountBalanceOut,
     AccountCreate,
     AccountOut,
+    AccountStatementOut,
     AccountUpdate,
     CategoryOut,
+    DayBookBranchRow,
+    DayBookOut,
     ExpenseCreate,
     ExpenseOut,
     ExpenseUpdate,
+    FinanceDashboardOut,
     HandoverCreate,
     HandoverOut,
+    MoneyInByAccount,
     PaymentMappingOut,
+    StatementRow,
     TransferCreate,
     TransferOut,
 )
@@ -51,6 +57,7 @@ from app.models.finance import (
     DIRECTION_OUT,
     PAYMENT_METHODS,
 )
+from app.reports.sales_log import _period_bounds
 from app.repositories.audit_repo import AuditRepository
 
 # Types that hold real cash/value at a physical site — a branch is mandatory. A CUSTODY
@@ -852,3 +859,141 @@ class FinanceService:
 
         out = await self.get_handover(handover_id=handover_id, allowed_branch_ids=allowed_branch_ids)
         return build_handover_slip_pdf(out), f"handover-{str(out.id)[:8]}"
+
+    # =================== dashboard / statement / day book ================= #
+    @staticmethod
+    def _bounds(date_from: dt.date, date_to: dt.date) -> tuple[dt.datetime, dt.datetime]:
+        return (dt.datetime.combine(date_from, dt.time.min, tzinfo=dt.UTC),
+                dt.datetime.combine(date_to, dt.time.max, tzinfo=dt.UTC))
+
+    async def _opening(self, accounts: list[FinancialAccount], before_dt: dt.datetime) -> Decimal:
+        """The combined balance of ``accounts`` as of just before ``before_dt`` — the sum of
+        their opening balances plus every movement dated earlier."""
+        base = sum((Decimal(a.opening_balance) for a in accounts), Decimal("0"))
+        sin, sout = await self.repo.signed_sum_before([a.id for a in accounts], before_dt)
+        return base + sin - sout
+
+    async def dashboard(
+        self, *, allowed_branch_ids: frozenset[uuid.UUID] | None, date_from: dt.date, date_to: dt.date,
+    ) -> FinanceDashboardOut:
+        accounts = await self.list_accounts(allowed_branch_ids=allowed_branch_ids)  # with balances
+        branch_ids = None if allowed_branch_ids is None else list(allowed_branch_ids)
+        account_rows = await self.repo.list_accounts(branch_ids=branch_ids)
+        ids = [a.id for a in account_rows]
+        start_dt, end_dt = self._bounds(date_from, date_to)
+        sums = await self.repo.period_category_sums(ids, start_dt, end_dt)
+        money_in = sums.get(("sale_payment", "IN"), Decimal("0"))
+        expenses_out = sums.get(("expense", "OUT"), Decimal("0"))
+        handovers_out = sums.get(("handover", "OUT"), Decimal("0"))
+        transfers_out = sums.get(("transfer", "OUT"), Decimal("0"))
+        total_in = sum((v for (_c, d), v in sums.items() if d == "IN"), Decimal("0"))
+        total_out = sum((v for (_c, d), v in sums.items() if d == "OUT"), Decimal("0"))
+        by_account = await self.repo.money_in_by_account(ids, start_dt, end_dt)
+        names = {a.id: a.name for a in account_rows}
+        breakdown = [
+            MoneyInByAccount(account_id=aid, account_name=names.get(aid), amount=amt)
+            for aid, amt in sorted(by_account.items(), key=lambda kv: -kv[1])
+        ]
+        return FinanceDashboardOut(
+            date_from=date_from, date_to=date_to, accounts=accounts,
+            money_in=money_in, expenses_out=expenses_out, handovers_out=handovers_out,
+            transfers_out=transfers_out, net_movement=total_in - total_out,
+            money_in_by_account=breakdown,
+        )
+
+    async def account_statement(
+        self, *, account_id: uuid.UUID, date_from: dt.date, date_to: dt.date,
+        allowed_branch_ids: frozenset[uuid.UUID] | None = None,
+    ) -> AccountStatementOut:
+        account = await self._require_account(account_id, allowed_branch_ids)
+        start_dt, end_dt = self._bounds(date_from, date_to)
+        opening = await self._opening([account], start_dt)
+        movements = await self.repo.statement_movements(account.id, start_dt, end_dt)
+        running = opening
+        total_in = total_out = Decimal("0")
+        rows: list[StatementRow] = []
+        for m in movements:
+            amt = Decimal(m.amount)
+            is_in = m.direction == DIRECTION_IN
+            running = running + amt if is_in else running - amt
+            if is_in:
+                total_in += amt
+            else:
+                total_out += amt
+            rows.append(StatementRow(
+                id=m.id, occurred_at=m.occurred_at, description=m.description, category=m.category,
+                reference_type=m.reference_type, reference_id=m.reference_id, direction=m.direction,
+                amount=amt, in_amount=amt if is_in else Decimal("0"),
+                out_amount=amt if not is_in else Decimal("0"), running_balance=running,
+            ))
+        return AccountStatementOut(
+            account_id=account.id, account_name=account.name, currency=account.currency,
+            date_from=date_from, date_to=date_to, opening_balance=opening, rows=rows,
+            total_in=total_in, total_out=total_out, closing_balance=running,
+        )
+
+    async def day_book(
+        self, *, allowed_branch_ids: frozenset[uuid.UUID] | None, period: str, on: dt.date,
+    ) -> DayBookOut:
+        """Cash position for a day / month, per branch: opening + money in - expenses -
+        handovers -> closing (transfers between the branch's own accounts net out). Reuses
+        the sales report's period bounds so a day/month lines up with the sales reports."""
+        date_from, date_to, label = _period_bounds(on, period)
+        start_dt, end_dt = self._bounds(date_from, date_to)
+        branch_ids = None if allowed_branch_ids is None else list(allowed_branch_ids)
+        accounts = await self.repo.list_accounts(branch_ids=branch_ids)
+        names = await self.repo.branch_name_map()
+
+        by_branch: dict = {}
+        for a in accounts:
+            by_branch.setdefault(a.branch_id, []).append(a)
+
+        rows: list[DayBookBranchRow] = []
+        for branch_id, branch_accounts in by_branch.items():
+            row = await self._day_book_row(branch_id, names.get(branch_id), branch_accounts, start_dt, end_dt)
+            rows.append(row)
+        rows.sort(key=lambda r: (r.branch_name or ""))
+        totals = await self._day_book_row(None, "All branches", accounts, start_dt, end_dt)
+        return DayBookOut(period=period, label=label, date_from=date_from, date_to=date_to,
+                          rows=rows, totals=totals)
+
+    async def _day_book_row(
+        self, branch_id, branch_name, accounts, start_dt, end_dt,
+    ) -> DayBookBranchRow:
+        ids = [a.id for a in accounts]
+        opening = await self._opening(accounts, start_dt)
+        sums = await self.repo.period_category_sums(ids, start_dt, end_dt)
+        money_in = sums.get(("sale_payment", "IN"), Decimal("0"))
+        expenses = sums.get(("expense", "OUT"), Decimal("0"))
+        handovers = sums.get(("handover", "OUT"), Decimal("0"))
+        transfers_in = sums.get(("transfer", "IN"), Decimal("0"))
+        transfers_out = sums.get(("transfer", "OUT"), Decimal("0"))
+        total_in = sum((v for (_c, d), v in sums.items() if d == "IN"), Decimal("0"))
+        total_out = sum((v for (_c, d), v in sums.items() if d == "OUT"), Decimal("0"))
+        other_in = total_in - money_in - transfers_in
+        other_out = total_out - expenses - handovers - transfers_out
+        closing = opening + total_in - total_out
+        return DayBookBranchRow(
+            branch_id=branch_id, branch_name=branch_name, opening=opening, money_in=money_in,
+            expenses=expenses, handovers=handovers, transfers_in=transfers_in,
+            transfers_out=transfers_out, other_in=other_in, other_out=other_out, closing=closing,
+        )
+
+    async def account_statement_pdf(
+        self, *, account_id: uuid.UUID, date_from: dt.date, date_to: dt.date,
+        allowed_branch_ids: frozenset[uuid.UUID] | None = None,
+    ) -> tuple[bytes, str]:
+        from app.finance.pdf import build_statement_pdf
+
+        stmt = await self.account_statement(
+            account_id=account_id, date_from=date_from, date_to=date_to,
+            allowed_branch_ids=allowed_branch_ids)
+        return build_statement_pdf(stmt), f"statement-{stmt.account_name or account_id}"
+
+    async def day_book_pdf(
+        self, *, allowed_branch_ids: frozenset[uuid.UUID] | None, period: str, on: dt.date,
+    ) -> tuple[bytes, str]:
+        from app.finance.pdf import build_day_book_pdf
+
+        book = await self.day_book(allowed_branch_ids=allowed_branch_ids, period=period, on=on)
+        return build_day_book_pdf(book), f"day-book-{book.label}"
