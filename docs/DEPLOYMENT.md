@@ -136,6 +136,16 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod exec db \
   psql -U postgres -d inventory -f /sql/<name>.sql
 ```
 
+For example, the finance module (cash book / treasury) ships four modules — apply them in
+this order, since the later ones reference `financial_accounts`:
+
+```bash
+for m in finance_accounts finance_payment_mapping finance_expenses finance_transfers_handovers; do
+  docker compose -f docker-compose.prod.yml --env-file .env.prod exec db \
+    psql -v ON_ERROR_STOP=1 -U postgres -d inventory -f "/sql/$m.sql"
+done
+```
+
 This is the same schema the authoritative `alembic upgrade head` path produces (CI proves
 the two stay equivalent). If you prefer Alembic, run it from the repo against the DB with
 the backend dependencies available; see `.github/workflows/ci.yml` (the "Alembic upgrade"
@@ -143,7 +153,18 @@ job) for the exact invocation.
 
 ---
 
-## 8. Hardening checklist
+## 8. Optional: WhatsApp channel
+
+Staff can query the system from WhatsApp and receive critical alerts. It needs the public
+HTTPS URL from §5, so set it up after the site is live. Full step-by-step (Meta app, tokens,
+webhook, linking staff numbers, the 24-hour window): **[WHATSAPP.md](WHATSAPP.md)**.
+
+It stays completely inert until `WHATSAPP_PROVIDER=cloud` **and** credentials are supplied —
+the adapter falls back to a mock that records messages instead of sending them.
+
+---
+
+## 9. Hardening checklist
 
 - [ ] Change the admin password after first login (and use per-person accounts, not shared).
 - [ ] Rotate the internal `app_user` DB password: change it in `backend/docker/02_app_role.sql`
