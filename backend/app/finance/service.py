@@ -31,10 +31,16 @@ from app.finance.schemas import (
     ExpenseCreate,
     ExpenseOut,
     ExpenseUpdate,
+    HandoverCreate,
+    HandoverOut,
     PaymentMappingOut,
+    TransferCreate,
+    TransferOut,
 )
 from app.models import (
     AccountMovement,
+    AccountTransfer,
+    CashHandover,
     Expense,
     ExpenseCategory,
     FinancialAccount,
@@ -573,3 +579,276 @@ class FinanceService:
         if att is None:
             raise NotFoundError("No receipt attached to this expense.")
         return att.data, att.filename, att.content_type
+
+    # ------------------------------ transfers ---------------------------- #
+    async def _lock_two(self, a: uuid.UUID, b: uuid.UUID) -> None:
+        """Lock two account rows in a deterministic order so concurrent transfers/handovers
+        can't deadlock (mirrors the stock transfer's ordered locking)."""
+        for aid in sorted((a, b), key=str):
+            await self.repo.get_account_for_update(aid)
+
+    async def create_transfer(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, data: TransferCreate,
+        allowed_branch_ids: frozenset[uuid.UUID] | None = None, ip: str | None = None,
+    ) -> TransferOut:
+        if data.from_account_id == data.to_account_id:
+            raise BusinessRuleError("Source and destination accounts must differ.")
+        if data.amount <= 0:
+            raise BusinessRuleError("Transfer amount must be positive.")
+        src = await self._require_account(data.from_account_id, allowed_branch_ids)
+        dst = await self._require_account(data.to_account_id, allowed_branch_ids)
+        if not src.is_active or not dst.is_active:
+            raise BusinessRuleError("Both accounts must be active to transfer.")
+        await self._lock_two(src.id, dst.id)
+        transfer = AccountTransfer(
+            tenant_id=tenant_id, from_account_id=src.id, to_account_id=dst.id, amount=data.amount,
+            occurred_at=data.occurred_at, reference_no=(data.reference_no or None),
+            notes=data.notes, status="completed", created_by=user_id,
+        )
+        await self.repo.add_transfer(transfer)
+        # Paired OUT + IN in ONE transaction, both tagged to this transfer — never one-sided.
+        desc = f"Transfer to {dst.name}"
+        await self.post_movement(
+            tenant_id=tenant_id, user_id=user_id, account_id=src.id, direction=DIRECTION_OUT,
+            amount=data.amount, category="transfer", reference_type="transfer",
+            reference_id=transfer.id, occurred_at=data.occurred_at, description=desc)
+        await self.post_movement(
+            tenant_id=tenant_id, user_id=user_id, account_id=dst.id, direction=DIRECTION_IN,
+            amount=data.amount, category="transfer", reference_type="transfer",
+            reference_id=transfer.id, occurred_at=data.occurred_at,
+            description=f"Transfer from {src.name}")
+        await self.audit.add(
+            tenant_id=tenant_id, user_id=user_id, action="finance.transfer", entity_type="account_transfer",
+            entity_id=transfer.id,
+            changes={"from": str(src.id), "to": str(dst.id), "amount": str(data.amount)}, ip_address=ip)
+        return await self._to_transfer_out(transfer)
+
+    async def _to_transfer_out(self, t: AccountTransfer, accounts: dict | None = None) -> TransferOut:
+        if accounts is None:
+            accounts = {a.id: a.name for a in await self.repo.list_accounts(branch_ids=None)}
+        out = TransferOut.model_validate(t)
+        out.from_account_name = accounts.get(t.from_account_id)
+        out.to_account_name = accounts.get(t.to_account_id)
+        return out
+
+    async def list_transfers(
+        self, *, allowed_branch_ids: frozenset[uuid.UUID] | None
+    ) -> list[TransferOut]:
+        branch_ids = None if allowed_branch_ids is None else list(allowed_branch_ids)
+        accounts_full = await self.repo.list_accounts(branch_ids=branch_ids)
+        account_ids = None if branch_ids is None else [a.id for a in accounts_full]
+        rows = await self.repo.list_transfers(account_ids=account_ids)
+        accounts = {a.id: a.name for a in await self.repo.list_accounts(branch_ids=None)}
+        return [await self._to_transfer_out(t, accounts) for t in rows]
+
+    async def reverse_transfer(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, transfer_id: uuid.UUID, reason: str,
+        allowed_branch_ids: frozenset[uuid.UUID] | None = None, ip: str | None = None,
+    ) -> TransferOut:
+        reason = (reason or "").strip()
+        if not reason:
+            raise BusinessRuleError("A reason is required to reverse a transfer.")
+        transfer = await self.repo.get_transfer(transfer_id)
+        if transfer is None:
+            raise NotFoundError("Transfer not found")
+        # Both accounts must be in scope to reverse.
+        await self._require_account(transfer.from_account_id, allowed_branch_ids)
+        await self._require_account(transfer.to_account_id, allowed_branch_ids)
+        if transfer.status == "reversed":
+            raise BusinessRuleError("This transfer is already reversed.")
+        await self.reverse_reference(
+            tenant_id=tenant_id, user_id=user_id, reference_type="transfer",
+            reference_id=transfer.id, reason=f"Transfer reversed: {reason}")
+        transfer.status = "reversed"
+        transfer.reversed_by = user_id
+        transfer.reversed_at = dt.datetime.now(dt.UTC)
+        transfer.reverse_reason = reason
+        await self.repo.session.flush()
+        await self.audit.add(
+            tenant_id=tenant_id, user_id=user_id, action="finance.transfer.reverse",
+            entity_type="account_transfer", entity_id=transfer.id,
+            changes={"reason": reason}, ip_address=ip)
+        return await self._to_transfer_out(transfer)
+
+    # ------------------------------ handovers ---------------------------- #
+    async def _to_handover_out(
+        self, h: CashHandover, *, names: dict | None = None, accounts: dict | None = None,
+        has_attachment: bool = False,
+    ) -> HandoverOut:
+        if names is None:
+            names = await self.repo.branch_name_map()
+        if accounts is None:
+            accounts = {a.id: a.name for a in await self.repo.list_accounts(branch_ids=None)}
+        out = HandoverOut.model_validate(h)
+        out.branch_name = names.get(h.branch_id) if h.branch_id else None
+        out.from_account_name = accounts.get(h.from_account_id)
+        out.to_account_name = accounts.get(h.to_account_id)
+        out.has_attachment = has_attachment
+        return out
+
+    async def create_handover(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, data: HandoverCreate,
+        allowed_branch_ids: frozenset[uuid.UUID] | None = None, ip: str | None = None,
+    ) -> HandoverOut:
+        if data.from_account_id == data.to_account_id:
+            raise BusinessRuleError("The handover source and destination must differ.")
+        if data.amount <= 0:
+            raise BusinessRuleError("Handover amount must be positive.")
+        if not data.received_by_name.strip():
+            raise BusinessRuleError("The receiver's name is required.")
+        src = await self._require_account(data.from_account_id, allowed_branch_ids)
+        dst = await self._require_account(data.to_account_id, allowed_branch_ids)
+        if not src.is_active:
+            raise BusinessRuleError("The branch cash account is inactive.")
+        branch_id = data.branch_id or src.branch_id
+        if branch_id is None:
+            raise BusinessRuleError("A branch is required to record a handover.")
+        if allowed_branch_ids is not None and branch_id not in allowed_branch_ids:
+            raise PermissionDeniedError("You are not assigned to that branch.")
+        handover = CashHandover(
+            tenant_id=tenant_id, branch_id=branch_id, from_account_id=src.id, to_account_id=dst.id,
+            amount=data.amount, handover_datetime=data.handover_datetime,
+            handed_over_by=user_id, handed_over_by_name=(data.handed_over_by_name or None),
+            received_by_name=data.received_by_name.strip(), received_by_user_id=data.received_by_user_id,
+            reference_no=(data.reference_no or None), notes=data.notes,
+            denomination_breakdown=data.denomination_breakdown, status="PENDING_CONFIRMATION",
+            created_by=user_id,
+        )
+        await self.repo.add_handover(handover)
+        # The branch no longer holds the cash: post the OUT immediately (money in transit).
+        # The receiver's NAME is in the description so the branch statement answers
+        # "where did the cash go" on its own.
+        await self.post_movement(
+            tenant_id=tenant_id, user_id=user_id, account_id=src.id, direction=DIRECTION_OUT,
+            amount=data.amount, category="handover", reference_type="handover",
+            reference_id=handover.id, occurred_at=data.handover_datetime,
+            description=f"Cash handover to {handover.received_by_name}")
+        await self.audit.add(
+            tenant_id=tenant_id, user_id=user_id, action="finance.handover.record",
+            entity_type="cash_handover", entity_id=handover.id,
+            changes={"from": str(src.id), "to": str(dst.id), "amount": str(data.amount),
+                     "received_by": handover.received_by_name}, ip_address=ip)
+        return await self._to_handover_out(handover)
+
+    async def confirm_handover(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, handover_id: uuid.UUID,
+        confirmed_amount: Decimal, discrepancy_reason: str | None = None,
+        allowed_branch_ids: frozenset[uuid.UUID] | None = None, ip: str | None = None,
+    ) -> HandoverOut:
+        handover = await self._require_handover(handover_id, allowed_branch_ids)
+        if handover.status != "PENDING_CONFIRMATION":
+            raise BusinessRuleError(f"This handover is already {handover.status.lower()}.")
+        if confirmed_amount < 0:
+            raise BusinessRuleError("The confirmed amount cannot be negative.")
+        matches = Decimal(confirmed_amount) == Decimal(handover.amount)
+        if not matches and not (discrepancy_reason or "").strip():
+            # A shortfall/overage is NEVER silently absorbed — a reason is mandatory.
+            raise BusinessRuleError(
+                "The counted amount differs from the handover amount — a discrepancy reason is required.")
+        handover.confirmed_by = user_id
+        handover.confirmed_at = dt.datetime.now(dt.UTC)
+        handover.confirmed_amount = Decimal(confirmed_amount)
+        if matches:
+            handover.status = "CONFIRMED"
+            handover.discrepancy_amount = Decimal("0")
+        else:
+            handover.status = "DISPUTED"
+            handover.discrepancy_amount = Decimal(handover.amount) - Decimal(confirmed_amount)
+            handover.discrepancy_reason = discrepancy_reason.strip()
+        # Post the IN for what was ACTUALLY received (skip a zero-value movement).
+        if Decimal(confirmed_amount) > 0:
+            await self.post_movement(
+                tenant_id=tenant_id, user_id=user_id, account_id=handover.to_account_id,
+                direction=DIRECTION_IN, amount=Decimal(confirmed_amount), category="handover",
+                reference_type="handover", reference_id=handover.id,
+                description=f"Cash handover received from {handover.handed_over_by_name or 'branch'}")
+        await self.repo.session.flush()
+        await self.audit.add(
+            tenant_id=tenant_id, user_id=user_id, action="finance.handover.confirm",
+            entity_type="cash_handover", entity_id=handover.id,
+            changes={"confirmed_amount": str(confirmed_amount), "status": handover.status,
+                     "discrepancy_amount": str(handover.discrepancy_amount)}, ip_address=ip)
+        return await self._to_handover_out(handover, has_attachment=await self.repo.get_handover_attachment(handover.id) is not None)
+
+    async def reverse_handover(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, handover_id: uuid.UUID, reason: str,
+        allowed_branch_ids: frozenset[uuid.UUID] | None = None, ip: str | None = None,
+    ) -> HandoverOut:
+        reason = (reason or "").strip()
+        if not reason:
+            raise BusinessRuleError("A reason is required to reverse a handover.")
+        handover = await self._require_handover(handover_id, allowed_branch_ids)
+        if handover.reversed_at is not None:
+            raise BusinessRuleError("This handover is already reversed.")
+        # Reverse whatever legs exist (the OUT always; the IN too if it was confirmed).
+        await self.reverse_reference(
+            tenant_id=tenant_id, user_id=user_id, reference_type="handover",
+            reference_id=handover.id, reason=f"Handover reversed: {reason}")
+        handover.reversed_by = user_id
+        handover.reversed_at = dt.datetime.now(dt.UTC)
+        handover.reverse_reason = reason
+        await self.repo.session.flush()
+        await self.audit.add(
+            tenant_id=tenant_id, user_id=user_id, action="finance.handover.reverse",
+            entity_type="cash_handover", entity_id=handover.id, changes={"reason": reason}, ip_address=ip)
+        return await self._to_handover_out(handover, has_attachment=await self.repo.get_handover_attachment(handover.id) is not None)
+
+    async def _require_handover(
+        self, handover_id: uuid.UUID, allowed_branch_ids: frozenset[uuid.UUID] | None
+    ) -> CashHandover:
+        handover = await self.repo.get_handover(handover_id)
+        if handover is None:
+            raise NotFoundError("Handover not found")
+        if allowed_branch_ids is not None and handover.branch_id not in allowed_branch_ids:
+            raise PermissionDeniedError("You are not assigned to that handover's branch.")
+        return handover
+
+    async def get_handover(
+        self, *, handover_id: uuid.UUID, allowed_branch_ids: frozenset[uuid.UUID] | None = None
+    ) -> HandoverOut:
+        handover = await self._require_handover(handover_id, allowed_branch_ids)
+        has = await self.repo.get_handover_attachment(handover_id) is not None
+        return await self._to_handover_out(handover, has_attachment=has)
+
+    async def list_handovers(
+        self, *, allowed_branch_ids: frozenset[uuid.UUID] | None, status=None, person=None,
+        date_from=None, date_to=None,
+    ) -> list[HandoverOut]:
+        branch_ids = None if allowed_branch_ids is None else list(allowed_branch_ids)
+        rows = await self.repo.list_handovers(
+            branch_ids=branch_ids, status=status, person=person, date_from=date_from, date_to=date_to)
+        names = await self.repo.branch_name_map()
+        accounts = {a.id: a.name for a in await self.repo.list_accounts(branch_ids=None)}
+        return [await self._to_handover_out(h, names=names, accounts=accounts) for h in rows]
+
+    async def set_handover_attachment(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, handover_id: uuid.UUID,
+        filename: str, content_type: str | None, data: bytes,
+        allowed_branch_ids: frozenset[uuid.UUID] | None = None,
+    ) -> None:
+        if not data:
+            raise BusinessRuleError("The uploaded slip is empty.")
+        await self._require_handover(handover_id, allowed_branch_ids)
+        await self.repo.upsert_handover_attachment(
+            tenant_id=tenant_id, handover_id=handover_id, filename=filename,
+            content_type=content_type, data=data, uploaded_by=user_id)
+        await self.audit.add(
+            tenant_id=tenant_id, user_id=user_id, action="attachment", entity_type="cash_handover",
+            entity_id=handover_id, changes={"filename": filename})
+
+    async def get_handover_attachment(
+        self, *, handover_id: uuid.UUID, allowed_branch_ids: frozenset[uuid.UUID] | None = None
+    ) -> tuple[bytes, str, str | None]:
+        await self._require_handover(handover_id, allowed_branch_ids)
+        att = await self.repo.get_handover_attachment(handover_id)
+        if att is None:
+            raise NotFoundError("No slip attached to this handover.")
+        return att.data, att.filename, att.content_type
+
+    async def handover_slip_pdf(
+        self, *, handover_id: uuid.UUID, allowed_branch_ids: frozenset[uuid.UUID] | None = None
+    ) -> tuple[bytes, str]:
+        from app.finance.pdf import build_handover_slip_pdf
+
+        out = await self.get_handover(handover_id=handover_id, allowed_branch_ids=allowed_branch_ids)
+        return build_handover_slip_pdf(out), f"handover-{str(out.id)[:8]}"

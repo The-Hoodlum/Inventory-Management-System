@@ -30,8 +30,14 @@ from app.finance.schemas import (
     ExpenseOut,
     ExpenseUpdate,
     ExpenseVoid,
+    HandoverConfirm,
+    HandoverCreate,
+    HandoverOut,
     PaymentMappingOut,
     PaymentMappingSet,
+    ReverseRequest,
+    TransferCreate,
+    TransferOut,
 )
 from app.finance.service import FinanceService
 
@@ -271,3 +277,147 @@ async def download_expense_attachment(
     return Response(
         content=data, media_type=content_type or "application/octet-stream",
         headers={"Content-Disposition": f'inline; filename="{filename}"'})
+
+
+# --------------------------------------------------------------------------- #
+# Account transfers (paired OUT + IN)
+# --------------------------------------------------------------------------- #
+@router.get("/transfers", response_model=list[TransferOut])
+async def list_transfers(
+    user: CurrentUser = Depends(require_permission(P.FINANCE_READ)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> list[TransferOut]:
+    return await svc.list_transfers(allowed_branch_ids=_allowed(user))
+
+
+@router.post("/transfers", response_model=TransferOut, status_code=201)
+async def create_transfer(
+    payload: TransferCreate,
+    request: Request,
+    user: CurrentUser = Depends(require_permission(P.FINANCE_TRANSFER)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> TransferOut:
+    return await svc.create_transfer(
+        tenant_id=user.tenant_id, user_id=user.id, data=payload,
+        allowed_branch_ids=_allowed(user), ip=_ip(request))
+
+
+@router.post("/transfers/{transfer_id}/reverse", response_model=TransferOut)
+async def reverse_transfer(
+    transfer_id: uuid.UUID,
+    payload: ReverseRequest,
+    request: Request,
+    user: CurrentUser = Depends(require_permission(P.FINANCE_TRANSFER)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> TransferOut:
+    return await svc.reverse_transfer(
+        tenant_id=user.tenant_id, user_id=user.id, transfer_id=transfer_id,
+        reason=payload.reason, allowed_branch_ids=_allowed(user), ip=_ip(request))
+
+
+# --------------------------------------------------------------------------- #
+# Cash handovers (two-sided: OUT on record, IN on confirm)
+# --------------------------------------------------------------------------- #
+@router.get("/handovers", response_model=list[HandoverOut])
+async def list_handovers(
+    branch_id: uuid.UUID | None = Query(default=None),
+    status_filter: str | None = Query(default=None, alias="status"),
+    person: str | None = Query(default=None),
+    date_from: dt.date | None = Query(default=None),
+    date_to: dt.date | None = Query(default=None),
+    user: CurrentUser = Depends(require_permission(P.FINANCE_READ)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> list[HandoverOut]:
+    scope = resolve_branch_scope(user, branch_id)
+    allowed = None if scope is None else frozenset(scope)
+    return await svc.list_handovers(
+        allowed_branch_ids=allowed, status=status_filter, person=person,
+        date_from=date_from, date_to=date_to)
+
+
+@router.get("/handovers/{handover_id}", response_model=HandoverOut)
+async def get_handover(
+    handover_id: uuid.UUID,
+    user: CurrentUser = Depends(require_permission(P.FINANCE_READ)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> HandoverOut:
+    return await svc.get_handover(handover_id=handover_id, allowed_branch_ids=_allowed(user))
+
+
+@router.post("/handovers", response_model=HandoverOut, status_code=201)
+async def create_handover(
+    payload: HandoverCreate,
+    request: Request,
+    user: CurrentUser = Depends(require_permission(P.FINANCE_HANDOVER)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> HandoverOut:
+    return await svc.create_handover(
+        tenant_id=user.tenant_id, user_id=user.id, data=payload,
+        allowed_branch_ids=_allowed(user), ip=_ip(request))
+
+
+@router.post("/handovers/{handover_id}/confirm", response_model=HandoverOut)
+async def confirm_handover(
+    handover_id: uuid.UUID,
+    payload: HandoverConfirm,
+    request: Request,
+    user: CurrentUser = Depends(require_permission(P.FINANCE_HANDOVER)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> HandoverOut:
+    return await svc.confirm_handover(
+        tenant_id=user.tenant_id, user_id=user.id, handover_id=handover_id,
+        confirmed_amount=payload.confirmed_amount, discrepancy_reason=payload.discrepancy_reason,
+        allowed_branch_ids=_allowed(user), ip=_ip(request))
+
+
+@router.post("/handovers/{handover_id}/reverse", response_model=HandoverOut)
+async def reverse_handover(
+    handover_id: uuid.UUID,
+    payload: ReverseRequest,
+    request: Request,
+    user: CurrentUser = Depends(require_permission(P.FINANCE_HANDOVER)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> HandoverOut:
+    return await svc.reverse_handover(
+        tenant_id=user.tenant_id, user_id=user.id, handover_id=handover_id,
+        reason=payload.reason, allowed_branch_ids=_allowed(user), ip=_ip(request))
+
+
+@router.post("/handovers/{handover_id}/attachment", status_code=204, response_class=Response)
+async def upload_handover_attachment(
+    handover_id: uuid.UUID,
+    file: UploadFile = File(...),
+    user: CurrentUser = Depends(require_permission(P.FINANCE_HANDOVER)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> Response:
+    data = await file.read()
+    await svc.set_handover_attachment(
+        tenant_id=user.tenant_id, user_id=user.id, handover_id=handover_id,
+        filename=file.filename or "slip", content_type=file.content_type, data=data,
+        allowed_branch_ids=_allowed(user))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/handovers/{handover_id}/attachment")
+async def download_handover_attachment(
+    handover_id: uuid.UUID,
+    user: CurrentUser = Depends(require_permission(P.FINANCE_READ)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> Response:
+    data, filename, content_type = await svc.get_handover_attachment(
+        handover_id=handover_id, allowed_branch_ids=_allowed(user))
+    return Response(
+        content=data, media_type=content_type or "application/octet-stream",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'})
+
+
+@router.get("/handovers/{handover_id}/slip")
+async def handover_slip_pdf(
+    handover_id: uuid.UUID,
+    user: CurrentUser = Depends(require_permission(P.FINANCE_READ)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> Response:
+    pdf, name = await svc.handover_slip_pdf(handover_id=handover_id, allowed_branch_ids=_allowed(user))
+    return Response(
+        content=pdf, media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{name}.pdf"'})

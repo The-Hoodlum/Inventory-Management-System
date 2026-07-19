@@ -118,7 +118,8 @@ jobs:
             database/sql/notification_prefs.sql \
             database/sql/finance_accounts.sql \
             database/sql/finance_payment_mapping.sql \
-            database/sql/finance_expenses.sql ; do
+            database/sql/finance_expenses.sql \
+            database/sql/finance_transfers_handovers.sql ; do
             echo "applying $f"
             psql -v ON_ERROR_STOP=1 -f "$f"
           done

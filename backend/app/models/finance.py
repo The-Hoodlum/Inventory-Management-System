@@ -10,9 +10,10 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import Boolean, Date, ForeignKey, LargeBinary, Numeric, Text, text
-from sqlalchemy.dialects.postgresql import TIMESTAMP
+from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -149,6 +150,80 @@ class ExpenseAttachment(Base):
     id: Mapped[uuid.UUID] = mapped_column(_UUID, primary_key=True, server_default=text("gen_random_uuid()"))
     tenant_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
     expense_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("expenses.id", ondelete="CASCADE"), nullable=False)
+    filename: Mapped[str] = mapped_column(Text, nullable=False)
+    content_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    uploaded_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class AccountTransfer(Base):
+    """Money moved between two accounts — one record backing a PAIRED OUT + IN posted in a
+    single transaction. Reversible only by a reversing pair."""
+
+    __tablename__ = "account_transfers"
+
+    id: Mapped[uuid.UUID] = mapped_column(_UUID, primary_key=True, server_default=text("gen_random_uuid()"))
+    tenant_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    from_account_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("financial_accounts.id", ondelete="RESTRICT"), nullable=False)
+    to_account_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("financial_accounts.id", ondelete="RESTRICT"), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    occurred_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    reference_no: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'completed'"))
+    reversed_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reversed_at: Mapped[dt.datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    reverse_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class CashHandover(Base):
+    """Branch cash handed to a named person / custody account. The OUT posts on record (the
+    branch no longer holds it — money in transit); the IN posts on confirm. A short
+    confirmation records a discrepancy + mandatory reason and posts the IN for what was
+    actually received. Corrections are reversing entries only."""
+
+    __tablename__ = "cash_handovers"
+
+    id: Mapped[uuid.UUID] = mapped_column(_UUID, primary_key=True, server_default=text("gen_random_uuid()"))
+    tenant_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    branch_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("branches.id", ondelete="RESTRICT"), nullable=True)
+    from_account_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("financial_accounts.id", ondelete="RESTRICT"), nullable=False)
+    to_account_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("financial_accounts.id", ondelete="RESTRICT"), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 4), nullable=False)
+    handover_datetime: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    handed_over_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    handed_over_by_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    received_by_name: Mapped[str] = mapped_column(Text, nullable=False)
+    received_by_user_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reference_no: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    denomination_breakdown: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'PENDING_CONFIRMATION'"))
+    confirmed_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    confirmed_at: Mapped[dt.datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    confirmed_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    discrepancy_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    discrepancy_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reversed_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reversed_at: Mapped[dt.datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    reverse_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class CashHandoverAttachment(Base):
+    """Optional signed-slip photo for a handover — bytes in-DB. One per handover; replaceable."""
+
+    __tablename__ = "cash_handover_attachments"
+
+    id: Mapped[uuid.UUID] = mapped_column(_UUID, primary_key=True, server_default=text("gen_random_uuid()"))
+    tenant_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    handover_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("cash_handovers.id", ondelete="CASCADE"), nullable=False)
     filename: Mapped[str] = mapped_column(Text, nullable=False)
     content_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)

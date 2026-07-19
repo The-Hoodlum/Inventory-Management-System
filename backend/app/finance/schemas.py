@@ -164,3 +164,87 @@ class ExpenseOut(BaseModel):
     voided_at: dt.datetime | None
     has_attachment: bool = False
     created_at: dt.datetime
+
+
+# ------------------------------ transfers -------------------------------- #
+class TransferCreate(BaseModel):
+    from_account_id: uuid.UUID
+    to_account_id: uuid.UUID
+    amount: Decimal = Field(gt=0)
+    occurred_at: dt.datetime | None = None
+    reference_no: str | None = Field(default=None, max_length=128)
+    notes: str | None = None
+
+
+class ReverseRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=512)
+
+
+class TransferOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    from_account_id: uuid.UUID
+    from_account_name: str | None = None
+    to_account_id: uuid.UUID
+    to_account_name: str | None = None
+    amount: Decimal
+    occurred_at: dt.datetime
+    reference_no: str | None
+    notes: str | None
+    status: str
+    created_by: uuid.UUID | None
+    created_at: dt.datetime
+
+
+# ------------------------------ handovers -------------------------------- #
+class HandoverCreate(BaseModel):
+    from_account_id: uuid.UUID           # the branch cash account handed FROM
+    to_account_id: uuid.UUID             # the receiving custody / bank account
+    branch_id: uuid.UUID | None = None   # defaults to the from-account's branch
+    amount: Decimal = Field(gt=0)
+    handover_datetime: dt.datetime | None = None
+    handed_over_by_name: str | None = Field(default=None, max_length=256)
+    received_by_name: str = Field(min_length=1, max_length=256)   # ALWAYS recorded
+    received_by_user_id: uuid.UUID | None = None
+    reference_no: str | None = Field(default=None, max_length=128)
+    notes: str | None = None
+    denomination_breakdown: dict | None = None
+
+
+class HandoverConfirm(BaseModel):
+    confirmed_amount: Decimal = Field(ge=0)
+    # Required by the service when confirmed_amount != amount (a shortfall is never absorbed).
+    discrepancy_reason: str | None = None
+
+
+class HandoverOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    branch_id: uuid.UUID | None
+    branch_name: str | None = None
+    from_account_id: uuid.UUID
+    from_account_name: str | None = None
+    to_account_id: uuid.UUID
+    to_account_name: str | None = None
+    amount: Decimal
+    handover_datetime: dt.datetime
+    handed_over_by: uuid.UUID | None
+    handed_over_by_name: str | None
+    received_by_name: str
+    received_by_user_id: uuid.UUID | None
+    reference_no: str | None
+    notes: str | None
+    denomination_breakdown: dict | None
+    status: str
+    confirmed_by: uuid.UUID | None
+    confirmed_at: dt.datetime | None
+    confirmed_amount: Decimal | None
+    discrepancy_amount: Decimal | None
+    discrepancy_reason: str | None
+    reversed_at: dt.datetime | None
+    reverse_reason: str | None
+    has_attachment: bool = False
+    created_at: dt.datetime
