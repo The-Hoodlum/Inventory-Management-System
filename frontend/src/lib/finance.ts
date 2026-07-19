@@ -91,4 +91,73 @@ export const financeApi = {
   setMapping: (body: { branch_id: string; method: PaymentMethod; account_id: string }) =>
     api.put<PaymentMapping>("/finance/payment-mappings", body),
   deleteMapping: (id: string) => api.del<void>(`/finance/payment-mappings/${id}`),
+
+  // Expense categories (configurable tenant list).
+  listCategories: (activeOnly = false) =>
+    api.get<ExpenseCategory[]>(`/finance/expense-categories${activeOnly ? "?active_only=true" : ""}`),
+  createCategory: (name: string) => api.post<ExpenseCategory>("/finance/expense-categories", { name }),
+  updateCategory: (id: string, body: { name?: string; is_active?: boolean }) =>
+    api.patch<ExpenseCategory>(`/finance/expense-categories/${id}`, body),
+
+  // Expenses (money out).
+  listExpenses: (params: {
+    branch_id?: string; category_id?: string; account_id?: string;
+    status?: string; date_from?: string; date_to?: string;
+  } = {}) => {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) if (v) p.set(k, v);
+    const qs = p.toString();
+    return api.get<Expense[]>(`/finance/expenses${qs ? `?${qs}` : ""}`);
+  },
+  createExpense: (body: ExpenseInput) => api.post<Expense>("/finance/expenses", body),
+  updateExpense: (id: string, body: Partial<ExpenseInput>) =>
+    api.patch<Expense>(`/finance/expenses/${id}`, body),
+  voidExpense: (id: string, reason: string) =>
+    api.post<Expense>(`/finance/expenses/${id}/void`, { reason }),
+  uploadReceipt: (id: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return api.upload<void>(`/finance/expenses/${id}/attachment`, form);
+  },
+  receiptUrl: (id: string) => `/finance/expenses/${id}/attachment`,
 };
+
+export interface ExpenseCategory {
+  id: string;
+  name: string;
+  is_active: boolean;
+}
+
+export interface Expense {
+  id: string;
+  tenant_id: string;
+  branch_id: string | null;
+  branch_name: string | null;
+  account_id: string;
+  account_name: string | null;
+  amount: string;
+  expense_date: string;
+  category_id: string | null;
+  category_name: string | null;
+  payee: string | null;
+  description: string | null;
+  reference_no: string | null;
+  status: "recorded" | "voided";
+  recorded_by: string | null;
+  void_reason: string | null;
+  voided_by: string | null;
+  voided_at: string | null;
+  has_attachment: boolean;
+  created_at: string;
+}
+
+export interface ExpenseInput {
+  account_id?: string;
+  branch_id?: string | null;
+  amount?: string;
+  expense_date?: string;
+  category_id?: string | null;
+  payee?: string | null;
+  description?: string | null;
+  reference_no?: string | null;
+}

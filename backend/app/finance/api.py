@@ -6,9 +6,10 @@ delete endpoint for any financial record — accounts are DEACTIVATED, never del
 """
 from __future__ import annotations
 
+import datetime as dt
 import uuid
 
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import APIRouter, Depends, File, Query, Request, Response, UploadFile, status
 
 from app.api.v1.deps import (
     CurrentUser,
@@ -22,6 +23,13 @@ from app.finance.schemas import (
     AccountCreate,
     AccountOut,
     AccountUpdate,
+    CategoryCreate,
+    CategoryOut,
+    CategoryUpdate,
+    ExpenseCreate,
+    ExpenseOut,
+    ExpenseUpdate,
+    ExpenseVoid,
     PaymentMappingOut,
     PaymentMappingSet,
 )
@@ -131,3 +139,135 @@ async def delete_payment_mapping(
         allowed_branch_ids=_allowed(user), ip=_ip(request),
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# --------------------------------------------------------------------------- #
+# Expense categories (configurable tenant list)
+# --------------------------------------------------------------------------- #
+@router.get("/expense-categories", response_model=list[CategoryOut])
+async def list_categories(
+    active_only: bool = Query(default=False),
+    _: CurrentUser = Depends(require_permission(P.FINANCE_READ)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> list[CategoryOut]:
+    return await svc.list_categories(active_only=active_only)
+
+
+@router.post("/expense-categories", response_model=CategoryOut, status_code=201)
+async def create_category(
+    payload: CategoryCreate,
+    request: Request,
+    user: CurrentUser = Depends(require_permission(P.FINANCE_EXPENSE_MANAGE)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> CategoryOut:
+    return await svc.create_category(
+        tenant_id=user.tenant_id, user_id=user.id, name=payload.name, ip=_ip(request))
+
+
+@router.patch("/expense-categories/{category_id}", response_model=CategoryOut)
+async def update_category(
+    category_id: uuid.UUID,
+    payload: CategoryUpdate,
+    request: Request,
+    user: CurrentUser = Depends(require_permission(P.FINANCE_EXPENSE_MANAGE)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> CategoryOut:
+    return await svc.update_category(
+        tenant_id=user.tenant_id, user_id=user.id, category_id=category_id,
+        name=payload.name, is_active=payload.is_active, ip=_ip(request))
+
+
+# --------------------------------------------------------------------------- #
+# Expenses (money out) — manager-recorded, view within branch scope
+# --------------------------------------------------------------------------- #
+@router.get("/expenses", response_model=list[ExpenseOut])
+async def list_expenses(
+    branch_id: uuid.UUID | None = Query(default=None),
+    category_id: uuid.UUID | None = Query(default=None),
+    account_id: uuid.UUID | None = Query(default=None),
+    status_filter: str | None = Query(default=None, alias="status"),
+    date_from: dt.date | None = Query(default=None),
+    date_to: dt.date | None = Query(default=None),
+    user: CurrentUser = Depends(require_permission(P.FINANCE_READ)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> list[ExpenseOut]:
+    scope = resolve_branch_scope(user, branch_id)
+    allowed = None if scope is None else frozenset(scope)
+    return await svc.list_expenses(
+        allowed_branch_ids=allowed, category_id=category_id, account_id=account_id,
+        status=status_filter, date_from=date_from, date_to=date_to)
+
+
+@router.get("/expenses/{expense_id}", response_model=ExpenseOut)
+async def get_expense(
+    expense_id: uuid.UUID,
+    user: CurrentUser = Depends(require_permission(P.FINANCE_READ)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> ExpenseOut:
+    return await svc.get_expense(expense_id=expense_id, allowed_branch_ids=_allowed(user))
+
+
+@router.post("/expenses", response_model=ExpenseOut, status_code=201)
+async def create_expense(
+    payload: ExpenseCreate,
+    request: Request,
+    user: CurrentUser = Depends(require_permission(P.FINANCE_EXPENSE_MANAGE)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> ExpenseOut:
+    return await svc.create_expense(
+        tenant_id=user.tenant_id, user_id=user.id, data=payload,
+        allowed_branch_ids=_allowed(user), ip=_ip(request))
+
+
+@router.patch("/expenses/{expense_id}", response_model=ExpenseOut)
+async def update_expense(
+    expense_id: uuid.UUID,
+    payload: ExpenseUpdate,
+    request: Request,
+    user: CurrentUser = Depends(require_permission(P.FINANCE_EXPENSE_MANAGE)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> ExpenseOut:
+    return await svc.update_expense(
+        tenant_id=user.tenant_id, user_id=user.id, expense_id=expense_id, data=payload,
+        allowed_branch_ids=_allowed(user), ip=_ip(request))
+
+
+@router.post("/expenses/{expense_id}/void", response_model=ExpenseOut)
+async def void_expense(
+    expense_id: uuid.UUID,
+    payload: ExpenseVoid,
+    request: Request,
+    user: CurrentUser = Depends(require_permission(P.FINANCE_EXPENSE_MANAGE)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> ExpenseOut:
+    return await svc.void_expense(
+        tenant_id=user.tenant_id, user_id=user.id, expense_id=expense_id,
+        reason=payload.reason, allowed_branch_ids=_allowed(user), ip=_ip(request))
+
+
+@router.post("/expenses/{expense_id}/attachment", status_code=204, response_class=Response)
+async def upload_expense_attachment(
+    expense_id: uuid.UUID,
+    file: UploadFile = File(...),
+    user: CurrentUser = Depends(require_permission(P.FINANCE_EXPENSE_MANAGE)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> Response:
+    data = await file.read()
+    await svc.set_attachment(
+        tenant_id=user.tenant_id, user_id=user.id, expense_id=expense_id,
+        filename=file.filename or "receipt", content_type=file.content_type, data=data,
+        allowed_branch_ids=_allowed(user))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/expenses/{expense_id}/attachment")
+async def download_expense_attachment(
+    expense_id: uuid.UUID,
+    user: CurrentUser = Depends(require_permission(P.FINANCE_READ)),
+    svc: FinanceService = Depends(get_finance_service),
+) -> Response:
+    data, filename, content_type = await svc.get_attachment(
+        expense_id=expense_id, allowed_branch_ids=_allowed(user))
+    return Response(
+        content=data, media_type=content_type or "application/octet-stream",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'})

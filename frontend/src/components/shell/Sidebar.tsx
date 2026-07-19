@@ -38,6 +38,7 @@ import {
   Truck,
   Upload,
   Users,
+  Wallet,
   Warehouse,
   Wrench,
   type LucideIcon,
@@ -88,6 +89,7 @@ const GROUPS: NavGroup[] = [
     label: "Finance",
     items: [
       { to: "/finance/accounts", label: "Accounts", icon: Landmark, permission: "finance.read" },
+      { to: "/finance/expenses", label: "Expenses", icon: Wallet, permission: "finance.read" },
       { to: "/finance/payment-setup", label: "Payment Setup", icon: CreditCard, permission: "finance.read" },
     ],
   },

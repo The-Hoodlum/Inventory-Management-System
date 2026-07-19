@@ -17,6 +17,7 @@ from decimal import Decimal
 
 from app.core.exceptions import (
     BusinessRuleError,
+    ConflictError,
     NotFoundError,
     PermissionDeniedError,
 )
@@ -26,9 +27,18 @@ from app.finance.schemas import (
     AccountCreate,
     AccountOut,
     AccountUpdate,
+    CategoryOut,
+    ExpenseCreate,
+    ExpenseOut,
+    ExpenseUpdate,
     PaymentMappingOut,
 )
-from app.models import AccountMovement, FinancialAccount
+from app.models import (
+    AccountMovement,
+    Expense,
+    ExpenseCategory,
+    FinancialAccount,
+)
 from app.models.finance import (
     ACCOUNT_TYPES,
     DIRECTION_IN,
@@ -345,3 +355,221 @@ class FinanceService:
             entity_type="finance_payment_map", entity_id=mapping_id,
             changes={"branch_id": str(row.branch_id), "method": row.method}, ip_address=ip,
         )
+
+    # ------------------------- expense categories ------------------------ #
+    async def list_categories(self, *, active_only: bool = False) -> list[CategoryOut]:
+        return [CategoryOut.model_validate(c) for c in await self.repo.list_categories(active_only=active_only)]
+
+    async def create_category(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, name: str, ip: str | None = None
+    ) -> CategoryOut:
+        name = name.strip()
+        if await self.repo.category_by_name(name) is not None:
+            raise ConflictError(f"An expense category '{name}' already exists.")
+        category = ExpenseCategory(tenant_id=tenant_id, name=name, is_active=True)
+        await self.repo.add_category(category)
+        await self.audit.add(
+            tenant_id=tenant_id, user_id=user_id, action="create", entity_type="expense_category",
+            entity_id=category.id, changes={"name": name}, ip_address=ip,
+        )
+        return CategoryOut.model_validate(category)
+
+    async def update_category(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, category_id: uuid.UUID,
+        name: str | None = None, is_active: bool | None = None, ip: str | None = None,
+    ) -> CategoryOut:
+        category = await self.repo.get_category(category_id)
+        if category is None:
+            raise NotFoundError("Category not found")
+        if name is not None and name.strip() and name.strip().lower() != category.name.lower():
+            if await self.repo.category_by_name(name.strip()) is not None:
+                raise ConflictError(f"An expense category '{name.strip()}' already exists.")
+            category.name = name.strip()
+        if is_active is not None:
+            category.is_active = is_active
+        await self.repo.session.flush()
+        await self.audit.add(
+            tenant_id=tenant_id, user_id=user_id, action="update", entity_type="expense_category",
+            entity_id=category.id, changes={"name": category.name, "is_active": category.is_active},
+            ip_address=ip,
+        )
+        return CategoryOut.model_validate(category)
+
+    # ------------------------------ expenses ----------------------------- #
+    async def _to_expense_out(
+        self, expense: Expense, *, names: dict | None = None, accounts: dict | None = None,
+        categories: dict | None = None, has_attachment: bool = False,
+    ) -> ExpenseOut:
+        if names is None:
+            names = await self.repo.branch_name_map()
+        if categories is None:
+            categories = await self.repo.category_name_map()
+        out = ExpenseOut.model_validate(expense)
+        out.branch_name = names.get(expense.branch_id) if expense.branch_id else None
+        out.category_name = categories.get(expense.category_id) if expense.category_id else None
+        if accounts is not None:
+            out.account_name = accounts.get(expense.account_id)
+        else:
+            acct = await self.repo.get_account(expense.account_id)
+            out.account_name = acct.name if acct is not None else None
+        out.has_attachment = has_attachment
+        return out
+
+    async def create_expense(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, data: ExpenseCreate,
+        allowed_branch_ids: frozenset[uuid.UUID] | None = None, ip: str | None = None,
+    ) -> ExpenseOut:
+        if data.amount <= 0:
+            raise BusinessRuleError("Expense amount must be positive.")
+        account = await self._require_account(data.account_id, allowed_branch_ids)
+        if not account.is_active:
+            raise BusinessRuleError(f"Account '{account.name}' is inactive.")
+        # An expense is branch-scoped: use the given branch, else the account's own branch.
+        branch_id = data.branch_id or account.branch_id
+        if branch_id is None:
+            raise BusinessRuleError("A branch is required to record an expense.")
+        if allowed_branch_ids is not None and branch_id not in allowed_branch_ids:
+            raise PermissionDeniedError("You are not assigned to that branch.")
+        if account.branch_id is not None and account.branch_id != branch_id:
+            raise BusinessRuleError("The chosen account belongs to a different branch.")
+        if data.category_id is not None:
+            category = await self.repo.get_category(data.category_id)
+            if category is None:
+                raise NotFoundError("Category not found")
+            if not category.is_active:
+                raise BusinessRuleError("That expense category is inactive.")
+        expense = Expense(
+            tenant_id=tenant_id, branch_id=branch_id, account_id=data.account_id,
+            amount=data.amount, expense_date=data.expense_date, category_id=data.category_id,
+            payee=(data.payee or None), description=data.description,
+            reference_no=(data.reference_no or None), status="recorded", recorded_by=user_id,
+        )
+        await self.repo.add_expense(expense)
+        # The money leaves the account: one OUT movement through the append-only ledger, so
+        # the balance drops by exactly the amount.
+        await self.post_movement(
+            tenant_id=tenant_id, user_id=user_id, account_id=data.account_id,
+            direction=DIRECTION_OUT, amount=data.amount, category="expense",
+            reference_type="expense", reference_id=expense.id,
+            occurred_at=dt.datetime.combine(data.expense_date, dt.time()),
+            description=f"Expense: {data.payee or (data.description or 'recorded')}",
+        )
+        await self.audit.add(
+            tenant_id=tenant_id, user_id=user_id, action="create", entity_type="expense",
+            entity_id=expense.id,
+            changes={"account_id": str(data.account_id), "amount": str(data.amount),
+                     "branch_id": str(branch_id), "category_id": str(data.category_id) if data.category_id else None},
+            ip_address=ip,
+        )
+        return await self._to_expense_out(expense)
+
+    async def list_expenses(
+        self, *, allowed_branch_ids: frozenset[uuid.UUID] | None, category_id=None,
+        account_id=None, status=None, date_from=None, date_to=None,
+    ) -> list[ExpenseOut]:
+        branch_ids = None if allowed_branch_ids is None else list(allowed_branch_ids)
+        rows = await self.repo.list_expenses(
+            branch_ids=branch_ids, category_id=category_id, account_id=account_id,
+            status=status, date_from=date_from, date_to=date_to)
+        names = await self.repo.branch_name_map()
+        categories = await self.repo.category_name_map()
+        accounts = {a.id: a.name for a in await self.repo.list_accounts(branch_ids=branch_ids)}
+        with_attach = await self.repo.attachment_expense_ids([e.id for e in rows])
+        return [
+            await self._to_expense_out(
+                e, names=names, accounts=accounts, categories=categories,
+                has_attachment=e.id in with_attach)
+            for e in rows
+        ]
+
+    async def _require_expense(
+        self, expense_id: uuid.UUID, allowed_branch_ids: frozenset[uuid.UUID] | None
+    ) -> Expense:
+        expense = await self.repo.get_expense(expense_id)
+        if expense is None:
+            raise NotFoundError("Expense not found")
+        if allowed_branch_ids is not None and expense.branch_id not in allowed_branch_ids:
+            raise PermissionDeniedError("You are not assigned to that expense's branch.")
+        return expense
+
+    async def get_expense(
+        self, *, expense_id: uuid.UUID, allowed_branch_ids: frozenset[uuid.UUID] | None = None
+    ) -> ExpenseOut:
+        expense = await self._require_expense(expense_id, allowed_branch_ids)
+        has = await self.repo.get_attachment(expense_id) is not None
+        return await self._to_expense_out(expense, has_attachment=has)
+
+    async def update_expense(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, expense_id: uuid.UUID,
+        data: ExpenseUpdate, allowed_branch_ids: frozenset[uuid.UUID] | None = None,
+        ip: str | None = None,
+    ) -> ExpenseOut:
+        expense = await self._require_expense(expense_id, allowed_branch_ids)
+        if expense.status == "voided":
+            raise BusinessRuleError("A voided expense cannot be edited.")
+        changes = data.model_dump(exclude_unset=True)
+        if "category_id" in changes and changes["category_id"] is not None:
+            if await self.repo.get_category(changes["category_id"]) is None:
+                raise NotFoundError("Category not found")
+        for field in ("category_id", "payee", "description", "reference_no", "expense_date"):
+            if field in changes:
+                setattr(expense, field, changes[field])
+        await self.repo.session.flush()
+        await self.audit.add(
+            tenant_id=tenant_id, user_id=user_id, action="update", entity_type="expense",
+            entity_id=expense.id, changes={k: str(v) for k, v in changes.items()}, ip_address=ip,
+        )
+        has = await self.repo.get_attachment(expense_id) is not None
+        return await self._to_expense_out(expense, has_attachment=has)
+
+    async def void_expense(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, expense_id: uuid.UUID, reason: str,
+        allowed_branch_ids: frozenset[uuid.UUID] | None = None, ip: str | None = None,
+    ) -> ExpenseOut:
+        """Correct an expense WITHOUT deleting it: reverse the OUT movement (a reversing IN
+        restores the account balance) and mark the record voided with who/when/why."""
+        reason = (reason or "").strip()
+        if not reason:
+            raise BusinessRuleError("A reason is required to void an expense.")
+        expense = await self._require_expense(expense_id, allowed_branch_ids)
+        if expense.status == "voided":
+            raise BusinessRuleError("This expense is already voided.")
+        await self.reverse_reference(
+            tenant_id=tenant_id, user_id=user_id, reference_type="expense",
+            reference_id=expense.id, reason=f"Expense voided: {reason}")
+        expense.status = "voided"
+        expense.void_reason = reason
+        expense.voided_by = user_id
+        expense.voided_at = dt.datetime.now(dt.UTC)
+        await self.repo.session.flush()
+        await self.audit.add(
+            tenant_id=tenant_id, user_id=user_id, action="void", entity_type="expense",
+            entity_id=expense.id, changes={"reason": reason}, ip_address=ip,
+        )
+        has = await self.repo.get_attachment(expense_id) is not None
+        return await self._to_expense_out(expense, has_attachment=has)
+
+    # ---------------------------- attachments ---------------------------- #
+    async def set_attachment(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, expense_id: uuid.UUID,
+        filename: str, content_type: str | None, data: bytes,
+        allowed_branch_ids: frozenset[uuid.UUID] | None = None,
+    ) -> None:
+        if not data:
+            raise BusinessRuleError("The uploaded receipt is empty.")
+        await self._require_expense(expense_id, allowed_branch_ids)
+        await self.repo.upsert_attachment(
+            tenant_id=tenant_id, expense_id=expense_id, filename=filename,
+            content_type=content_type, data=data, uploaded_by=user_id)
+        await self.audit.add(
+            tenant_id=tenant_id, user_id=user_id, action="attachment", entity_type="expense",
+            entity_id=expense_id, changes={"filename": filename})
+
+    async def get_attachment(
+        self, *, expense_id: uuid.UUID, allowed_branch_ids: frozenset[uuid.UUID] | None = None
+    ) -> tuple[bytes, str, str | None]:
+        await self._require_expense(expense_id, allowed_branch_ids)
+        att = await self.repo.get_attachment(expense_id)
+        if att is None:
+            raise NotFoundError("No receipt attached to this expense.")
+        return att.data, att.filename, att.content_type
