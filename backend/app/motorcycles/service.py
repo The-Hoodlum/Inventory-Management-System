@@ -579,3 +579,100 @@ class MotorcycleService:
             version=unit.version, created_at=unit.created_at, updated_at=unit.updated_at,
             allowed_next=L.allowed_next(unit.status), events=events,
         )
+
+    # ==================================================================== #
+    # Bike stock: which model/colours are running out
+    # ==================================================================== #
+    async def low_stock_bikes(
+        self, *, branch_ids: Sequence[uuid.UUID] | None = None
+    ) -> list[dict]:
+        """Model+colour combos whose SELLABLE stock has fallen to or below their reorder
+        point, per branch, worst first.
+
+        Threshold resolution, most specific wins:
+          1. a row for that exact model+colour,
+          2. else the model-wide default (a row with colour_id NULL),
+          3. else the combo is NOT monitored and is never reported — thresholds are opt-in,
+             so a tenant that hasn't configured any never gets noise.
+
+        A combo the branch has held before is still reported at zero (that's the case that
+        matters most), but one it has never stocked is not invented.
+        """
+        points = await self.repo.list_reorder_points()
+        if not points:
+            return []
+        per_colour = {(p.model_id, p.colour_id): p.reorder_point for p in points if p.colour_id is not None}
+        per_model = {p.model_id: p.reorder_point for p in points if p.colour_id is None}
+
+        rows = await self.repo.sellable_counts(branch_ids=branch_ids)
+        low: list[dict] = []
+        for model_id, colour_id, branch_id, sellable, _ever in rows:
+            point = per_colour.get((model_id, colour_id), per_model.get(model_id))
+            if point is None:            # not monitored
+                continue
+            if sellable > point:
+                continue
+            low.append({
+                "model_id": model_id, "colour_id": colour_id, "branch_id": branch_id,
+                "available": sellable, "reorder_point": point,
+            })
+        if not low:
+            return []
+        models = await self.repo.model_names([r["model_id"] for r in low])
+        colours = await self.repo.colour_names([r["colour_id"] for r in low])
+        branches = await self.repo.branch_names([r["branch_id"] for r in low])
+        for r in low:
+            r["model"] = models.get(r["model_id"])
+            r["colour"] = colours.get(r["colour_id"]) if r["colour_id"] else None
+            r["branch"] = branches.get(r["branch_id"]) if r["branch_id"] else None
+        # Emptiest first, then by name so the message is stable run to run.
+        low.sort(key=lambda r: (r["available"], r["model"] or "", r["colour"] or ""))
+        return low
+
+    async def list_reorder_points(self) -> list[dict]:
+        rows = await self.repo.list_reorder_points()
+        models = await self.repo.model_names([r.model_id for r in rows])
+        colours = await self.repo.colour_names([r.colour_id for r in rows])
+        return [
+            {"id": r.id, "model_id": r.model_id, "model_name": models.get(r.model_id),
+             "colour_id": r.colour_id,
+             "colour_name": colours.get(r.colour_id) if r.colour_id else None,
+             "reorder_point": r.reorder_point}
+            for r in rows
+        ]
+
+    async def set_reorder_point(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, model_id: uuid.UUID,
+        colour_id: uuid.UUID | None, reorder_point: int,
+    ) -> dict:
+        if await self.repo.get_model(model_id) is None:
+            raise NotFoundError("Motorcycle model not found")
+        if colour_id is not None and await self.repo.get_colour(colour_id) is None:
+            raise NotFoundError("Colour not found")
+        if reorder_point < 0:
+            raise BusinessRuleError("A reorder point cannot be negative.")
+        row = await self.repo.upsert_reorder_point(
+            tenant_id=tenant_id, model_id=model_id, colour_id=colour_id, reorder_point=reorder_point)
+        await self.audit.add(
+            tenant_id=tenant_id, user_id=user_id, action="set_reorder_point",
+            entity_type="motorcycle_reorder_point", entity_id=row.id,
+            changes={"model_id": str(model_id),
+                     "colour_id": str(colour_id) if colour_id else None,
+                     "reorder_point": reorder_point})
+        models = await self.repo.model_names([row.model_id])
+        colours = await self.repo.colour_names([row.colour_id]) if row.colour_id else {}
+        return {"id": row.id, "model_id": row.model_id, "model_name": models.get(row.model_id),
+                "colour_id": row.colour_id,
+                "colour_name": colours.get(row.colour_id) if row.colour_id else None,
+                "reorder_point": row.reorder_point}
+
+    async def delete_reorder_point(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, rp_id: uuid.UUID
+    ) -> None:
+        row = await self.repo.get_reorder_point_by_id(rp_id)
+        if row is None:
+            raise NotFoundError("Reorder point not found")
+        await self.repo.delete_reorder_point(row)
+        await self.audit.add(
+            tenant_id=tenant_id, user_id=user_id, action="delete_reorder_point",
+            entity_type="motorcycle_reorder_point", entity_id=rp_id, changes={"deleted": True})

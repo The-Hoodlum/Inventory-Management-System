@@ -266,3 +266,32 @@ class UnitOut(BaseModel):
     updated_at: dt.datetime
     allowed_next: list[str] = []
     events: list[UnitEventOut] = []
+
+
+# ----------------------- stock reorder points (per model/colour) ------------ #
+class ReorderPointIn(BaseModel):
+    model_id: uuid.UUID
+    colour_id: uuid.UUID | None = None      # None = the model-wide default
+    reorder_point: int = Field(ge=0)
+
+
+class ReorderPointOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    model_id: uuid.UUID
+    model_name: str | None = None
+    colour_id: uuid.UUID | None
+    colour_name: str | None = None
+    reorder_point: int
+
+
+class LowStockBikeOut(BaseModel):
+    model_id: uuid.UUID
+    model: str | None = None
+    colour_id: uuid.UUID | None = None
+    colour: str | None = None
+    branch_id: uuid.UUID | None = None
+    branch: str | None = None
+    available: int
+    reorder_point: int

@@ -9,7 +9,7 @@ from __future__ import annotations
 import math
 import uuid
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 
 from app.api.v1.deps import (
     CurrentUser,
@@ -23,10 +23,13 @@ from app.motorcycles.schemas import (
     ColourCreate,
     ColourOut,
     ColourUpdate,
+    LowStockBikeOut,
     MetricsOut,
     ModelCreate,
     ModelOut,
     ModelUpdate,
+    ReorderPointIn,
+    ReorderPointOut,
     ReserveIn,
     SellIn,
     TransferIn,
@@ -266,3 +269,48 @@ async def transfer_unit(
     svc: MotorcycleService = Depends(get_motorcycle_service),
 ) -> UnitOut:
     return await svc.transfer(tenant_id=user.tenant_id, user_id=user.id, unit_id=unit_id, payload=payload)
+
+
+# ==================== stock reorder points (per model/colour) ============= #
+@router.get("/reorder-points", response_model=list[ReorderPointOut])
+async def list_reorder_points(
+    _: CurrentUser = Depends(require_permission(P.MOTORCYCLE_READ)),
+    svc: MotorcycleService = Depends(get_motorcycle_service),
+) -> list[ReorderPointOut]:
+    return [ReorderPointOut(**r) for r in await svc.list_reorder_points()]
+
+
+@router.put("/reorder-points", response_model=ReorderPointOut)
+async def set_reorder_point(
+    payload: ReorderPointIn,
+    user: CurrentUser = Depends(require_permission(P.MOTORCYCLE_CONFIG)),
+    svc: MotorcycleService = Depends(get_motorcycle_service),
+) -> ReorderPointOut:
+    """Set the sellable-stock threshold for a model (colour_id omitted = the model-wide
+    default used by every colour without its own row)."""
+    return ReorderPointOut(**await svc.set_reorder_point(
+        tenant_id=user.tenant_id, user_id=user.id, model_id=payload.model_id,
+        colour_id=payload.colour_id, reorder_point=payload.reorder_point))
+
+
+@router.delete("/reorder-points/{rp_id}", status_code=status.HTTP_204_NO_CONTENT,
+               response_class=Response)
+async def delete_reorder_point(
+    rp_id: uuid.UUID,
+    user: CurrentUser = Depends(require_permission(P.MOTORCYCLE_CONFIG)),
+    svc: MotorcycleService = Depends(get_motorcycle_service),
+) -> Response:
+    """Stop monitoring a model/colour. Config only — no stock or history is touched."""
+    await svc.delete_reorder_point(tenant_id=user.tenant_id, user_id=user.id, rp_id=rp_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/low-stock", response_model=list[LowStockBikeOut])
+async def low_stock_bikes(
+    branch_id: uuid.UUID | None = Query(default=None),
+    user: CurrentUser = Depends(require_permission(P.MOTORCYCLE_READ)),
+    svc: MotorcycleService = Depends(get_motorcycle_service),
+) -> list[LowStockBikeOut]:
+    """Model/colours at or below their reorder point, worst first — branch-scoped."""
+    scope = resolve_branch_scope(user, branch_id)
+    return [LowStockBikeOut(**r) for r in await svc.low_stock_bikes(branch_ids=scope)]

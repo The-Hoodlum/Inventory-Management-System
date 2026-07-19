@@ -46,8 +46,19 @@ class AlertScheduler:
                 )
                 repo = AssistantRepository(session)
                 currency = await repo.tenant_currency()
+                # Bike model/colour thresholds live in the Motorcycle module — reuse that
+                # service rather than reimplementing the resolution here.
+                low_bikes: list[dict] = []
+                if "bike_stock" in kinds:
+                    from app.motorcycles.repository import MotorcycleRepository
+                    from app.motorcycles.service import MotorcycleService
+                    from app.repositories.audit_repo import AuditRepository
+
+                    moto = MotorcycleService(MotorcycleRepository(session), AuditRepository(session))
+                    low_bikes = await moto.low_stock_bikes()
                 svc = AlertService(repo, build_whatsapp_adapter(self._settings))
-                return await svc.run_due(kinds, currency=currency, today=today)
+                return await svc.run_due(
+                    kinds, currency=currency, today=today, low_bikes=low_bikes)
 
     async def run_cycle(self) -> dict:
         now = dt.datetime.now()

@@ -58,6 +58,7 @@ from app.models.inventory import (
 from app.models.motorcycle import (
     MotorcycleColour,
     MotorcycleModel,
+    MotorcycleReorderPoint,
     MotorcycleUnit,
     MotorcycleUnitEvent,
     MotorcycleVariant,
@@ -113,7 +114,7 @@ __all__ = [
     "Payment", "PaymentAllocation", "Receipt",
     "Return", "ReturnLine", "CreditNote", "CreditNoteLine",
     "MotorcycleModel", "MotorcycleVariant", "MotorcycleColour",
-    "MotorcycleUnit", "MotorcycleUnitEvent",
+    "MotorcycleUnit", "MotorcycleUnitEvent", "MotorcycleReorderPoint",
     "DispatchNote", "DispatchNoteLine",
     "Issuance", "IssuanceLine",
     "CustomerDelivery", "CustomerDeliveryLine",

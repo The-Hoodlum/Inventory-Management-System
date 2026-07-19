@@ -6,7 +6,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -20,6 +20,7 @@ from app.models import (
     IssuanceLine,
     MotorcycleColour,
     MotorcycleModel,
+    MotorcycleReorderPoint,
     MotorcycleUnit,
     MotorcycleUnitEvent,
     MotorcycleVariant,
@@ -261,6 +262,71 @@ class MotorcycleRepository:
             stmt = stmt.where(MotorcycleUnit.branch_id.in_(list(branch_ids)))
         rows = await self.session.execute(stmt)
         return {status: int(count) for status, count in rows.all()}
+
+    # -------------------- sellable stock by model + colour -------------------- #
+    async def sellable_counts(
+        self, *, branch_ids: Sequence[uuid.UUID] | None = None
+    ) -> list[tuple[uuid.UUID, uuid.UUID | None, uuid.UUID | None, int, int]]:
+        """(model_id, colour_id, branch_id, sellable, ever_held) per model/colour/branch.
+
+        Sellable = 'unassembled' or 'assembled'. A reserved unit is committed to a customer,
+        an on-hold unit is in the workshop, and a sold one is gone — none are stock you can
+        still sell.
+
+        ``ever_held`` counts units of ANY status, so a combo that has just sold its last unit
+        still appears with sellable=0. Grouping on sellable units alone would make that row
+        vanish entirely and the "out of stock" case could never fire — the very case that
+        matters most.
+        """
+        sellable = func.sum(
+            case((MotorcycleUnit.status.in_(("unassembled", "assembled")), 1), else_=0)
+        )
+        stmt = (
+            select(MotorcycleUnit.model_id, MotorcycleUnit.colour_id,
+                   MotorcycleUnit.branch_id, sellable, func.count())
+            .group_by(MotorcycleUnit.model_id, MotorcycleUnit.colour_id, MotorcycleUnit.branch_id)
+        )
+        if branch_ids is not None:
+            stmt = stmt.where(MotorcycleUnit.branch_id.in_(list(branch_ids)))
+        rows = await self.session.execute(stmt)
+        return [(m, c, b, int(s or 0), int(t)) for m, c, b, s, t in rows.all()]
+
+    async def list_reorder_points(self) -> list[MotorcycleReorderPoint]:
+        rows = await self.session.scalars(select(MotorcycleReorderPoint))
+        return list(rows.all())
+
+    async def get_reorder_point(
+        self, model_id: uuid.UUID, colour_id: uuid.UUID | None
+    ) -> MotorcycleReorderPoint | None:
+        stmt = select(MotorcycleReorderPoint).where(MotorcycleReorderPoint.model_id == model_id)
+        stmt = stmt.where(
+            MotorcycleReorderPoint.colour_id.is_(None) if colour_id is None
+            else MotorcycleReorderPoint.colour_id == colour_id
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def upsert_reorder_point(
+        self, *, tenant_id: uuid.UUID, model_id: uuid.UUID, colour_id: uuid.UUID | None,
+        reorder_point: int,
+    ) -> MotorcycleReorderPoint:
+        row = await self.get_reorder_point(model_id, colour_id)
+        if row is not None:
+            row.reorder_point = reorder_point
+        else:
+            row = MotorcycleReorderPoint(
+                tenant_id=tenant_id, model_id=model_id, colour_id=colour_id,
+                reorder_point=reorder_point,
+            )
+            self.session.add(row)
+        await self.session.flush()
+        return row
+
+    async def delete_reorder_point(self, row: MotorcycleReorderPoint) -> None:
+        await self.session.delete(row)
+        await self.session.flush()
+
+    async def get_reorder_point_by_id(self, rp_id: uuid.UUID) -> MotorcycleReorderPoint | None:
+        return await self.session.get(MotorcycleReorderPoint, rp_id)
 
     async def assembly_rollup(
         self, *, branch_id: uuid.UUID | None = None, branch_ids: Sequence[uuid.UUID] | None = None

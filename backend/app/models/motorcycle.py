@@ -139,3 +139,20 @@ class MotorcycleUnitEvent(Base):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     user_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+
+
+class MotorcycleReorderPoint(Base):
+    """Sellable-stock threshold for a model (optionally a specific colour; NULL colour is
+    the model-wide default). Drives the "bike colours running low" alert. Deliberately
+    separate from AssemblyTarget: that tunes assembly readiness, this answers "do we still
+    have any to sell". See ``database/sql/motorcycle_reorder_points.sql``."""
+
+    __tablename__ = "motorcycle_reorder_points"
+
+    id: Mapped[uuid.UUID] = mapped_column(_UUID, primary_key=True, server_default=text("gen_random_uuid()"))
+    tenant_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
+    model_id: Mapped[uuid.UUID] = mapped_column(_UUID, ForeignKey("motorcycle_models.id", ondelete="CASCADE"), nullable=False)
+    colour_id: Mapped[uuid.UUID | None] = mapped_column(_UUID, ForeignKey("motorcycle_colours.id", ondelete="CASCADE"), nullable=True)
+    reorder_point: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[dt.datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=text("now()"))
