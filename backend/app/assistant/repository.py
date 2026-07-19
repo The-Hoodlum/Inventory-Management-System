@@ -36,6 +36,7 @@ from app.models import (
     SalesDaily,
     StockMovement,
     Supplier,
+    User,
     UserRole,
     UserWarehouseAccess,
     Warehouse,
@@ -439,22 +440,47 @@ class AssistantRepository:
         return {"count": len(requests), "requests": requests}
 
     async def pending_order_requests(self, warehouse_ids: list[uuid.UUID]) -> dict:
-        """Branch requisitions awaiting approval — for the proactive admin alert."""
+        """Branch requisitions awaiting approval — for the proactive admin alert.
+
+        Carries WHO asked, from where, what for, and the actual lines, so an approver can
+        decide from the message instead of opening the app to find out what was requested.
+        """
         lines = func.count(RequestLine.id)
         stmt = (
-            select(RequestHeader.request_number, Warehouse.name, RequestHeader.requested_date, lines)
+            select(RequestHeader.id, RequestHeader.request_number, Warehouse.name,
+                   RequestHeader.requested_date, RequestHeader.purpose, User.full_name, lines)
             .join(Warehouse, Warehouse.id == RequestHeader.branch_id)
+            .outerjoin(User, User.id == RequestHeader.requested_by)
             .outerjoin(RequestLine, RequestLine.request_id == RequestHeader.id)
             .where(RequestHeader.status == "pending", RequestHeader.branch_id.in_(warehouse_ids))
-            .group_by(RequestHeader.request_number, Warehouse.name, RequestHeader.requested_date)
+            .group_by(RequestHeader.id, RequestHeader.request_number, Warehouse.name,
+                      RequestHeader.requested_date, RequestHeader.purpose, User.full_name)
             .order_by(RequestHeader.requested_date.desc())
             .limit(_MAX_ROWS)
         )
-        res = await self.session.execute(stmt)
+        rows = (await self.session.execute(stmt)).all()
+        if not rows:
+            return {"count": 0, "requests": []}
+
+        # The requested lines for exactly these requests, in one query.
+        ids = [r[0] for r in rows]
+        line_rows = (await self.session.execute(
+            select(RequestLine.request_id, Product.name, Product.sku, RequestLine.requested_qty)
+            .join(Product, Product.id == RequestLine.product_id)
+            .where(RequestLine.request_id.in_(ids))
+            .order_by(Product.name)
+        )).all()
+        by_request: dict[uuid.UUID, list[dict]] = {}
+        for rid, name, sku, qty in line_rows:
+            by_request.setdefault(rid, []).append(
+                {"name": name or sku, "qty": float(qty or 0)}
+            )
+
         requests = [
             {"request_number": num, "branch": branch, "item_count": int(n),
-             "requested_at": rd.date().isoformat()}
-            for num, branch, rd, n in res.all()
+             "requested_at": rd.date().isoformat(), "purpose": purpose,
+             "requested_by": who, "items": by_request.get(rid, [])}
+            for rid, num, branch, rd, purpose, who, n in rows
         ]
         return {"count": len(requests), "requests": requests}
 

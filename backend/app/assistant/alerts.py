@@ -86,15 +86,56 @@ def build_pending_pr_message(pending: dict) -> str | None:
     return f"📝 *{pending['count']} purchase request(s)* awaiting approval:\n" + "\n".join(lines)
 
 
+_MAX_REQUEST_ITEMS = 5      # per request, before "…and N more items"
+_MAX_DETAILED_REQUESTS = 3  # beyond this, fall back to one-liners so the message stays readable
+
+
+def _qty(value) -> str:
+    """Whole numbers without a trailing .0 — '10' not '10.0'."""
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return "?"
+    return str(int(f)) if f == int(f) else f"{f:g}"
+
+
+def _request_block(r: dict) -> list[str]:
+    """One request rendered with its requester, purpose and actual lines."""
+    purpose = str(r.get("purpose") or "request").replace("_", " ")
+    head = f"*{r['request_number']}* — {purpose}"
+    who = r.get("requested_by")
+    where = r.get("branch")
+    origin = " · ".join(x for x in (who, where) if x)
+    block = [head] + ([f"  From: {origin}"] if origin else [])
+    items = r.get("items") or []
+    for it in items[:_MAX_REQUEST_ITEMS]:
+        block.append(f"  - {it['name']} x {_qty(it['qty'])}")
+    hidden = len(items) - min(len(items), _MAX_REQUEST_ITEMS)
+    if hidden > 0:
+        block.append(f"  ...and {hidden} more item(s)")
+    if not items:
+        block.append(f"  ({r.get('item_count', 0)} item(s))")
+    return block
+
+
 def build_order_requests_message(pending: dict) -> str | None:
+    """Requisitions awaiting approval, WITH what was actually requested.
+
+    An approver should be able to decide from the message; listing only a request number
+    and an item count forced them into the app to find out what was being asked for. A few
+    requests are shown in full; beyond that it degrades to one-liners so a busy day doesn't
+    produce an unreadable wall of text."""
     reqs = pending.get("requests", [])
     if not reqs:
         return None
-    lines = [f"- {r['request_number']} ({r['branch']}): {r['item_count']} item(s)"
-             for r in reqs[:_MAX_BULLETS]]
-    more = len(reqs) - len(lines)
+    lines: list[str] = []
+    for r in reqs[:_MAX_DETAILED_REQUESTS]:
+        lines += _request_block(r)
+    for r in reqs[_MAX_DETAILED_REQUESTS:_MAX_BULLETS]:
+        lines.append(f"*{r['request_number']}* ({r['branch']}): {r['item_count']} item(s)")
+    more = len(reqs) - min(len(reqs), _MAX_BULLETS)
     if more > 0:
-        lines.append(f"...and {more} more")
+        lines.append(f"...and {more} more request(s)")
     return (f"📝 *{pending['count']} order request(s)* awaiting approval — reply "
             f"\"approve REQ-…\" or \"reject REQ-…\":\n" + "\n".join(lines))
 

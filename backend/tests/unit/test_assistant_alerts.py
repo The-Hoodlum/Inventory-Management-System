@@ -139,3 +139,45 @@ def test_bike_stock_alert_is_due_every_cycle():
     settings = SimpleNamespace(assistant_daily_summary_hour=18, assistant_weekly_report_weekday=0)
     kinds = due_alert_kinds(dt.datetime(2026, 7, 19, 9, 0), settings)
     assert "bike_stock" in kinds
+
+
+# ------------------- order requests: the requested items ------------------- #
+def _req(num, *, items, who="Joyce (Cashier)", branch="Lusaka Shop", purpose="shelf_replenishment"):
+    return {"request_number": num, "branch": branch, "purpose": purpose,
+            "requested_by": who, "item_count": len(items), "items": items}
+
+
+def test_order_request_message_shows_who_asked_and_what_for():
+    msg = build_order_requests_message({"count": 1, "requests": [
+        _req("REQ-2026-0031", items=[
+            {"name": "Brake pads CG125", "qty": 10.0},
+            {"name": "Chain lube 400ml", "qty": 6.0},
+        ])
+    ]})
+    assert "REQ-2026-0031" in msg
+    assert "shelf replenishment" in msg                      # purpose, underscores humanised
+    assert "Joyce (Cashier)" in msg and "Lusaka Shop" in msg
+    assert "Brake pads CG125 x 10" in msg              # whole qty, no trailing .0
+    assert "Chain lube 400ml x 6" in msg
+    assert "approve REQ-" in msg                       # the reply flow is preserved
+
+
+def test_order_request_message_truncates_long_item_lists():
+    items = [{"name": f"Part {i}", "qty": 1} for i in range(9)]
+    msg = build_order_requests_message({"count": 1, "requests": [_req("REQ-1", items=items)]})
+    assert "Part 0 x 1" in msg
+    assert "...and 4 more item(s)" in msg              # 9 items, 5 shown
+
+
+def test_order_request_message_degrades_to_one_liners_when_busy():
+    """Many pending requests must not produce an unreadable wall of text."""
+    reqs = [_req(f"REQ-{i}", items=[{"name": "Widget", "qty": 2}]) for i in range(6)]
+    msg = build_order_requests_message({"count": 6, "requests": reqs})
+    # First few in full detail, the rest summarised.
+    assert "Widget x 2" in msg
+    assert "REQ-5" in msg and "1 item(s)" in msg
+
+
+def test_order_request_message_handles_a_request_with_no_lines():
+    msg = build_order_requests_message({"count": 1, "requests": [_req("REQ-EMPTY", items=[])]})
+    assert "REQ-EMPTY" in msg and "0 item(s)" in msg
