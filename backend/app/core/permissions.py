@@ -76,3 +76,5 @@ class P:
     FINANCE_READ = "finance.read"                      # view accounts, balances, statements, reports
     FINANCE_ACCOUNT_MANAGE = "finance.account.manage"  # create / edit / deactivate finance accounts
     FINANCE_EXPENSE_MANAGE = "finance.expense.manage"  # record / edit / void expenses + categories (managers)
+    FINANCE_TRANSFER = "finance.transfer"              # move money between accounts (+ reverse)
+    FINANCE_HANDOVER = "finance.handover"              # record + confirm cash handovers

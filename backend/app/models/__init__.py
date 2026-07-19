@@ -26,6 +26,9 @@ from app.models.dispatch import (
 )
 from app.models.finance import (
     AccountMovement,
+    AccountTransfer,
+    CashHandover,
+    CashHandoverAttachment,
     Expense,
     ExpenseAttachment,
     ExpenseCategory,
@@ -121,4 +124,5 @@ __all__ = [
     "PartsSale",
     "FinancialAccount", "AccountMovement", "FinancePaymentAccountMap",
     "ExpenseCategory", "Expense", "ExpenseAttachment",
+    "AccountTransfer", "CashHandover", "CashHandoverAttachment",
 ]

@@ -20,7 +20,9 @@ import DeliveryNoteDetailPage from "@/pages/DeliveryNoteDetailPage";
 import DeliveryNotesPage from "@/pages/DeliveryNotesPage";
 import FinanceAccountsPage from "@/pages/FinanceAccountsPage";
 import FinanceExpensesPage from "@/pages/FinanceExpensesPage";
+import FinanceHandoversPage from "@/pages/FinanceHandoversPage";
 import FinancePaymentSetupPage from "@/pages/FinancePaymentSetupPage";
+import FinanceTransfersPage from "@/pages/FinanceTransfersPage";
 import ForecastPage from "@/pages/ForecastPage";
 import ImportHistoryPage from "@/pages/ImportHistoryPage";
 import ImportInventoryPage from "@/pages/ImportInventoryPage";
@@ -89,6 +91,8 @@ export default function App() {
         <Route path="/customers" element={<CustomersPage />} />
         <Route path="/finance/accounts" element={<FinanceAccountsPage />} />
         <Route path="/finance/expenses" element={<FinanceExpensesPage />} />
+        <Route path="/finance/transfers" element={<FinanceTransfersPage />} />
+        <Route path="/finance/handovers" element={<FinanceHandoversPage />} />
         <Route path="/finance/payment-setup" element={<FinancePaymentSetupPage />} />
         <Route path="/motorcycles" element={<MotorcyclesPage />} />
         <Route path="/motorcycles/setup" element={<MotorcycleSetupPage />} />

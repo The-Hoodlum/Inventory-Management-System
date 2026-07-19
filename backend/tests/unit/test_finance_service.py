@@ -17,10 +17,18 @@ from decimal import Decimal
 import pytest
 
 from app.core.exceptions import BusinessRuleError, PermissionDeniedError
-from app.finance.schemas import AccountCreate, AccountUpdate, ExpenseCreate
+from app.finance.schemas import (
+    AccountCreate,
+    AccountUpdate,
+    ExpenseCreate,
+    HandoverCreate,
+    TransferCreate,
+)
 from app.finance.service import FinanceService, derive_balance
 from app.models import (
     AccountMovement,
+    AccountTransfer,
+    CashHandover,
     Expense,
     ExpenseCategory,
     FinancePaymentAccountMap,
@@ -45,6 +53,9 @@ class _FakeFinanceRepo:
         self.categories: dict[uuid.UUID, ExpenseCategory] = {}
         self.expenses: dict[uuid.UUID, Expense] = {}
         self.attachments: dict[uuid.UUID, object] = {}
+        self.transfers: dict[uuid.UUID, AccountTransfer] = {}
+        self.handovers: dict[uuid.UUID, CashHandover] = {}
+        self.handover_attachments: dict[uuid.UUID, object] = {}
 
         class _S:
             async def flush(self_inner) -> None:
@@ -176,6 +187,52 @@ class _FakeFinanceRepo:
 
     async def attachment_expense_ids(self, expense_ids):
         return {eid for eid in expense_ids if eid in self.attachments}
+
+    # transfers
+    async def add_transfer(self, transfer):
+        if transfer.id is None:
+            transfer.id = uuid.uuid4()
+        transfer.created_at = dt.datetime.now(dt.UTC)
+        if transfer.status is None:
+            transfer.status = "completed"
+        if transfer.occurred_at is None:
+            transfer.occurred_at = transfer.created_at
+        self.transfers[transfer.id] = transfer
+        return transfer
+
+    async def get_transfer(self, transfer_id):
+        return self.transfers.get(transfer_id)
+
+    async def list_transfers(self, *, account_ids):
+        return list(self.transfers.values())
+
+    # handovers
+    async def add_handover(self, handover):
+        if handover.id is None:
+            handover.id = uuid.uuid4()
+        handover.created_at = dt.datetime.now(dt.UTC)
+        if handover.status is None:
+            handover.status = "PENDING_CONFIRMATION"
+        if handover.handover_datetime is None:
+            handover.handover_datetime = handover.created_at
+        self.handovers[handover.id] = handover
+        return handover
+
+    async def get_handover(self, handover_id):
+        return self.handovers.get(handover_id)
+
+    async def list_handovers(self, *, branch_ids, **f):
+        out = list(self.handovers.values())
+        if branch_ids is not None:
+            out = [h for h in out if h.branch_id in branch_ids]
+        return out
+
+    async def get_handover_attachment(self, handover_id):
+        return self.handover_attachments.get(handover_id)
+
+    async def upsert_handover_attachment(self, **kwargs):
+        self.handover_attachments[kwargs["handover_id"]] = kwargs
+        return kwargs
 
 
 def _svc():
@@ -438,3 +495,99 @@ async def test_duplicate_category_rejected():
     await svc.create_category(tenant_id=TENANT, user_id=USER, name="Rent")
     with pytest.raises(ConflictError):
         await svc.create_category(tenant_id=TENANT, user_id=USER, name="rent")
+
+
+# ------------------------------- transfers -------------------------------- #
+async def test_transfer_posts_paired_out_in_net_zero():
+    svc = _svc()
+    cash = await svc.create_account(tenant_id=TENANT, user_id=USER,
+        data=AccountCreate(name="Cash", type="CASH", branch_id=BRANCH_A, opening_balance=Decimal("1000")))
+    bank = await svc.create_account(tenant_id=TENANT, user_id=USER,
+        data=AccountCreate(name="Bank", type="BANK", branch_id=BRANCH_A, opening_balance=Decimal("0")))
+    await svc.create_transfer(tenant_id=TENANT, user_id=USER,
+        data=TransferCreate(from_account_id=cash.id, to_account_id=bank.id, amount=Decimal("400")))
+    assert await svc.account_balance(cash.id) == Decimal("600")
+    assert await svc.account_balance(bank.id) == Decimal("400")
+    # Net across the two accounts is unchanged (money only moved).
+    assert await svc.account_balance(cash.id) + await svc.account_balance(bank.id) == Decimal("1000")
+
+
+async def test_transfer_same_account_rejected_and_reverse_nets_back():
+    svc = _svc()
+    cash = await svc.create_account(tenant_id=TENANT, user_id=USER,
+        data=AccountCreate(name="Cash", type="CASH", branch_id=BRANCH_A, opening_balance=Decimal("500")))
+    bank = await svc.create_account(tenant_id=TENANT, user_id=USER,
+        data=AccountCreate(name="Bank", type="BANK", branch_id=BRANCH_A))
+    with pytest.raises(BusinessRuleError):
+        await svc.create_transfer(tenant_id=TENANT, user_id=USER,
+            data=TransferCreate(from_account_id=cash.id, to_account_id=cash.id, amount=Decimal("10")))
+    t = await svc.create_transfer(tenant_id=TENANT, user_id=USER,
+        data=TransferCreate(from_account_id=cash.id, to_account_id=bank.id, amount=Decimal("200")))
+    await svc.reverse_transfer(tenant_id=TENANT, user_id=USER, transfer_id=t.id, reason="mistake")
+    assert await svc.account_balance(cash.id) == Decimal("500")
+    assert await svc.account_balance(bank.id) == Decimal("0")
+
+
+# ------------------------------- handovers -------------------------------- #
+async def _cash_and_custody(svc):
+    cash = await svc.create_account(tenant_id=TENANT, user_id=USER,
+        data=AccountCreate(name="Till", type="CASH", branch_id=BRANCH_A, opening_balance=Decimal("1000")))
+    custody = await svc.create_account(tenant_id=TENANT, user_id=USER,
+        data=AccountCreate(name="HQ custody", type="CUSTODY", branch_id=None))
+    return cash, custody
+
+
+async def test_handover_out_on_record_not_counted_in_both():
+    svc = _svc()
+    cash, custody = await _cash_and_custody(svc)
+    h = await svc.create_handover(tenant_id=TENANT, user_id=USER,
+        data=HandoverCreate(from_account_id=cash.id, to_account_id=custody.id, branch_id=BRANCH_A,
+                            amount=Decimal("600"), received_by_name="Grace (accountant)"))
+    assert h.status == "PENDING_CONFIRMATION"
+    # Branch cash dropped by exactly the amount (money left the branch)...
+    assert await svc.account_balance(cash.id) == Decimal("400")
+    # ...but the destination has NOT been credited yet — not counted in both (in transit).
+    assert await svc.account_balance(custody.id) == Decimal("0")
+
+
+async def test_handover_confirm_matching_posts_in():
+    svc = _svc()
+    cash, custody = await _cash_and_custody(svc)
+    h = await svc.create_handover(tenant_id=TENANT, user_id=USER,
+        data=HandoverCreate(from_account_id=cash.id, to_account_id=custody.id, branch_id=BRANCH_A,
+                            amount=Decimal("600"), received_by_name="Grace"))
+    out = await svc.confirm_handover(tenant_id=TENANT, user_id=USER, handover_id=h.id,
+                                     confirmed_amount=Decimal("600"))
+    assert out.status == "CONFIRMED"
+    assert await svc.account_balance(custody.id) == Decimal("600")  # IN now posted
+
+
+async def test_short_handover_requires_reason_and_does_not_absorb_shortfall():
+    svc = _svc()
+    cash, custody = await _cash_and_custody(svc)
+    h = await svc.create_handover(tenant_id=TENANT, user_id=USER,
+        data=HandoverCreate(from_account_id=cash.id, to_account_id=custody.id, branch_id=BRANCH_A,
+                            amount=Decimal("600"), received_by_name="Grace"))
+    # A mismatch with NO reason is rejected (a shortfall is never silently absorbed).
+    with pytest.raises(BusinessRuleError):
+        await svc.confirm_handover(tenant_id=TENANT, user_id=USER, handover_id=h.id,
+                                   confirmed_amount=Decimal("550"))
+    out = await svc.confirm_handover(tenant_id=TENANT, user_id=USER, handover_id=h.id,
+                                     confirmed_amount=Decimal("550"), discrepancy_reason="short by 50")
+    assert out.status == "DISPUTED"
+    assert out.discrepancy_amount == Decimal("50")
+    # Branch already lost the full 600; only the 550 actually received is credited — the
+    # 50 shortfall is surfaced, not absorbed.
+    assert await svc.account_balance(cash.id) == Decimal("400")
+    assert await svc.account_balance(custody.id) == Decimal("550")
+
+
+async def test_handover_reverse_returns_cash_to_branch():
+    svc = _svc()
+    cash, custody = await _cash_and_custody(svc)
+    h = await svc.create_handover(tenant_id=TENANT, user_id=USER,
+        data=HandoverCreate(from_account_id=cash.id, to_account_id=custody.id, branch_id=BRANCH_A,
+                            amount=Decimal("600"), received_by_name="Grace"))
+    await svc.reverse_handover(tenant_id=TENANT, user_id=USER, handover_id=h.id, reason="cancelled")
+    # The reversing IN restores the branch cash; nothing left in transit.
+    assert await svc.account_balance(cash.id) == Decimal("1000")

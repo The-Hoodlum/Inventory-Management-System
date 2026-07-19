@@ -3,6 +3,7 @@
 // and empty groups are hidden. Always on the deep "ink" chrome so it reads in any theme.
 import { clsx } from "clsx";
 import {
+  ArrowLeftRight,
   Award,
   BarChart3,
   Bell,
@@ -17,6 +18,7 @@ import {
   Contact,
   CircleDollarSign,
   CreditCard,
+  HandCoins,
   HandHelping,
   Hammer,
   FileText,
@@ -90,6 +92,8 @@ const GROUPS: NavGroup[] = [
     items: [
       { to: "/finance/accounts", label: "Accounts", icon: Landmark, permission: "finance.read" },
       { to: "/finance/expenses", label: "Expenses", icon: Wallet, permission: "finance.read" },
+      { to: "/finance/transfers", label: "Transfers", icon: ArrowLeftRight, permission: "finance.read" },
+      { to: "/finance/handovers", label: "Cash Handovers", icon: HandCoins, permission: "finance.read" },
       { to: "/finance/payment-setup", label: "Payment Setup", icon: CreditCard, permission: "finance.read" },
     ],
   },

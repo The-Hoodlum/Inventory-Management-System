@@ -120,7 +120,79 @@ export const financeApi = {
     return api.upload<void>(`/finance/expenses/${id}/attachment`, form);
   },
   receiptUrl: (id: string) => `/finance/expenses/${id}/attachment`,
+
+  // Transfers between accounts (paired OUT + IN).
+  listTransfers: () => api.get<Transfer[]>("/finance/transfers"),
+  createTransfer: (body: { from_account_id: string; to_account_id: string; amount: string; reference_no?: string | null; notes?: string | null }) =>
+    api.post<Transfer>("/finance/transfers", body),
+  reverseTransfer: (id: string, reason: string) => api.post<Transfer>(`/finance/transfers/${id}/reverse`, { reason }),
+
+  // Cash handovers (two-sided).
+  listHandovers: (params: { branch_id?: string; status?: string; person?: string; date_from?: string; date_to?: string } = {}) => {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) if (v) p.set(k, v);
+    const qs = p.toString();
+    return api.get<Handover[]>(`/finance/handovers${qs ? `?${qs}` : ""}`);
+  },
+  createHandover: (body: HandoverInput) => api.post<Handover>("/finance/handovers", body),
+  confirmHandover: (id: string, confirmed_amount: string, discrepancy_reason?: string) =>
+    api.post<Handover>(`/finance/handovers/${id}/confirm`, { confirmed_amount, discrepancy_reason }),
+  reverseHandover: (id: string, reason: string) => api.post<Handover>(`/finance/handovers/${id}/reverse`, { reason }),
+  slipUrl: (id: string) => `/finance/handovers/${id}/slip`,
 };
+
+export interface Transfer {
+  id: string;
+  from_account_id: string;
+  from_account_name: string | null;
+  to_account_id: string;
+  to_account_name: string | null;
+  amount: string;
+  occurred_at: string;
+  reference_no: string | null;
+  notes: string | null;
+  status: "completed" | "reversed";
+  created_at: string;
+}
+
+export type HandoverStatus = "PENDING_CONFIRMATION" | "CONFIRMED" | "DISPUTED";
+
+export interface Handover {
+  id: string;
+  branch_id: string | null;
+  branch_name: string | null;
+  from_account_id: string;
+  from_account_name: string | null;
+  to_account_id: string;
+  to_account_name: string | null;
+  amount: string;
+  handover_datetime: string;
+  handed_over_by_name: string | null;
+  received_by_name: string;
+  reference_no: string | null;
+  notes: string | null;
+  denomination_breakdown: Record<string, unknown> | null;
+  status: HandoverStatus;
+  confirmed_amount: string | null;
+  discrepancy_amount: string | null;
+  discrepancy_reason: string | null;
+  reversed_at: string | null;
+  reverse_reason: string | null;
+  has_attachment: boolean;
+  created_at: string;
+}
+
+export interface HandoverInput {
+  from_account_id: string;
+  to_account_id: string;
+  branch_id?: string | null;
+  amount: string;
+  handed_over_by_name?: string | null;
+  received_by_name: string;
+  reference_no?: string | null;
+  notes?: string | null;
+  denomination_breakdown?: Record<string, number> | null;
+}
 
 export interface ExpenseCategory {
   id: string;

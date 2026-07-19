@@ -67,6 +67,10 @@ const STATUS_TONES: Record<string, string> = {
   active: "bg-emerald-100 text-emerald-700",
   inactive: "bg-slate-200 text-slate-600",
   discontinued: "bg-red-100 text-red-700",
+  // finance handover statuses
+  confirmed: "bg-emerald-100 text-emerald-700",
+  disputed: "bg-red-100 text-red-700",
+  reversed: "bg-slate-200 text-slate-600",
 };
 
 export function StatusBadge({ status }: { status: string }) {

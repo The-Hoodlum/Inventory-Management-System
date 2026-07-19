@@ -15,7 +15,10 @@ from sqlalchemy import func, select
 
 from app.models import (
     AccountMovement,
+    AccountTransfer,
     Branch,
+    CashHandover,
+    CashHandoverAttachment,
     Expense,
     ExpenseAttachment,
     ExpenseCategory,
@@ -307,3 +310,83 @@ class FinanceRepository:
             select(ExpenseAttachment.expense_id).where(ExpenseAttachment.expense_id.in_(list(expense_ids)))
         )
         return set(res.scalars().all())
+
+    # ------------------------------ transfers ---------------------------- #
+    async def add_transfer(self, transfer: AccountTransfer) -> AccountTransfer:
+        self.session.add(transfer)
+        await self.session.flush()
+        return transfer
+
+    async def get_transfer(self, transfer_id: uuid.UUID) -> AccountTransfer | None:
+        return await self.session.get(AccountTransfer, transfer_id)
+
+    async def list_transfers(
+        self, *, account_ids: Sequence[uuid.UUID] | None
+    ) -> list[AccountTransfer]:
+        stmt = select(AccountTransfer)
+        if account_ids is not None:
+            ids = list(account_ids)
+            stmt = stmt.where(
+                AccountTransfer.from_account_id.in_(ids) | AccountTransfer.to_account_id.in_(ids)
+            )
+        stmt = stmt.order_by(AccountTransfer.occurred_at.desc(), AccountTransfer.created_at.desc())
+        res = await self.session.execute(stmt)
+        return list(res.scalars().all())
+
+    # ------------------------------ handovers ---------------------------- #
+    async def add_handover(self, handover: CashHandover) -> CashHandover:
+        self.session.add(handover)
+        await self.session.flush()
+        return handover
+
+    async def get_handover(self, handover_id: uuid.UUID) -> CashHandover | None:
+        return await self.session.get(CashHandover, handover_id)
+
+    async def list_handovers(
+        self, *, branch_ids: Sequence[uuid.UUID] | None, status: str | None = None,
+        person: str | None = None, date_from: dt.date | None = None, date_to: dt.date | None = None,
+    ) -> list[CashHandover]:
+        stmt = select(CashHandover)
+        if branch_ids is not None:
+            stmt = stmt.where(CashHandover.branch_id.in_(list(branch_ids)))
+        if status is not None:
+            stmt = stmt.where(CashHandover.status == status)
+        if person is not None:
+            like = f"%{person.lower()}%"
+            stmt = stmt.where(
+                func.lower(func.coalesce(CashHandover.received_by_name, "")).like(like)
+                | func.lower(func.coalesce(CashHandover.handed_over_by_name, "")).like(like)
+            )
+        if date_from is not None:
+            stmt = stmt.where(CashHandover.handover_datetime >= dt.datetime.combine(date_from, dt.time()))
+        if date_to is not None:
+            stmt = stmt.where(CashHandover.handover_datetime <= dt.datetime.combine(date_to, dt.time.max))
+        stmt = stmt.order_by(CashHandover.handover_datetime.desc())
+        res = await self.session.execute(stmt)
+        return list(res.scalars().all())
+
+    async def get_handover_attachment(self, handover_id: uuid.UUID) -> CashHandoverAttachment | None:
+        res = await self.session.execute(
+            select(CashHandoverAttachment).where(CashHandoverAttachment.handover_id == handover_id)
+        )
+        return res.scalar_one_or_none()
+
+    async def upsert_handover_attachment(
+        self, *, tenant_id: uuid.UUID, handover_id: uuid.UUID, filename: str,
+        content_type: str | None, data: bytes, uploaded_by: uuid.UUID | None,
+    ) -> CashHandoverAttachment:
+        existing = await self.get_handover_attachment(handover_id)
+        if existing is not None:
+            existing.filename = filename
+            existing.content_type = content_type
+            existing.data = data
+            existing.uploaded_by = uploaded_by
+            await self.session.flush()
+            return existing
+        row = CashHandoverAttachment(
+            tenant_id=tenant_id, handover_id=handover_id, filename=filename,
+            content_type=content_type, data=data, uploaded_by=uploaded_by,
+        )
+        self.session.add(row)
+        await self.session.flush()
+        return row
