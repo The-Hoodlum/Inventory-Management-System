@@ -178,6 +178,11 @@ class Settings(BaseSettings):
     company_address: str = ""
     company_email: str = ""
     company_phone: str = ""
+    # Tax identifier printed on documents. The LABEL is configurable because it differs by
+    # country (TPIN in Zambia, VAT No. in the EU, TIN elsewhere) — the core stays generic.
+    # Both blank by default, so nothing is printed until a tenant sets them.
+    company_tax_label: str = "Tax ID"
+    company_tax_id: str = ""
     # Absolute path to a logo image (PNG/JPG) drawn on printed documents; empty = none.
     company_logo_path: str = ""
     po_terms: str = (

@@ -13,7 +13,7 @@ from typing import Any
 from fpdf import FPDF
 
 from app.core.config import settings
-from app.core.pdf_branding import draw_company_block, place_logo
+from app.core.pdf_branding import company_contact_lines, draw_company_block, place_logo
 from app.customer_delivery.schemas import CustomerDeliveryOut
 
 _CONTENT_W = 180.0
@@ -81,7 +81,7 @@ def build_customer_delivery_pdf(note: CustomerDeliveryOut) -> bytes:
     pdf.set_text_color(*_MUTED)
     company_bottom = draw_company_block(
         pdf, 15, pdf.get_y(), 90,
-        (settings.company_name, settings.company_address, settings.company_email, settings.company_phone),
+        company_contact_lines(include_name=True),
     )
 
     pdf.set_xy(115, top_y)

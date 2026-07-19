@@ -8,7 +8,7 @@ from typing import Any
 from fpdf import FPDF
 
 from app.core.config import settings
-from app.core.pdf_branding import draw_company_block, place_logo
+from app.core.pdf_branding import company_contact_lines, draw_company_block, place_logo
 from app.sales.schemas import InvoiceOut, QuotationOut
 
 _INK = (33, 37, 41)
@@ -93,7 +93,7 @@ def build_invoice_pdf(
     pdf.set_text_color(*_MUTED)
     left_bottom = draw_company_block(
         pdf, 15, pdf.get_y(), 90,
-        (settings.company_name, settings.company_address, settings.company_email, settings.company_phone),
+        company_contact_lines(include_name=True),
     )
 
     pdf.set_xy(115, top_y)
@@ -253,7 +253,7 @@ def build_quotation_pdf(q: QuotationOut, *, currency: str = "") -> bytes:
     pdf.set_text_color(*_MUTED)
     left_bottom = draw_company_block(
         pdf, 15, pdf.get_y(), 90,
-        (settings.company_name, settings.company_address, settings.company_email, settings.company_phone),
+        company_contact_lines(include_name=True),
     )
     pdf.set_xy(115, top_y)
     for label, value in (

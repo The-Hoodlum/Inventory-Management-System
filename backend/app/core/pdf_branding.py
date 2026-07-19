@@ -16,6 +16,23 @@ def _latin1(text: str) -> str:
     return str(text).encode("latin-1", "replace").decode("latin-1")
 
 
+def company_contact_lines(*, include_name: bool = False) -> tuple[str, ...]:
+    """The company block every document prints: address, email, phone, and the tax
+    identifier when configured.
+
+    Defined once so a detail added here (like the tax id) appears on EVERY document rather
+    than only the ones someone remembered to update. The tax label is configurable — TPIN,
+    VAT No., TIN — so nothing country-specific is baked into the core. Blank entries are
+    skipped by :func:`draw_company_block`.
+    """
+    tax = ""
+    if settings.company_tax_id:
+        label = (settings.company_tax_label or "Tax ID").strip()
+        tax = f"{label}: {settings.company_tax_id}"
+    lines = (settings.company_address, settings.company_email, settings.company_phone, tax)
+    return ((settings.company_name,) + lines) if include_name else lines
+
+
 def draw_company_block(pdf, x: float, y: float, width: float, lines) -> float:
     """Draw the company address block (name / address / email / phone) starting at (x, y),
     each line wrapped WITHIN ``width`` mm so it never bleeds into a right-hand meta column.
