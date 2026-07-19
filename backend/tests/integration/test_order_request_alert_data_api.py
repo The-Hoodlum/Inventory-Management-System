@@ -8,6 +8,8 @@ Requires a live database (DATABASE_URL); skipped otherwise.
 """
 from __future__ import annotations
 
+import base64
+import json
 import os
 import uuid
 
@@ -38,28 +40,40 @@ def _rand(p: str) -> str:
     return f"{p}-{uuid.uuid4().hex[:8]}"
 
 
-async def _headers(client) -> dict[str, str]:
+def _claims(token: str) -> dict:
+    p = token.split(".")[1]
+    p += "=" * (-len(p) % 4)
+    return json.loads(base64.urlsafe_b64decode(p))
+
+
+async def _headers(client):
     r = await client.post("/api/v1/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD})
     assert r.status_code == 200, r.text
-    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+    tok = r.json()["access_token"]
+    return {"Authorization": f"Bearer {tok}"}, _claims(tok)
 
 
-async def _alert_data(warehouse_id):
-    """Run the alert's own query, RLS-scoped, exactly as the scheduler would."""
-    from sqlalchemy import select, text
+async def _alert_data(tenant_id, warehouse_id):
+    """Run the alert's own query, RLS-scoped, exactly as the scheduler would.
+
+    The tenant MUST come from the caller (the login claims). Picking "the first tenant"
+    silently returns nothing when the database holds more than one, which reads as a
+    feature bug rather than a test bug.
+    """
+    from sqlalchemy import text
 
     from app.assistant.repository import AssistantRepository
     from app.db.session import AsyncSessionLocal
-    from app.models import Tenant
 
     async with AsyncSessionLocal() as s:
-        tid = await s.scalar(select(Tenant.id).limit(1))
-        await s.execute(text("SELECT set_config('app.current_tenant', :t, true)"), {"t": str(tid)})
+        await s.execute(text("SELECT set_config('app.current_tenant', :t, true)"),
+                        {"t": str(tenant_id)})
         return await AssistantRepository(s).pending_order_requests([uuid.UUID(str(warehouse_id))])
 
 
 async def test_pending_request_carries_requester_purpose_and_items(client):
-    h = await _headers(client)
+    h, claims = await _headers(client)
+    tenant_id = claims["tenant_id"]
     branch = (await client.post("/api/v1/branches", headers=h,
               json={"code": _rand("BR"), "name": _rand("Branch")})).json()["id"]
     wh = (await client.post("/api/v1/warehouses", headers=h, json={
@@ -75,8 +89,10 @@ async def test_pending_request_carries_requester_purpose_and_items(client):
     assert r.status_code == 201, r.text
     number = r.json()["request_number"]
 
-    data = await _alert_data(wh)
-    req = next(x for x in data["requests"] if x["request_number"] == number)
+    data = await _alert_data(tenant_id, wh)
+    matches = [x for x in data["requests"] if x["request_number"] == number]
+    assert matches, f"{number} missing from the alert data: {[r['request_number'] for r in data['requests']]}"
+    req = matches[0]
     assert req["item_count"] == 2
     assert req["purpose"] == "shelf_replenishment"
     assert req["requested_by"]                      # the creator's name is carried

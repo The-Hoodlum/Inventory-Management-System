@@ -56,9 +56,48 @@ class AlertScheduler:
 
                     moto = MotorcycleService(MotorcycleRepository(session), AuditRepository(session))
                     low_bikes = await moto.low_stock_bikes()
-                svc = AlertService(repo, build_whatsapp_adapter(self._settings))
-                return await svc.run_due(
+                adapter = build_whatsapp_adapter(self._settings)
+                svc = AlertService(repo, adapter)
+                sent = await svc.run_due(
                     kinds, currency=currency, today=today, low_bikes=low_bikes)
+                if "daily" in kinds:
+                    sent["branch_daily"] = await self._send_branch_digests(
+                        session, adapter, today=today, currency=currency)
+                return sent
+
+    async def _send_branch_digests(self, session, adapter, *, today, currency: str) -> int:
+        """One digest per branch, delivered to THAT branch's managers only.
+
+        The broadcast alerts go to every registered number in the tenant, which for a
+        per-branch report would send Lusaka's takings to the Solwezi manager. Recipients are
+        resolved by role within the branch, then filtered to those who registered a WhatsApp
+        number and have not opted out. Best-effort: a delivery failure never breaks the cycle.
+        """
+        from app.assistant.alerts import build_branch_daily_report
+        from app.notifications.repository import NotificationRepository
+        from app.reports.digest import DailyDigestService
+        from app.reports.repository import ReportsRepository
+        from app.reports.service import ReportsService
+
+        sent = 0
+        try:
+            digests = await DailyDigestService(
+                ReportsService(ReportsRepository(session)), session
+            ).branch_digests(today)
+            notif = NotificationRepository(session)
+            for d in digests:
+                recipients = await notif.recipients_with_role(
+                    "Branch Manager", branch_id=d["branch_id"])
+                phones = await notif.phones_for_push(recipients)
+                if not phones:
+                    continue
+                message = build_branch_daily_report(d, currency=currency)
+                for phone in set(phones.values()):
+                    await adapter.send(to=phone, text=message)
+                    sent += 1
+        except Exception:  # noqa: BLE001 — a digest must never break the alert cycle
+            logger.warning("branch_digest_failed")
+        return sent
 
     async def run_cycle(self) -> dict:
         now = dt.datetime.now()

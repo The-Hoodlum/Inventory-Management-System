@@ -40,6 +40,58 @@ def build_daily_summary_message(s: dict) -> str:
     return head + "\n" + "\n".join(body)
 
 
+_MAX_SOLD_LINES = 8
+
+
+def build_branch_daily_report(d: dict, *, currency: str = "") -> str:
+    """A branch's day: what sold, how it was paid for, and what else happened.
+
+    Figures come from the authoritative invoice-based sales aggregation, so this always
+    agrees with the Daily/Monthly Sales Report page. Sections are omitted rather than
+    printed empty — a quiet day should read short, not padded with zeros."""
+    ccy = currency
+    lines = [f"📊 *{d['branch']} — {d['date']}*"]
+
+    sold = d.get("sold") or []
+    if sold:
+        lines.append(f"*Sold* ({len(sold)} line(s)):")
+        for s in sold[:_MAX_SOLD_LINES]:
+            what = s.get("description") or s.get("ref") or "item"
+            qty = s.get("qty") or 0
+            qty_txt = f" x{int(qty)}" if float(qty) == int(qty) else f" x{qty:g}"
+            lines.append(f"  - {what}{qty_txt}: {ccy} {float(s.get('gross') or 0):,.2f}")
+        hidden = len(sold) - min(len(sold), _MAX_SOLD_LINES)
+        if hidden > 0:
+            lines.append(f"  ...and {hidden} more line(s)")
+    else:
+        lines.append("*Sold:* nothing today")
+
+    payments = d.get("payments") or []
+    if payments:
+        lines.append("*Money in:*")
+        for p in payments:
+            method = str(p.get("method", "")).replace("_", " ").title()
+            lines.append(f"  - {method}: {ccy} {float(p.get('amount') or 0):,.2f}")
+    lines.append(
+        f"*Totals:* sold {ccy} {float(d.get('gross_total') or 0):,.2f} | "
+        f"collected {ccy} {float(d.get('collected_total') or 0):,.2f}"
+    )
+    outstanding = float(d.get("outstanding_total") or 0)
+    if outstanding > 0:
+        lines.append(f"  ⚠️ Outstanding: {ccy} {outstanding:,.2f}")
+
+    activity = [
+        (d.get("order_requests", 0), "order request(s)"),
+        (d.get("transfers", 0), "transfer(s)"),
+        (d.get("issuances", 0), "issuance(s)"),
+        (d.get("bike_issues", 0), "bike issue(s)"),
+    ]
+    busy = [f"{n} {label}" for n, label in activity if n]
+    if busy:
+        lines.append("*Activity:* " + ", ".join(busy))
+    return "\n".join(lines)
+
+
 def build_weekly_report_message(perf: dict) -> str:
     ccy = perf.get("currency", "")
     lines = [f"📊 *Weekly report* {perf['period']}"]

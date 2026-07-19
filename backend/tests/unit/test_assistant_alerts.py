@@ -181,3 +181,59 @@ def test_order_request_message_degrades_to_one_liners_when_busy():
 def test_order_request_message_handles_a_request_with_no_lines():
     msg = build_order_requests_message({"count": 1, "requests": [_req("REQ-EMPTY", items=[])]})
     assert "REQ-EMPTY" in msg and "0 item(s)" in msg
+
+
+# --------------------------- branch daily digest --------------------------- #
+def _digest(**over):
+    base = {
+        "branch": "Lusaka", "date": "2026-07-19",
+        "sold": [{"kind": "part", "ref": "BP-01", "description": "Brake pads CG125", "qty": 2, "gross": 300.0},
+                 {"kind": "bike", "ref": "CH-9", "description": "TVS HLX125", "qty": 1, "gross": 18000.0}],
+        "payments": [{"method": "cash", "amount": 15000.0},
+                     {"method": "mobile_money", "amount": 3300.0}],
+        "gross_total": 18300.0, "collected_total": 18300.0, "outstanding_total": 0.0,
+        "order_requests": 2, "transfers": 1, "issuances": 0, "bike_issues": 3,
+    }
+    base.update(over)
+    return base
+
+
+def test_branch_daily_report_covers_sales_payments_and_activity():
+    from app.assistant.alerts import build_branch_daily_report
+
+    msg = build_branch_daily_report(_digest(), currency="ZMW")
+    assert "Lusaka" in msg and "2026-07-19" in msg
+    assert "Brake pads CG125 x2" in msg and "TVS HLX125 x1" in msg      # what sold
+    assert "Cash: ZMW 15,000.00" in msg                                  # by method
+    assert "Mobile Money: ZMW 3,300.00" in msg
+    assert "18,300.00" in msg                                            # totals
+    # Zero-count activity is omitted, non-zero is listed.
+    assert "2 order request(s)" in msg and "1 transfer(s)" in msg and "3 bike issue(s)" in msg
+    assert "issuance(s)" not in msg
+
+
+def test_branch_daily_report_flags_outstanding_money():
+    from app.assistant.alerts import build_branch_daily_report
+
+    msg = build_branch_daily_report(_digest(collected_total=10000.0, outstanding_total=8300.0), currency="ZMW")
+    assert "Outstanding: ZMW 8,300.00" in msg
+
+
+def test_branch_daily_report_reads_short_on_a_quiet_day():
+    from app.assistant.alerts import build_branch_daily_report
+
+    msg = build_branch_daily_report(
+        _digest(sold=[], payments=[], gross_total=0.0, collected_total=0.0, outstanding_total=0.0,
+                order_requests=0, transfers=0, issuances=0, bike_issues=0),
+        currency="ZMW")
+    assert "nothing today" in msg
+    assert "Money in" not in msg and "Activity" not in msg   # empty sections omitted, not zero-padded
+
+
+def test_branch_daily_report_truncates_a_long_sales_list():
+    from app.assistant.alerts import build_branch_daily_report
+
+    sold = [{"kind": "part", "ref": f"P{i}", "description": f"Part {i}", "qty": 1, "gross": 10.0}
+            for i in range(12)]
+    msg = build_branch_daily_report(_digest(sold=sold), currency="ZMW")
+    assert "...and 4 more line(s)" in msg    # 12 lines, 8 shown
