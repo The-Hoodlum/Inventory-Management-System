@@ -3,12 +3,18 @@ delegation flow into AssistantService (all with fakes — no DB, no network)."""
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
+import hmac
 import uuid
 from types import SimpleNamespace
 
 from app.assistant.whatsapp import MockWhatsAppAdapter
 from app.integrations.whatsapp.service import WhatsAppChannelService
-from app.integrations.whatsapp.utils import parse_inbound, verify_subscription
+from app.integrations.whatsapp.utils import (
+    parse_inbound,
+    verify_signature,
+    verify_subscription,
+)
 
 TENANT = str(uuid.uuid4())
 
@@ -28,6 +34,52 @@ def test_verify_subscription_rejects_bad_or_missing_token():
     assert verify_subscription(mode="subscribe", token="x", challenge="42", verify_token="T") is None
     assert verify_subscription(mode="subscribe", token="T", challenge="42", verify_token=None) is None
     assert verify_subscription(mode=None, token="T", challenge="42", verify_token="T") is None
+
+
+# --------------------------- signature (inbound auth) ---------------------- #
+SECRET = "app-secret"
+
+
+def _sign(body: bytes, secret: str = SECRET) -> str:
+    return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+
+
+def test_signature_accepts_a_genuine_meta_payload():
+    body = b'{"entry":[]}'
+    assert verify_signature(body=body, header=_sign(body), app_secret=SECRET) is True
+
+
+def test_signature_rejects_a_forged_or_tampered_body():
+    body = b'{"entry":[]}'
+    good = _sign(body)
+    # Body altered after signing -> HMAC no longer matches.
+    assert verify_signature(body=b'{"entry":[{"evil":1}]}', header=good, app_secret=SECRET) is False
+    # Signed with a different secret (attacker doesn't know ours).
+    assert verify_signature(body=body, header=_sign(body, "wrong-secret"), app_secret=SECRET) is False
+
+
+def test_signature_rejects_missing_or_malformed_header():
+    body = b'{"entry":[]}'
+    assert verify_signature(body=body, header=None, app_secret=SECRET) is False
+    assert verify_signature(body=body, header="", app_secret=SECRET) is False
+    assert verify_signature(body=body, header="deadbeef", app_secret=SECRET) is False   # no sha256= prefix
+    assert verify_signature(body=body, header="sha256=nothex", app_secret=SECRET) is False
+
+
+def test_signature_check_disabled_when_no_app_secret_configured():
+    # Keeps mock/local setups working; production must set WHATSAPP_APP_SECRET.
+    assert verify_signature(body=b"anything", header=None, app_secret=None) is True
+    assert verify_signature(body=b"anything", header=None, app_secret="") is True
+
+
+def test_service_exposes_signature_check():
+    svc = WhatsAppChannelService(
+        assistant=None, adapter=MockWhatsAppAdapter(), session=None,
+        default_tenant_id=TENANT, verify_token="T", app_secret=SECRET,
+    )
+    body = b'{"entry":[]}'
+    assert svc.verify_signature(body=body, header=_sign(body)) is True
+    assert svc.verify_signature(body=body, header="sha256=bad") is False
 
 
 # ------------------------------- parsing ----------------------------------- #

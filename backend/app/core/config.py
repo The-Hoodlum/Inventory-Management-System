@@ -136,6 +136,10 @@ class Settings(BaseSettings):
     whatsapp_business_account_id: str | None = None
     whatsapp_access_token: str | None = None
     whatsapp_verify_token: str | None = None    # for the Meta webhook GET handshake
+    # Meta app secret — authenticates inbound webhooks (HMAC-SHA256 of the raw body vs the
+    # X-Hub-Signature-256 header). Unset -> signature verification is DISABLED (fine for
+    # mock/local; always set it in production, the webhook is otherwise unauthenticated).
+    whatsapp_app_secret: str | None = None
     whatsapp_api_base_url: str = "https://graph.facebook.com/v23.0"
     # Single-tenant inbound routing for the Meta webhook (one business = one tenant).
     # Unset -> the webhook acknowledges but does not route (multi-tenant phone->tenant

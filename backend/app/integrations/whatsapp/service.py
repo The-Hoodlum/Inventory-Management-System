@@ -15,7 +15,11 @@ from app.assistant.service import AssistantService
 from app.assistant.whatsapp import WhatsAppAdapter
 from app.core.logging import get_logger
 from app.integrations.whatsapp.schemas import SendResult, WebhookAck
-from app.integrations.whatsapp.utils import parse_inbound, verify_subscription
+from app.integrations.whatsapp.utils import (
+    parse_inbound,
+    verify_signature,
+    verify_subscription,
+)
 
 logger = get_logger(__name__)
 
@@ -23,18 +27,24 @@ logger = get_logger(__name__)
 class WhatsAppChannelService:
     def __init__(
         self, *, assistant: AssistantService, adapter: WhatsAppAdapter, session: AsyncSession,
-        default_tenant_id: str | None, verify_token: str | None,
+        default_tenant_id: str | None, verify_token: str | None, app_secret: str | None = None,
     ) -> None:
         self._assistant = assistant
         self._adapter = adapter
         self._session = session
         self._default_tenant_id = default_tenant_id
         self._verify_token = verify_token
+        self._app_secret = app_secret
 
     # ----------------------------- verification ------------------------ #
     def verify(self, *, mode: str | None, token: str | None, challenge: str | None) -> str | None:
         return verify_subscription(mode=mode, token=token, challenge=challenge,
                                    verify_token=self._verify_token)
+
+    def verify_signature(self, *, body: bytes, header: str | None) -> bool:
+        """Authenticate an inbound webhook against the Meta app secret. True when the
+        request is genuine (or when no app secret is configured, i.e. verification off)."""
+        return verify_signature(body=body, header=header, app_secret=self._app_secret)
 
     # ------------------------------- outbound -------------------------- #
     async def send_text_message(self, to: str, text_body: str) -> SendResult:

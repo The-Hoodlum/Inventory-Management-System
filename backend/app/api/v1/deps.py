@@ -469,6 +469,8 @@ def get_whatsapp_channel_service(db: AsyncSession = Depends(get_db)) -> WhatsApp
         session=db,
         default_tenant_id=settings.whatsapp_default_tenant_id,
         verify_token=settings.whatsapp_verify_token,
+        # Authenticates inbound webhooks (X-Hub-Signature-256). Unset -> check disabled.
+        app_secret=settings.whatsapp_app_secret,
     )
 
 
