@@ -614,41 +614,61 @@ class SalesService:
     # ------------------- bike-sale notification (branch managers) -------- #
     async def _notify_bike_sale(
         self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, branch_id, invoice, customer_id,
-        bikes: list[tuple[str, str | None, Decimal]], payments,
+        bikes: list[tuple[str, str | None, str | None, Decimal]], payments,
     ) -> None:
-        """Tell the branch's managers a bike was sold, with the detail they'd otherwise have
-        to open the app for: what went out, for how much, to whom, and how it was paid.
+        """Tell the branch's managers a bike was sold, with everything they'd otherwise have
+        to open the app for: the bike (model, colour, chassis) and its price, who bought it
+        (name, phone, address), what they paid and how, the invoice, and any balance still
+        owed.
 
-        ``bikes`` is [(chassis, model_name, price)]. Pushed to WhatsApp explicitly (push=True)
-        rather than by inflating severity — a sale is routine `info`, just worth knowing.
-        Best-effort throughout: the notification service isolates any failure from the sale.
+        ``bikes`` is [(chassis, model_name, colour_name, price)]. Pushed to WhatsApp
+        explicitly (push=True) rather than by inflating severity — a sale is routine `info`,
+        just worth knowing. Best-effort: the notification service isolates any failure from
+        the sale, and the outstanding balance reuses the SAME ``_invoice_balance_zmw`` the
+        payment path uses, so the figure can never disagree with the invoice.
         """
         if self.notifications is None:
             return
         from app.notifications import events as N_EVENTS
 
-        names = await self.repo.customer_names([customer_id]) if customer_id else {}
-        customer = names.get(customer_id) or "Walk-in customer"
+        details = await self.repo.customer_details([customer_id]) if customer_id else {}
+        cust = details.get(customer_id) or {}
         currency = await self.repo.base_currency(tenant_id)
-        total = sum((p for _c, _m, p in bikes), Decimal("0"))
+        total = sum((p for _c, _m, _col, p in bikes), Decimal("0"))
 
+        def _bike_label(model: str | None, colour: str | None) -> str:
+            return f"{model or 'Motorcycle'}{f' ({colour})' if colour else ''}"
+
+        lines: list[str] = []
         if len(bikes) == 1:
-            chassis, model, price = bikes[0]
-            title = f"Bike sold: {model or 'Motorcycle'} — {currency} {_f(price):,.2f}"
-            first = f"Chassis {chassis}"
+            chassis, model, colour, price = bikes[0]
+            title = f"Bike sold: {_bike_label(model, colour)} — {currency} {_f(price):,.2f}"
+            lines.append(f"Chassis: {chassis}")
         else:
             title = f"{len(bikes)} bikes sold — {currency} {_f(total):,.2f}"
-            first = "; ".join(f"{m or 'Motorcycle'} ({c})" for c, m, _p in bikes[:4])
-            if len(bikes) > 4:
-                first += f" …+{len(bikes) - 4} more"
-        lines = [first, f"Customer: {customer}", f"Invoice: {invoice.invoice_number}"]
+            lines += [
+                f"- {_bike_label(m, col)} | {c} | {currency} {_f(p):,.2f}"
+                for c, m, col, p in bikes
+            ]
+        lines.append(f"Customer: {cust.get('name') or 'Walk-in customer'}")
+        if cust.get("phone"):
+            lines.append(f"Phone: {cust['phone']}")
+        if cust.get("address"):
+            lines.append(f"Address: {cust['address']}")
+        lines.append(f"Invoice: {invoice.invoice_number}")
         if payments:
-            paid = ", ".join(
+            paid_total = sum((_d(p.amount) for p in payments), Decimal("0"))
+            how = ", ".join(
                 f"{str(p.method).replace('_', ' ')} {currency} {_f(p.amount):,.2f}" for p in payments
             )
-            lines.append(f"Paid: {paid}")
+            lines.append(f"Paid: {currency} {_f(paid_total):,.2f} ({how})")
         else:
-            lines.append("Paid: unpaid (invoice issued)")
+            lines.append("Paid: nothing yet — invoice issued")
+        balance = self._invoice_balance_zmw(invoice)
+        lines.append(
+            f"Balance due: {currency} {_f(balance):,.2f}" if balance > Decimal("0.0001")
+            else "Balance: fully paid"
+        )
         await self.notifications.notify(
             tenant_id=tenant_id, event_type=N_EVENTS.BIKE_SOLD, severity="info", push=True,
             title=title, body="\n".join(lines), href="/sales",
@@ -733,7 +753,8 @@ class SalesService:
         await self._notify_bike_sale(
             tenant_id=tenant_id, user_id=user_id, branch_id=payload.branch_id or unit.branch_id,
             invoice=invoice, customer_id=customer_id,
-            bikes=[(unit.chassis_number, unit.model_name, price)], payments=payload.payments,
+            bikes=[(unit.chassis_number, unit.model_name, unit.colour_name, price)],
+            payments=payload.payments,
         )
         fresh = await self.repo.get_invoice(invoice.id)
         return BikeSaleResult(
@@ -820,7 +841,7 @@ class SalesService:
         await self._notify_bike_sale(
             tenant_id=tenant_id, user_id=user_id, branch_id=branch_id, invoice=invoice,
             customer_id=customer_id,
-            bikes=[(u.chassis_number, u.model_name, p) for u, p, _a in prepared],
+            bikes=[(u.chassis_number, u.model_name, u.colour_name, p) for u, p, _a in prepared],
             payments=payload.payments,
         )
         fresh = await self.repo.get_invoice(invoice.id)

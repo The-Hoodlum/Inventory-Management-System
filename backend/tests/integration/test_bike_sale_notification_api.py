@@ -92,14 +92,26 @@ async def _notifications_for(tenant_id, user_id) -> list[dict]:
                  "severity": n.severity, "branch_id": n.branch_id} for n in rows]
 
 
-async def _assembled_unit(client, h, *, price, branch_id=None) -> dict:
+async def _assembled_unit(client, h, *, price, branch_id=None, colour=None) -> dict:
     model = (await client.post("/api/v1/motorcycles/models", headers=h,
              json={"name": _rand("Model"), "brand": "TVS"})).json()
     body = {"chassis_number": _rand("CH"), "engine_number": _rand("EN"),
             "model_id": model["id"], "selling_price": price}
     if branch_id:
         body["branch_id"] = branch_id
+    if colour:
+        c = await client.post("/api/v1/motorcycles/colours", headers=h, json={"name": colour})
+        assert c.status_code == 201, c.text
+        body["colour_id"] = c.json()["id"]
     r = await client.post("/api/v1/motorcycles/units", headers=h, json=body)
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+async def _customer(client, h, *, name, phone, city) -> dict:
+    r = await client.post("/api/v1/customers", headers=h, json={
+        "name": name, "phone": phone,
+        "addresses": [{"line1": "12 Cairo Road", "city": city, "is_default": True}]})
     assert r.status_code == 201, r.text
     return r.json()
 
@@ -112,11 +124,13 @@ async def test_bike_sale_alerts_the_branch_manager_with_full_details(client):
     branch = (await client.post("/api/v1/branches", headers=h,
               json={"code": _rand("BR"), "name": _rand("Branch")})).json()["id"]
     manager = await _branch_manager(client, h, [branch])
-    unit = await _assembled_unit(client, h, price=18000, branch_id=branch)
+    colour = _rand("MetallicRed")
+    unit = await _assembled_unit(client, h, price=18000, branch_id=branch, colour=colour)
+    buyer = await _customer(client, h, name=_rand("Grace"), phone="+260971234567", city="Lusaka")
 
     r = await client.post("/api/v1/sales/bike-sale", headers=h, json={
         "unit_id": unit["id"], "branch_id": branch, "price": 18000,
-        "payments": [{"method": "cash", "amount": 18000}]})
+        "customer_id": buyer["id"], "payments": [{"method": "cash", "amount": 18000}]})
     assert r.status_code == 201, r.text
 
     notes = [n for n in await _notifications_for(tenant_id, manager) if n["event_type"] == "bike.sold"]
@@ -124,11 +138,39 @@ async def test_bike_sale_alerts_the_branch_manager_with_full_details(client):
     note = notes[0]
     # Routine event -> info severity (push is opted into separately, not via severity).
     assert note["severity"] == "info"
-    assert "18,000" in note["title"]                      # how much
-    assert unit["chassis_number"] in note["body"]         # what went out
-    assert "Customer:" in note["body"]                    # to whom
-    assert "cash" in note["body"].lower()                 # how it was paid
-    assert "Invoice:" in note["body"]
+    body = note["body"]
+    assert unit["model_name"] in note["title"]            # model
+    assert colour in note["title"]                        # colour
+    assert "18,000" in note["title"]                      # price charged
+    assert unit["chassis_number"] in body                 # which bike
+    assert buyer["name"] in body                          # customer name
+    assert "+260971234567" in body                        # phone
+    assert "Cairo Road" in body and "Lusaka" in body      # address
+    assert "Invoice:" in body                             # invoice number
+    assert "cash" in body.lower() and "Paid:" in body     # how much and how
+    assert "fully paid" in body.lower()                   # nothing outstanding
+
+
+async def test_partial_payment_reports_the_outstanding_balance(client):
+    h, claims = await _login(client)
+    tenant_id = claims["tenant_id"]
+    await _enable_sales(client, h)
+    branch = (await client.post("/api/v1/branches", headers=h,
+              json={"code": _rand("BR"), "name": _rand("Branch")})).json()["id"]
+    manager = await _branch_manager(client, h, [branch])
+    unit = await _assembled_unit(client, h, price=20000, branch_id=branch, colour=_rand("Blue"))
+    buyer = await _customer(client, h, name=_rand("Mwansa"), phone="+260955000111", city="Ndola")
+
+    # Pays 15,000 of 20,000 -> 5,000 still owed.
+    r = await client.post("/api/v1/sales/bike-sale", headers=h, json={
+        "unit_id": unit["id"], "branch_id": branch, "price": 20000,
+        "customer_id": buyer["id"], "payments": [{"method": "mobile_money", "amount": 15000}]})
+    assert r.status_code == 201, r.text
+
+    note = next(n for n in await _notifications_for(tenant_id, manager) if n["event_type"] == "bike.sold")
+    body = note["body"]
+    assert "15,000" in body and "mobile money" in body.lower()
+    assert "Balance due:" in body and "5,000" in body
 
 
 async def test_manager_of_another_branch_is_not_told(client):
