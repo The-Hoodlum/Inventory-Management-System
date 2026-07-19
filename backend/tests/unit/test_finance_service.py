@@ -19,7 +19,7 @@ import pytest
 from app.core.exceptions import BusinessRuleError, PermissionDeniedError
 from app.finance.schemas import AccountCreate, AccountUpdate
 from app.finance.service import FinanceService, derive_balance
-from app.models import AccountMovement, FinancialAccount
+from app.models import AccountMovement, FinancePaymentAccountMap, FinancialAccount
 from tests.conftest import FakeAuditRepo
 
 TENANT = uuid.uuid4()
@@ -35,6 +35,7 @@ class _FakeFinanceRepo:
     def __init__(self) -> None:
         self.accounts: dict[uuid.UUID, FinancialAccount] = {}
         self.movements: list[AccountMovement] = []
+        self.mappings: list[FinancePaymentAccountMap] = []
 
         class _S:
             async def flush(self_inner) -> None:
@@ -96,6 +97,26 @@ class _FakeFinanceRepo:
 
     async def get_movement(self, movement_id):
         return next((m for m in self.movements if m.id == movement_id), None)
+
+    async def unreversed_for_reference(self, reference_type, reference_id):
+        reversed_ids = {m.reversal_of for m in self.movements if m.reversal_of is not None}
+        return [
+            m for m in self.movements
+            if m.reference_type == reference_type and m.reference_id == reference_id
+            and m.reversal_of is None and m.id not in reversed_ids
+        ]
+
+    async def mapping_for(self, branch_id, method):
+        return next((m for m in self.mappings if m.branch_id == branch_id and m.method == method), None)
+
+    async def branch_has_mappings(self, branch_id):
+        return any(m.branch_id == branch_id for m in self.mappings)
+
+    async def upsert_mapping(self, *, tenant_id, branch_id, method, account_id):
+        row = FinancePaymentAccountMap(tenant_id=tenant_id, branch_id=branch_id, method=method, account_id=account_id)
+        row.id = uuid.uuid4()
+        self.mappings.append(row)
+        return row
 
 
 def _svc():
@@ -206,3 +227,94 @@ async def test_scoped_user_sees_tenant_wide_custody():
     # A branch-scoped user can still see (and later hand over to) tenant-wide custody.
     out = await svc.get_account(account_id=custody.id, allowed_branch_ids=frozenset({BRANCH_A}))
     assert out.id == custody.id
+
+
+# ---------------------- money-in from invoice payments -------------------- #
+async def _account(svc, name, typ, branch):
+    return await svc.create_account(
+        tenant_id=TENANT, user_id=USER, data=AccountCreate(name=name, type=typ, branch_id=branch))
+
+
+async def test_money_in_dormant_without_mappings():
+    svc = _svc()
+    cash = await _account(svc, "Cash", "CASH", BRANCH_A)
+    inv = uuid.uuid4()
+    posted = await svc.post_invoice_payments(
+        tenant_id=TENANT, user_id=USER, branch_id=BRANCH_A, invoice_id=inv,
+        invoice_number="INV-1", lines=[("cash", Decimal("300"))])
+    assert posted == []  # branch has no mappings -> nothing posted (sales untouched)
+    assert await svc.account_balance(cash.id) == Decimal("0")
+
+
+async def test_cash_payment_posts_in_to_mapped_account():
+    svc = _svc()
+    cash = await _account(svc, "Cash", "CASH", BRANCH_A)
+    await svc.set_mapping(tenant_id=TENANT, user_id=USER, branch_id=BRANCH_A, method="cash", account_id=cash.id)
+    inv = uuid.uuid4()
+    posted = await svc.post_invoice_payments(
+        tenant_id=TENANT, user_id=USER, branch_id=BRANCH_A, invoice_id=inv,
+        invoice_number="INV-1", lines=[("cash", Decimal("300"))])
+    assert len(posted) == 1 and posted[0].direction == "IN"
+    assert await svc.account_balance(cash.id) == Decimal("300")
+
+
+async def test_split_payment_posts_one_per_method_to_correct_accounts():
+    svc = _svc()
+    cash = await _account(svc, "Cash", "CASH", BRANCH_A)
+    bank = await _account(svc, "Bank", "BANK", BRANCH_A)
+    await svc.set_mapping(tenant_id=TENANT, user_id=USER, branch_id=BRANCH_A, method="cash", account_id=cash.id)
+    await svc.set_mapping(tenant_id=TENANT, user_id=USER, branch_id=BRANCH_A, method="bank_transfer", account_id=bank.id)
+    inv = uuid.uuid4()
+    lines = [("cash", Decimal("120")), ("bank_transfer", Decimal("80"))]
+    posted = await svc.post_invoice_payments(
+        tenant_id=TENANT, user_id=USER, branch_id=BRANCH_A, invoice_id=inv,
+        invoice_number="INV-2", lines=lines)
+    assert len(posted) == 2  # one movement per line
+    assert await svc.account_balance(cash.id) == Decimal("120")
+    assert await svc.account_balance(bank.id) == Decimal("80")
+    # Reconciles EXACTLY with the payment total — no double-count, no second source.
+    total_in = sum(m.amount for m in posted)
+    assert total_in == sum(amt for _m, amt in lines) == Decimal("200")
+
+
+async def test_unmapped_method_on_active_branch_fails_loudly():
+    svc = _svc()
+    cash = await _account(svc, "Cash", "CASH", BRANCH_A)
+    await svc.set_mapping(tenant_id=TENANT, user_id=USER, branch_id=BRANCH_A, method="cash", account_id=cash.id)
+    inv = uuid.uuid4()
+    # The branch is finance-active (has a cash mapping) but 'mobile_money' is unmapped —
+    # must fail loudly rather than silently dropping the money.
+    with pytest.raises(BusinessRuleError):
+        await svc.post_invoice_payments(
+            tenant_id=TENANT, user_id=USER, branch_id=BRANCH_A, invoice_id=inv,
+            invoice_number="INV-3", lines=[("mobile_money", Decimal("50"))])
+
+
+async def test_void_reverses_payment_movements_keeping_originals():
+    svc = _svc()
+    cash = await _account(svc, "Cash", "CASH", BRANCH_A)
+    await svc.set_mapping(tenant_id=TENANT, user_id=USER, branch_id=BRANCH_A, method="cash", account_id=cash.id)
+    inv = uuid.uuid4()
+    await svc.post_invoice_payments(
+        tenant_id=TENANT, user_id=USER, branch_id=BRANCH_A, invoice_id=inv,
+        invoice_number="INV-4", lines=[("cash", Decimal("500"))])
+    assert await svc.account_balance(cash.id) == Decimal("500")
+    reversals = await svc.reverse_reference(
+        tenant_id=TENANT, user_id=USER, reference_type="invoice_payment",
+        reference_id=inv, reason="voided")
+    assert len(reversals) == 1 and reversals[0].direction == "OUT"
+    assert await svc.account_balance(cash.id) == Decimal("0")  # money-in reversed
+    # A second void attempt reverses nothing (originals already cancelled; none deleted).
+    again = await svc.reverse_reference(
+        tenant_id=TENANT, user_id=USER, reference_type="invoice_payment",
+        reference_id=inv, reason="voided again")
+    assert again == []
+
+
+async def test_mapping_rejects_foreign_branch_account():
+    svc = _svc()
+    bank_b = await _account(svc, "Bank B", "BANK", BRANCH_B)
+    # Mapping branch A's method to an account that belongs to branch B is rejected.
+    with pytest.raises(BusinessRuleError):
+        await svc.set_mapping(tenant_id=TENANT, user_id=USER, branch_id=BRANCH_A,
+                              method="bank_transfer", account_id=bank_b.id)

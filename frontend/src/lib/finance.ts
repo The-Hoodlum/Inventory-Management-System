@@ -46,6 +46,32 @@ export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
   CUSTODY: "Custody",
 };
 
+// Sales payment methods that can be mapped to a finance account (mirrors the backend).
+export type PaymentMethod =
+  | "cash" | "card" | "mobile_money" | "bank_transfer" | "cheque" | "store_credit";
+
+export const PAYMENT_METHODS: PaymentMethod[] = [
+  "cash", "mobile_money", "bank_transfer", "card", "cheque", "store_credit",
+];
+
+export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+  cash: "Cash",
+  mobile_money: "Mobile money",
+  bank_transfer: "Bank transfer",
+  card: "Card",
+  cheque: "Cheque",
+  store_credit: "Store credit",
+};
+
+export interface PaymentMapping {
+  id: string;
+  branch_id: string;
+  branch_name: string | null;
+  method: PaymentMethod;
+  account_id: string;
+  account_name: string | null;
+}
+
 export const financeApi = {
   listAccounts: (params: { branch_id?: string; active_only?: boolean; type?: string } = {}) => {
     const p = new URLSearchParams();
@@ -59,4 +85,10 @@ export const financeApi = {
   createAccount: (body: AccountCreateInput) => api.post<FinanceAccount>("/finance/accounts", body),
   updateAccount: (id: string, body: AccountUpdateInput) =>
     api.patch<FinanceAccount>(`/finance/accounts/${id}`, body),
+
+  // Money-in: per-branch payment-method -> account mapping.
+  listMappings: () => api.get<PaymentMapping[]>("/finance/payment-mappings"),
+  setMapping: (body: { branch_id: string; method: PaymentMethod; account_id: string }) =>
+    api.put<PaymentMapping>("/finance/payment-mappings", body),
+  deleteMapping: (id: string) => api.del<void>(`/finance/payment-mappings/${id}`),
 };

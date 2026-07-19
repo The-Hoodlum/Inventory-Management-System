@@ -61,6 +61,26 @@ class AccountBalanceOut(AccountOut):
     balance: Decimal
 
 
+PaymentMethod = Literal["cash", "card", "mobile_money", "bank_transfer", "cheque", "store_credit"]
+
+
+class PaymentMappingSet(BaseModel):
+    branch_id: uuid.UUID
+    method: PaymentMethod
+    account_id: uuid.UUID
+
+
+class PaymentMappingOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    branch_id: uuid.UUID
+    branch_name: str | None = None
+    method: PaymentMethod
+    account_id: uuid.UUID
+    account_name: str | None = None
+
+
 class MovementOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

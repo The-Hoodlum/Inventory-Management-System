@@ -26,9 +26,15 @@ from app.finance.schemas import (
     AccountCreate,
     AccountOut,
     AccountUpdate,
+    PaymentMappingOut,
 )
 from app.models import AccountMovement, FinancialAccount
-from app.models.finance import ACCOUNT_TYPES, DIRECTION_IN, DIRECTION_OUT
+from app.models.finance import (
+    ACCOUNT_TYPES,
+    DIRECTION_IN,
+    DIRECTION_OUT,
+    PAYMENT_METHODS,
+)
 from app.repositories.audit_repo import AuditRepository
 
 # Types that hold real cash/value at a physical site — a branch is mandatory. A CUSTODY
@@ -228,4 +234,114 @@ class FinanceService:
             direction=opposite, amount=original.amount, category=original.category,
             reference_type=original.reference_type, reference_id=original.reference_id,
             description=f"Reversal: {reason}", occurred_at=occurred_at, reversal_of=original.id,
+        )
+
+    async def reverse_reference(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID | None, reference_type: str,
+        reference_id: uuid.UUID, reason: str,
+    ) -> list[AccountMovement]:
+        """Reverse every not-yet-reversed movement tied to a source document (e.g. all the
+        IN movements from a voided invoice's payments). Originals are preserved."""
+        originals = await self.repo.unreversed_for_reference(reference_type, reference_id)
+        return [
+            await self.reverse_movement(
+                tenant_id=tenant_id, user_id=user_id, movement_id=mv.id, reason=reason)
+            for mv in originals
+        ]
+
+    # ------------------------ money-in from payments ---------------------- #
+    async def post_invoice_payments(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID | None,
+        branch_id: uuid.UUID | None, invoice_id: uuid.UUID, invoice_number: str,
+        lines: list[tuple[str, Decimal]],
+    ) -> list[AccountMovement]:
+        """Money in is never re-entered: given the payment lines the SALES module just
+        recorded, post ONE IN movement per line to the account mapped to that method at the
+        sale's branch. A SPLIT payment therefore posts one movement per line.
+
+        Activation is per branch: if the branch has NO mappings, finance money-in is dormant
+        and nothing is posted (the sales flow is untouched). If it HAS mappings but a line's
+        method is unmapped, this RAISES — failing the whole sale rather than silently dropping
+        the money. Runs in the caller's transaction, so a failure rolls the sale back.
+        """
+        if branch_id is None:
+            return []
+        if not await self.repo.branch_has_mappings(branch_id):
+            return []  # finance money-in not configured for this branch — dormant
+        posted: list[AccountMovement] = []
+        for method, amount in lines:
+            mapping = await self.repo.mapping_for(branch_id, method)
+            if mapping is None:
+                raise BusinessRuleError(
+                    f"No finance account is mapped for '{method}' payments at this branch. "
+                    "Map one under Finance → Payment Setup (or remove this branch's mappings "
+                    "to turn finance money-in off)."
+                )
+            posted.append(await self.post_movement(
+                tenant_id=tenant_id, user_id=user_id, account_id=mapping.account_id,
+                direction=DIRECTION_IN, amount=Decimal(amount), category="sale_payment",
+                reference_type="invoice_payment", reference_id=invoice_id,
+                description=f"{method} payment on invoice {invoice_number}",
+            ))
+        return posted
+
+    # --------------------------- payment mapping -------------------------- #
+    async def list_mappings(
+        self, *, allowed_branch_ids: frozenset[uuid.UUID] | None
+    ) -> list[PaymentMappingOut]:
+        branch_ids = None if allowed_branch_ids is None else list(allowed_branch_ids)
+        rows = await self.repo.list_mappings(branch_ids)
+        names = await self.repo.branch_name_map()
+        accounts = {a.id: a.name for a in await self.repo.list_accounts(branch_ids=branch_ids)}
+        return [
+            PaymentMappingOut(
+                id=r.id, branch_id=r.branch_id, branch_name=names.get(r.branch_id),
+                method=r.method, account_id=r.account_id, account_name=accounts.get(r.account_id),
+            )
+            for r in rows
+        ]
+
+    async def set_mapping(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, branch_id: uuid.UUID, method: str,
+        account_id: uuid.UUID, allowed_branch_ids: frozenset[uuid.UUID] | None = None,
+        ip: str | None = None,
+    ) -> PaymentMappingOut:
+        if method not in PAYMENT_METHODS:
+            raise BusinessRuleError(f"Unknown payment method '{method}'.")
+        if allowed_branch_ids is not None and branch_id not in allowed_branch_ids:
+            raise PermissionDeniedError("You are not assigned to that branch.")
+        account = await self._require_account(account_id, allowed_branch_ids)
+        # The account must serve this branch (its own branch, or a tenant-wide account).
+        if account.branch_id is not None and account.branch_id != branch_id:
+            raise BusinessRuleError("The chosen account belongs to a different branch.")
+        if not account.is_active:
+            raise BusinessRuleError("The chosen account is inactive.")
+        row = await self.repo.upsert_mapping(
+            tenant_id=tenant_id, branch_id=branch_id, method=method, account_id=account_id)
+        await self.audit.add(
+            tenant_id=tenant_id, user_id=user_id, action="finance.mapping.set",
+            entity_type="finance_payment_map", entity_id=row.id,
+            changes={"branch_id": str(branch_id), "method": method, "account_id": str(account_id)},
+            ip_address=ip,
+        )
+        names = await self.repo.branch_name_map()
+        return PaymentMappingOut(
+            id=row.id, branch_id=branch_id, branch_name=names.get(branch_id), method=method,
+            account_id=account_id, account_name=account.name,
+        )
+
+    async def delete_mapping(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, mapping_id: uuid.UUID,
+        allowed_branch_ids: frozenset[uuid.UUID] | None = None, ip: str | None = None,
+    ) -> None:
+        row = await self.repo.get_mapping(mapping_id)
+        if row is None:
+            raise NotFoundError("Mapping not found")
+        if allowed_branch_ids is not None and row.branch_id not in allowed_branch_ids:
+            raise PermissionDeniedError("You are not assigned to that branch.")
+        await self.repo.delete_mapping(row)
+        await self.audit.add(
+            tenant_id=tenant_id, user_id=user_id, action="finance.mapping.delete",
+            entity_type="finance_payment_map", entity_id=mapping_id,
+            changes={"branch_id": str(row.branch_id), "method": row.method}, ip_address=ip,
         )

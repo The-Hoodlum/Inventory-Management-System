@@ -107,7 +107,8 @@ def _vat_line_kwargs(ln) -> dict:
 
 class SalesService:
     def __init__(
-        self, repo: SalesRepository, audit: AuditRepository, inventory: InventoryService
+        self, repo: SalesRepository, audit: AuditRepository, inventory: InventoryService,
+        finance=None,
     ) -> None:
         self.repo = repo
         self.audit = audit
@@ -115,6 +116,10 @@ class SalesService:
         # for qty_on_hand, the ledger, the audit trail, and demand. Sales never mutates
         # inventory itself.
         self.inventory = inventory
+        # Optional FinanceService: when a payment settles, finance posts the matching IN
+        # movement(s) so cash/bank balances follow the sale. Money-in is read from THESE
+        # payment lines (never re-entered); dormant until the branch maps its methods.
+        self.finance = finance
 
     # ============================== quotation ============================= #
     async def create_quotation(
@@ -515,6 +520,16 @@ class SalesService:
             ))
             self.repo.session.add(payment)
         await self.repo.session.flush()
+        # Finance money-in: post ONE IN movement per payment line to the mapped account for
+        # its method at this branch (split payment -> one per line). Reads these very lines,
+        # so figures reconcile exactly with the sales module. Dormant unless the branch has
+        # mappings; an unmapped method raises here and rolls the whole settlement back.
+        if self.finance is not None:
+            await self.finance.post_invoice_payments(
+                tenant_id=tenant_id, user_id=user_id, branch_id=branch_id,
+                invoice_id=invoice.id, invoice_number=invoice.invoice_number,
+                lines=[(p.method, _d(p.amount)) for p in payments],
+            )
         await self._audit(tenant_id, user_id, "sales_payment", receipt.id, "recorded", None, invoice.status)
         return receipt
 
@@ -792,6 +807,15 @@ class SalesService:
         await motorcycles.revert_sale_for_invoice(
             tenant_id=tenant_id, user_id=user_id, invoice_id=invoice.id, reason=reason,
         )
+
+        # 2b. Finance: reverse the IN movement(s) this invoice's payments posted — a
+        #     reversing OUT per original (originals preserved, never deleted). No-op if the
+        #     branch wasn't posting to finance.
+        if self.finance is not None:
+            await self.finance.reverse_reference(
+                tenant_id=tenant_id, user_id=user_id, reference_type="invoice_payment",
+                reference_id=invoice.id, reason=f"Sale voided: {reason}",
+            )
 
         # 3. Mark the invoice voided (kept for audit; excluded from active sales).
         old = invoice.status

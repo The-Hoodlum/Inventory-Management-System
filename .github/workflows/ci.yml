@@ -116,7 +116,8 @@ jobs:
             database/sql/quotation_bikes.sql \
             database/sql/notifications.sql \
             database/sql/notification_prefs.sql \
-            database/sql/finance_accounts.sql ; do
+            database/sql/finance_accounts.sql \
+            database/sql/finance_payment_mapping.sql ; do
             echo "applying $f"
             psql -v ON_ERROR_STOP=1 -f "$f"
           done

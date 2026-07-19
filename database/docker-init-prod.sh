@@ -40,7 +40,7 @@ MODULES=(
   product_wholesale_price user_branch_access order_request_transfer_permission
   bike_issues assembly_targets motorcycle_country_of_origin product_location motorcycle_service parts_sales vat sales_void quotation_bikes
   notifications notification_prefs
-  finance_accounts
+  finance_accounts finance_payment_mapping
 )
 for m in "${MODULES[@]}"; do
   echo "[init] module: $m"

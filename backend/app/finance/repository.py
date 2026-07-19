@@ -13,7 +13,12 @@ from decimal import Decimal
 
 from sqlalchemy import func, select
 
-from app.models import AccountMovement, Branch, FinancialAccount
+from app.models import (
+    AccountMovement,
+    Branch,
+    FinancePaymentAccountMap,
+    FinancialAccount,
+)
 
 
 class FinanceRepository:
@@ -135,3 +140,74 @@ class FinanceRepository:
 
     async def get_movement(self, movement_id: uuid.UUID) -> AccountMovement | None:
         return await self.session.get(AccountMovement, movement_id)
+
+    async def unreversed_for_reference(
+        self, reference_type: str, reference_id: uuid.UUID
+    ) -> list[AccountMovement]:
+        """Movements for a source document that have NOT yet been cancelled by a reversal —
+        so a void reverses each original exactly once (and never a reversal itself)."""
+        rows = (await self.session.execute(
+            select(AccountMovement).where(
+                AccountMovement.reference_type == reference_type,
+                AccountMovement.reference_id == reference_id,
+                AccountMovement.reversal_of.is_(None),
+            )
+        )).scalars().all()
+        reversed_ids = set(
+            (await self.session.execute(
+                select(AccountMovement.reversal_of).where(AccountMovement.reversal_of.isnot(None))
+            )).scalars().all()
+        )
+        return [m for m in rows if m.id not in reversed_ids]
+
+    # --------------------------- payment mapping -------------------------- #
+    async def mapping_for(
+        self, branch_id: uuid.UUID, method: str
+    ) -> FinancePaymentAccountMap | None:
+        res = await self.session.execute(
+            select(FinancePaymentAccountMap).where(
+                FinancePaymentAccountMap.branch_id == branch_id,
+                FinancePaymentAccountMap.method == method,
+            )
+        )
+        return res.scalar_one_or_none()
+
+    async def branch_has_mappings(self, branch_id: uuid.UUID) -> bool:
+        res = await self.session.execute(
+            select(FinancePaymentAccountMap.id)
+            .where(FinancePaymentAccountMap.branch_id == branch_id)
+            .limit(1)
+        )
+        return res.first() is not None
+
+    async def list_mappings(
+        self, branch_ids: Sequence[uuid.UUID] | None
+    ) -> list[FinancePaymentAccountMap]:
+        stmt = select(FinancePaymentAccountMap)
+        if branch_ids is not None:
+            stmt = stmt.where(FinancePaymentAccountMap.branch_id.in_(list(branch_ids)))
+        stmt = stmt.order_by(FinancePaymentAccountMap.branch_id, FinancePaymentAccountMap.method)
+        res = await self.session.execute(stmt)
+        return list(res.scalars().all())
+
+    async def upsert_mapping(
+        self, *, tenant_id: uuid.UUID, branch_id: uuid.UUID, method: str, account_id: uuid.UUID
+    ) -> FinancePaymentAccountMap:
+        existing = await self.mapping_for(branch_id, method)
+        if existing is not None:
+            existing.account_id = account_id
+            await self.session.flush()
+            return existing
+        row = FinancePaymentAccountMap(
+            tenant_id=tenant_id, branch_id=branch_id, method=method, account_id=account_id
+        )
+        self.session.add(row)
+        await self.session.flush()
+        return row
+
+    async def get_mapping(self, mapping_id: uuid.UUID) -> FinancePaymentAccountMap | None:
+        return await self.session.get(FinancePaymentAccountMap, mapping_id)
+
+    async def delete_mapping(self, row: FinancePaymentAccountMap) -> None:
+        await self.session.delete(row)
+        await self.session.flush()
