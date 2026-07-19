@@ -18,6 +18,7 @@ from app.models import (
     Notification,
     NotificationPref,
     Permission,
+    Role,
     RolePermission,
     User,
     UserBranchAccess,
@@ -122,6 +123,29 @@ class NotificationRepository:
             .join(RolePermission, RolePermission.role_id == UserRole.role_id)
             .join(Permission, Permission.id == RolePermission.permission_id)
             .where(Permission.code == permission_code, User.is_active.is_(True))
+        )
+        if branch_id is not None:
+            unrestricted = ~exists().where(UserBranchAccess.user_id == User.id)
+            has_branch = exists().where(
+                and_(UserBranchAccess.user_id == User.id, UserBranchAccess.branch_id == branch_id)
+            )
+            stmt = stmt.where(or_(unrestricted, has_branch))
+        return [uid for (uid,) in (await self.session.execute(stmt)).all()]
+
+    async def recipients_with_role(
+        self, role_name: str, *, branch_id: uuid.UUID | None = None
+    ) -> list[uuid.UUID]:
+        """Active users holding a named ROLE (e.g. 'Branch Manager'), optionally limited to
+        those who can see ``branch_id``. Some audiences are a job, not a permission — a
+        branch manager should hear about their branch's sales even though no single
+        permission code identifies them. Branch filtering matches
+        :meth:`recipients_with_permission` exactly. RLS scopes this to the current tenant."""
+        stmt = (
+            select(User.id)
+            .distinct()
+            .join(UserRole, UserRole.user_id == User.id)
+            .join(Role, Role.id == UserRole.role_id)
+            .where(Role.name == role_name, User.is_active.is_(True))
         )
         if branch_id is not None:
             unrestricted = ~exists().where(UserBranchAccess.user_id == User.id)

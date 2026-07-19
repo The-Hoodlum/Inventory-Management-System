@@ -108,10 +108,13 @@ def _vat_line_kwargs(ln) -> dict:
 class SalesService:
     def __init__(
         self, repo: SalesRepository, audit: AuditRepository, inventory: InventoryService,
-        finance=None,
+        finance=None, notifications=None,
     ) -> None:
         self.repo = repo
         self.audit = audit
+        # Optional NotificationService — pushes a completed bike sale to the branch's
+        # managers in real time. Best-effort: it can never break the sale.
+        self.notifications = notifications
         # Stock moves ONLY through the inventory service — the single source of truth
         # for qty_on_hand, the ledger, the audit trail, and demand. Sales never mutates
         # inventory itself.
@@ -608,6 +611,71 @@ class SalesService:
         await self.repo.session.flush()
         return walkin.id
 
+    # ------------------- bike-sale notification (branch managers) -------- #
+    async def _notify_bike_sale(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, branch_id, invoice, customer_id,
+        bikes: list[tuple[str, str | None, str | None, Decimal]], payments,
+    ) -> None:
+        """Tell the branch's managers a bike was sold, with everything they'd otherwise have
+        to open the app for: the bike (model, colour, chassis) and its price, who bought it
+        (name, phone, address), what they paid and how, the invoice, and any balance still
+        owed.
+
+        ``bikes`` is [(chassis, model_name, colour_name, price)]. Pushed to WhatsApp
+        explicitly (push=True) rather than by inflating severity — a sale is routine `info`,
+        just worth knowing. Best-effort: the notification service isolates any failure from
+        the sale, and the outstanding balance reuses the SAME ``_invoice_balance_zmw`` the
+        payment path uses, so the figure can never disagree with the invoice.
+        """
+        if self.notifications is None:
+            return
+        from app.notifications import events as N_EVENTS
+
+        details = await self.repo.customer_details([customer_id]) if customer_id else {}
+        cust = details.get(customer_id) or {}
+        currency = await self.repo.base_currency(tenant_id)
+        total = sum((p for _c, _m, _col, p in bikes), Decimal("0"))
+
+        def _bike_label(model: str | None, colour: str | None) -> str:
+            return f"{model or 'Motorcycle'}{f' ({colour})' if colour else ''}"
+
+        lines: list[str] = []
+        if len(bikes) == 1:
+            chassis, model, colour, price = bikes[0]
+            title = f"Bike sold: {_bike_label(model, colour)} — {currency} {_f(price):,.2f}"
+            lines.append(f"Chassis: {chassis}")
+        else:
+            title = f"{len(bikes)} bikes sold — {currency} {_f(total):,.2f}"
+            lines += [
+                f"- {_bike_label(m, col)} | {c} | {currency} {_f(p):,.2f}"
+                for c, m, col, p in bikes
+            ]
+        lines.append(f"Customer: {cust.get('name') or 'Walk-in customer'}")
+        if cust.get("phone"):
+            lines.append(f"Phone: {cust['phone']}")
+        if cust.get("address"):
+            lines.append(f"Address: {cust['address']}")
+        lines.append(f"Invoice: {invoice.invoice_number}")
+        if payments:
+            paid_total = sum((_d(p.amount) for p in payments), Decimal("0"))
+            how = ", ".join(
+                f"{str(p.method).replace('_', ' ')} {currency} {_f(p.amount):,.2f}" for p in payments
+            )
+            lines.append(f"Paid: {currency} {_f(paid_total):,.2f} ({how})")
+        else:
+            lines.append("Paid: nothing yet — invoice issued")
+        balance = self._invoice_balance_zmw(invoice)
+        lines.append(
+            f"Balance due: {currency} {_f(balance):,.2f}" if balance > Decimal("0.0001")
+            else "Balance: fully paid"
+        )
+        await self.notifications.notify(
+            tenant_id=tenant_id, event_type=N_EVENTS.BIKE_SOLD, severity="info", push=True,
+            title=title, body="\n".join(lines), href="/sales",
+            entity_type="invoice", entity_id=invoice.id, branch_id=branch_id,
+            actor_user_id=user_id, role="Branch Manager",
+        )
+
     # ============================= sell a bike ========================== #
     async def sell_bike(
         self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, payload: BikeSaleIn, motorcycles,
@@ -682,6 +750,12 @@ class SalesService:
             )
 
         await self._audit(tenant_id, user_id, "sales_invoice", invoice.id, "bike_sale", None, invoice.status)
+        await self._notify_bike_sale(
+            tenant_id=tenant_id, user_id=user_id, branch_id=payload.branch_id or unit.branch_id,
+            invoice=invoice, customer_id=customer_id,
+            bikes=[(unit.chassis_number, unit.model_name, unit.colour_name, price)],
+            payments=payload.payments,
+        )
         fresh = await self.repo.get_invoice(invoice.id)
         return BikeSaleResult(
             unit_id=payload.unit_id, chassis_number=unit.chassis_number, model_name=unit.model_name,
@@ -764,6 +838,12 @@ class SalesService:
             )
 
         await self._audit(tenant_id, user_id, "sales_invoice", invoice.id, "bike_sale_bulk", None, invoice.status)
+        await self._notify_bike_sale(
+            tenant_id=tenant_id, user_id=user_id, branch_id=branch_id, invoice=invoice,
+            customer_id=customer_id,
+            bikes=[(u.chassis_number, u.model_name, u.colour_name, p) for u, p, _a in prepared],
+            payments=payload.payments,
+        )
         fresh = await self.repo.get_invoice(invoice.id)
         return BulkBikeSaleResult(
             invoice=await self._invoice_out(fresh), bikes=bikes_out,

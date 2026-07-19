@@ -279,6 +279,8 @@ def get_sales_service(db: AsyncSession = Depends(get_db)) -> SalesService:
         AuditRepository(db),
         get_inventory_service(db),
         get_finance_service(db),
+        # Real-time bike-sale alert to the branch's managers (in-app + opt-in WhatsApp).
+        get_notification_service(db),
     )
 
 

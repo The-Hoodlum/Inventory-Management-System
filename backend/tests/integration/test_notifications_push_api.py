@@ -122,3 +122,60 @@ async def test_unread_only_filter(client):
     assert len([i for i in unread2["items"] if i["event_type"] == et]) == 1
     allv = (await client.get("/api/v1/notifications", headers=h, params={"limit": 100})).json()
     assert len([i for i in allv["items"] if i["event_type"] == et]) == 2
+
+
+# --------------- explicit push policy + role-based recipients --------------- #
+async def test_push_true_pushes_a_routine_info_event(client):
+    """A completed sale is genuinely `info`, not `critical` — push is opted into
+    explicitly so severity keeps meaning "how urgent", not "does it leave the app"."""
+    from app.assistant.whatsapp import MockWhatsAppAdapter
+
+    _, claims = await _login(client)
+    tenant_id, admin_id = claims["tenant_id"], uuid.UUID(claims["sub"])
+    phone = f"+2609{uuid.uuid4().int % 10_000_000:07d}"
+    await _register_whatsapp(tenant_id, admin_id, phone)
+
+    adapter = MockWhatsAppAdapter()
+    await _notify(tenant_id, adapter, event_type="bike.sold", title="Bike sold: CG125 — ZMW 18,000.00",
+                  severity="info", push=True, body="Chassis CH123\nCustomer: Grace",
+                  recipient_user_ids=[admin_id])
+    assert len(adapter.sent) == 1
+    sent = adapter.sent[0]["text"]
+    assert "Bike sold" in sent and "Chassis CH123" in sent and "Grace" in sent
+
+
+async def test_push_false_suppresses_even_a_critical_event(client):
+    from app.assistant.whatsapp import MockWhatsAppAdapter
+
+    _, claims = await _login(client)
+    tenant_id, admin_id = claims["tenant_id"], uuid.UUID(claims["sub"])
+    await _register_whatsapp(tenant_id, admin_id, f"+2609{uuid.uuid4().int % 10_000_000:07d}")
+
+    adapter = MockWhatsAppAdapter()
+    await _notify(tenant_id, adapter, event_type="test.quiet", title="Critical but in-app only",
+                  severity="critical", push=False, recipient_user_ids=[admin_id])
+    assert adapter.sent == []
+
+
+async def test_role_based_recipients_reach_branch_managers(client):
+    """Some audiences are a job, not a permission — resolve by role name."""
+    from sqlalchemy import text
+
+    from app.db.session import AsyncSessionLocal
+    from app.notifications.repository import NotificationRepository
+
+    h, claims = await _login(client)
+    tenant_id = claims["tenant_id"]
+    roles = (await client.get("/api/v1/users/roles", headers=h)).json()
+    bm_role = next(r["id"] for r in roles if r["name"] == "Branch Manager")
+    email = f"bm-{uuid.uuid4().hex[:8]}@demo.com"
+    created = await client.post("/api/v1/users", headers=h, json={
+        "email": email, "full_name": "Branch Boss", "password": "ScopeTest123!",
+        "role_ids": [bm_role]})
+    assert created.status_code in (200, 201), created.text
+    bm_id = uuid.UUID(created.json()["id"])
+
+    async with AsyncSessionLocal() as s:
+        await s.execute(text("SELECT set_config('app.current_tenant', :t, true)"), {"t": str(tenant_id)})
+        ids = await NotificationRepository(s).recipients_with_role("Branch Manager")
+    assert bm_id in ids
