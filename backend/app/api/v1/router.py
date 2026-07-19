@@ -23,6 +23,7 @@ from app.customer_delivery.api import router as customer_delivery_router
 from app.dashboard.api import router as dashboard_router
 from app.demand.api import router as demand_router
 from app.dispatch.api import router as dispatch_router
+from app.finance.api import router as finance_router
 from app.forecast.api import router as forecast_router
 from app.imports.api import router as imports_router
 from app.integrations.whatsapp.router import router as whatsapp_router
@@ -76,3 +77,4 @@ api_router.include_router(issuance_router, prefix="/issuances", tags=["issuances
 api_router.include_router(customer_delivery_router, prefix="/customer-deliveries", tags=["customer-deliveries"])
 api_router.include_router(search_router, prefix="/search", tags=["search"])
 api_router.include_router(notifications_router, prefix="/notifications", tags=["notifications"])
+api_router.include_router(finance_router, prefix="/finance", tags=["finance"])

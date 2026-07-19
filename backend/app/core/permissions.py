@@ -72,3 +72,6 @@ class P:
     DELIVERY_NOTE_READ = "delivery_note.read"
     DELIVERY_NOTE_DISPATCH = "delivery_note.dispatch"  # create + dispatch (send in transit)
     DELIVERY_NOTE_RECEIVE = "delivery_note.receive"    # confirm receipt (with discrepancies)
+    # Finance (cash book / treasury: accounts, movements, expenses, transfers, handovers)
+    FINANCE_READ = "finance.read"                      # view accounts, balances, statements, reports
+    FINANCE_ACCOUNT_MANAGE = "finance.account.manage"  # create / edit / deactivate finance accounts
