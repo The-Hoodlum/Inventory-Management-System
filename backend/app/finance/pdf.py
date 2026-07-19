@@ -10,7 +10,7 @@ from fpdf import FPDF
 
 from app.core.config import settings
 from app.core.pdf_branding import draw_company_block, place_logo
-from app.finance.schemas import HandoverOut
+from app.finance.schemas import AccountStatementOut, DayBookOut, HandoverOut
 
 _CONTENT_W = 180.0
 _INK = (33, 37, 41)
@@ -159,4 +159,111 @@ def build_handover_slip_pdf(h: HandoverOut) -> bytes:
         pdf.set_text_color(*_MUTED)
         pdf.cell(sig_w - 10, 4, _s(f"{role}: {name or '________'}  (signature / date)"))
 
+    return bytes(pdf.output())
+
+
+class _ReportPdf(FPDF):
+    company_name: str = ""
+    doc_title: str = "REPORT"
+
+    def header(self) -> None:  # noqa: D401
+        top = self.get_y()
+        band = max(place_logo(self, 15, top, 45, 15), 10)
+        self.set_xy(15, top)
+        self.set_font("Helvetica", "B", 15)
+        self.set_text_color(*_INK)
+        self.cell(0, band, self.doc_title, ln=1, align="R")
+        self.set_draw_color(*_LINE)
+        self.line(15, self.get_y() + 1, 195, self.get_y() + 1)
+        self.ln(3)
+
+    def footer(self) -> None:  # noqa: D401
+        self.set_y(-15)
+        self.set_font("Helvetica", "I", 8)
+        self.set_text_color(*_MUTED)
+        self.cell(0, 10, f"{_s(self.company_name)}  -  Page {self.page_no()}/{{nb}}", align="C")
+
+
+def _start_report(title: str) -> _ReportPdf:
+    pdf = _ReportPdf(orientation="P", unit="mm", format="A4")
+    pdf.company_name = settings.company_name
+    pdf.doc_title = title
+    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.set_margins(15, 15, 15)
+    pdf.alias_nb_pages()
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_text_color(*_INK)
+    pdf.cell(0, 5, _s(settings.company_name or "Company"), ln=1)
+    return pdf
+
+
+def build_statement_pdf(stmt: AccountStatementOut) -> bytes:
+    pdf = _start_report("ACCOUNT STATEMENT")
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(*_MUTED)
+    pdf.cell(0, 5, _s(f"{stmt.account_name}   |   {stmt.date_from} to {stmt.date_to}"), ln=1)
+    pdf.set_text_color(*_INK)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(0, 6, _s(f"Opening balance: {stmt.currency} {_money(stmt.opening_balance)}"), ln=1)
+    pdf.ln(1)
+
+    cols = [("Date", 26, "L"), ("Description", 92, "L"), ("In", 22, "R"), ("Out", 22, "R"), ("Balance", 24, "R")]
+    pdf.set_font("Helvetica", "B", 8.5)
+    pdf.set_fill_color(*_HEAD_BG)
+    for title, w, align in cols:
+        pdf.cell(w, 7, _s(title), align=align, fill=True)
+    pdf.ln(7)
+    pdf.set_font("Helvetica", "", 8)
+    for r in stmt.rows:
+        desc = _s(r.description or (r.category or ""))
+        if len(desc) > 58:
+            desc = desc[:57] + "..."
+        pdf.cell(26, 6, _s(r.occurred_at.date().isoformat()), border="B")
+        pdf.cell(92, 6, desc, border="B")
+        pdf.cell(22, 6, _money(r.in_amount) if r.in_amount else "", border="B", align="R")
+        pdf.cell(22, 6, _money(r.out_amount) if r.out_amount else "", border="B", align="R")
+        pdf.cell(24, 6, _money(r.running_balance), border="B", align="R", ln=1)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(118, 7, "Totals / closing", align="R")
+    pdf.cell(22, 7, _money(stmt.total_in), align="R")
+    pdf.cell(22, 7, _money(stmt.total_out), align="R")
+    pdf.cell(24, 7, _money(stmt.closing_balance), align="R", ln=1)
+    return bytes(pdf.output())
+
+
+def build_day_book_pdf(book: DayBookOut) -> bytes:
+    pdf = _start_report("DAY BOOK / CASH POSITION")
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(*_MUTED)
+    pdf.cell(0, 5, _s(f"{book.period.title()} - {book.label}   ({book.date_from} to {book.date_to})"), ln=1)
+    pdf.set_text_color(*_INK)
+    pdf.ln(1)
+
+    cols = [("Branch", 46, "L"), ("Opening", 26, "R"), ("Money in", 26, "R"),
+            ("Expenses", 26, "R"), ("Handovers", 26, "R"), ("Closing", 26, "R")]
+    pdf.set_font("Helvetica", "B", 8.5)
+    pdf.set_fill_color(*_HEAD_BG)
+    for title, w, align in cols:
+        pdf.cell(w, 7, _s(title), align=align, fill=True)
+    pdf.ln(7)
+    pdf.set_font("Helvetica", "", 8.5)
+
+    def _row(r, bold=False):
+        pdf.set_font("Helvetica", "B" if bold else "", 8.5)
+        name = _s(r.branch_name or "-")
+        pdf.cell(46, 6, name[:28], border="B")
+        for v in (r.opening, r.money_in, r.expenses, r.handovers, r.closing):
+            pdf.cell(26, 6, _money(v), border="B", align="R")
+        pdf.ln(6)
+
+    for r in book.rows:
+        _row(r)
+    _row(book.totals, bold=True)
+
+    pdf.ln(3)
+    pdf.set_font("Helvetica", "I", 8)
+    pdf.set_text_color(*_MUTED)
+    pdf.multi_cell(0, 4.5, _s("Closing = Opening + Money in - Expenses - Handovers (transfers between a "
+                              "branch's own accounts net to zero)."))
     return bytes(pdf.output())

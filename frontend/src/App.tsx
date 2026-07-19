@@ -19,9 +19,12 @@ import DashboardPage from "@/pages/DashboardPage";
 import DeliveryNoteDetailPage from "@/pages/DeliveryNoteDetailPage";
 import DeliveryNotesPage from "@/pages/DeliveryNotesPage";
 import FinanceAccountsPage from "@/pages/FinanceAccountsPage";
+import FinanceDashboardPage from "@/pages/FinanceDashboardPage";
+import FinanceDayBookPage from "@/pages/FinanceDayBookPage";
 import FinanceExpensesPage from "@/pages/FinanceExpensesPage";
 import FinanceHandoversPage from "@/pages/FinanceHandoversPage";
 import FinancePaymentSetupPage from "@/pages/FinancePaymentSetupPage";
+import FinanceStatementPage from "@/pages/FinanceStatementPage";
 import FinanceTransfersPage from "@/pages/FinanceTransfersPage";
 import ForecastPage from "@/pages/ForecastPage";
 import ImportHistoryPage from "@/pages/ImportHistoryPage";
@@ -89,7 +92,10 @@ export default function App() {
         <Route path="/sales-log" element={<SalesLogPage />} />
         <Route path="/sales-report" element={<SalesReportPage />} />
         <Route path="/customers" element={<CustomersPage />} />
+        <Route path="/finance" element={<FinanceDashboardPage />} />
         <Route path="/finance/accounts" element={<FinanceAccountsPage />} />
+        <Route path="/finance/statement" element={<FinanceStatementPage />} />
+        <Route path="/finance/day-book" element={<FinanceDayBookPage />} />
         <Route path="/finance/expenses" element={<FinanceExpensesPage />} />
         <Route path="/finance/transfers" element={<FinanceTransfersPage />} />
         <Route path="/finance/handovers" element={<FinanceHandoversPage />} />

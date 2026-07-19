@@ -2,7 +2,7 @@
 // A balance is always DERIVED (opening + IN - OUT) and returned on read; it can never be
 // set. Reads need finance.read; account admin needs finance.account.manage. Accounts are
 // DEACTIVATED (is_active=false), never deleted — there is no delete endpoint.
-import { api } from "@/lib/api";
+import { api, BASE_URL, tokenStore } from "@/lib/api";
 
 export type AccountType = "CASH" | "BANK" | "MOBILE_MONEY" | "CUSTODY";
 
@@ -139,7 +139,112 @@ export const financeApi = {
     api.post<Handover>(`/finance/handovers/${id}/confirm`, { confirmed_amount, discrepancy_reason }),
   reverseHandover: (id: string, reason: string) => api.post<Handover>(`/finance/handovers/${id}/reverse`, { reason }),
   slipUrl: (id: string) => `/finance/handovers/${id}/slip`,
+
+  // Dashboard, statement, day book.
+  dashboard: (params: { date_from?: string; date_to?: string; branch_id?: string } = {}) => {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) if (v) p.set(k, v);
+    const qs = p.toString();
+    return api.get<FinanceDashboard>(`/finance/dashboard${qs ? `?${qs}` : ""}`);
+  },
+  statement: (accountId: string, params: { date_from?: string; date_to?: string } = {}) => {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) if (v) p.set(k, v);
+    const qs = p.toString();
+    return api.get<AccountStatement>(`/finance/accounts/${accountId}/statement${qs ? `?${qs}` : ""}`);
+  },
+  statementPdfPath: (accountId: string, params: { date_from?: string; date_to?: string }) => {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) if (v) p.set(k, v);
+    return `/finance/accounts/${accountId}/statement.pdf?${p.toString()}`;
+  },
+  dayBook: (params: { period?: string; date?: string; branch_id?: string } = {}) => {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) if (v) p.set(k, v);
+    const qs = p.toString();
+    return api.get<DayBook>(`/finance/day-book${qs ? `?${qs}` : ""}`);
+  },
+  dayBookPdfPath: (params: { period?: string; date?: string; branch_id?: string }) => {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) if (v) p.set(k, v);
+    return `/finance/day-book.pdf?${p.toString()}`;
+  },
 };
+
+export interface FinanceDashboard {
+  date_from: string;
+  date_to: string;
+  accounts: FinanceAccount[];
+  money_in: string;
+  expenses_out: string;
+  handovers_out: string;
+  transfers_out: string;
+  net_movement: string;
+  money_in_by_account: { account_id: string; account_name: string | null; amount: string }[];
+}
+
+export interface StatementRow {
+  id: string;
+  occurred_at: string;
+  description: string | null;
+  category: string | null;
+  reference_type: string | null;
+  direction: "IN" | "OUT";
+  amount: string;
+  in_amount: string;
+  out_amount: string;
+  running_balance: string;
+}
+
+export interface AccountStatement {
+  account_id: string;
+  account_name: string | null;
+  currency: string;
+  date_from: string;
+  date_to: string;
+  opening_balance: string;
+  rows: StatementRow[];
+  total_in: string;
+  total_out: string;
+  closing_balance: string;
+}
+
+export interface DayBookRow {
+  branch_id: string | null;
+  branch_name: string | null;
+  opening: string;
+  money_in: string;
+  expenses: string;
+  handovers: string;
+  transfers_in: string;
+  transfers_out: string;
+  other_in: string;
+  other_out: string;
+  closing: string;
+}
+
+export interface DayBook {
+  period: string;
+  label: string;
+  date_from: string;
+  date_to: string;
+  rows: DayBookRow[];
+  totals: DayBookRow;
+}
+
+// Authenticated blob download for a finance PDF (statement / day book / slip).
+export async function downloadFinancePdf(path: string, filename: string): Promise<void> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    headers: { Authorization: `Bearer ${tokenStore.getAccess() ?? ""}` },
+  });
+  if (!res.ok) return;
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 export interface Transfer {
   id: string;

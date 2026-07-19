@@ -80,9 +80,14 @@ class FinanceRepository:
         description: str | None = None, created_by: uuid.UUID | None = None,
         reversal_of: uuid.UUID | None = None,
     ) -> AccountMovement:
+        # Always stamp a business moment (tz-aware UTC) so time-based reads (statement, day
+        # book) are well-defined; defaults to now when the caller has no specific date.
+        occ = occurred_at if occurred_at is not None else dt.datetime.now(dt.UTC)
+        if occ.tzinfo is None:
+            occ = occ.replace(tzinfo=dt.UTC)
         movement = AccountMovement(
             tenant_id=tenant_id, account_id=account_id, direction=direction, amount=amount,
-            occurred_at=occurred_at, category=category, reference_type=reference_type,
+            occurred_at=occ, category=category, reference_type=reference_type,
             reference_id=reference_id, description=description, created_by=created_by,
             reversal_of=reversal_of,
         )
@@ -146,6 +151,68 @@ class FinanceRepository:
 
     async def get_movement(self, movement_id: uuid.UUID) -> AccountMovement | None:
         return await self.session.get(AccountMovement, movement_id)
+
+    # ------------------------- period aggregations ----------------------- #
+    async def period_category_sums(
+        self, account_ids: Sequence[uuid.UUID], start_dt: dt.datetime, end_dt: dt.datetime,
+    ) -> dict[tuple[str | None, str], Decimal]:
+        """{(category, direction): amount} for the accounts within [start, end]."""
+        if not account_ids:
+            return {}
+        res = await self.session.execute(
+            select(AccountMovement.category, AccountMovement.direction,
+                   func.coalesce(func.sum(AccountMovement.amount), 0))
+            .where(AccountMovement.account_id.in_(list(account_ids)),
+                   AccountMovement.occurred_at >= start_dt,
+                   AccountMovement.occurred_at <= end_dt)
+            .group_by(AccountMovement.category, AccountMovement.direction)
+        )
+        return {(cat, direction): Decimal(str(total)) for cat, direction, total in res.all()}
+
+    async def signed_sum_before(
+        self, account_ids: Sequence[uuid.UUID], before_dt: dt.datetime,
+    ) -> tuple[Decimal, Decimal]:
+        """(sum_in, sum_out) for the accounts before ``before_dt`` — used for an opening balance."""
+        if not account_ids:
+            return Decimal("0"), Decimal("0")
+        res = await self.session.execute(
+            select(AccountMovement.direction, func.coalesce(func.sum(AccountMovement.amount), 0))
+            .where(AccountMovement.account_id.in_(list(account_ids)),
+                   AccountMovement.occurred_at < before_dt)
+            .group_by(AccountMovement.direction)
+        )
+        totals = {d: Decimal(str(t)) for d, t in res.all()}
+        return totals.get("IN", Decimal("0")), totals.get("OUT", Decimal("0"))
+
+    async def money_in_by_account(
+        self, account_ids: Sequence[uuid.UUID], start_dt: dt.datetime, end_dt: dt.datetime,
+    ) -> dict[uuid.UUID, Decimal]:
+        """Operational money IN (sale payments) per account within the period."""
+        if not account_ids:
+            return {}
+        res = await self.session.execute(
+            select(AccountMovement.account_id, func.coalesce(func.sum(AccountMovement.amount), 0))
+            .where(AccountMovement.account_id.in_(list(account_ids)),
+                   AccountMovement.direction == "IN",
+                   AccountMovement.category == "sale_payment",
+                   AccountMovement.occurred_at >= start_dt,
+                   AccountMovement.occurred_at <= end_dt)
+            .group_by(AccountMovement.account_id)
+        )
+        return {aid: Decimal(str(total)) for aid, total in res.all()}
+
+    async def statement_movements(
+        self, account_id: uuid.UUID, start_dt: dt.datetime, end_dt: dt.datetime,
+    ) -> list[AccountMovement]:
+        """An account's movements in the window, in strict time order (for a running balance)."""
+        res = await self.session.execute(
+            select(AccountMovement)
+            .where(AccountMovement.account_id == account_id,
+                   AccountMovement.occurred_at >= start_dt,
+                   AccountMovement.occurred_at <= end_dt)
+            .order_by(AccountMovement.occurred_at, AccountMovement.created_at)
+        )
+        return list(res.scalars().all())
 
     async def unreversed_for_reference(
         self, reference_type: str, reference_id: uuid.UUID

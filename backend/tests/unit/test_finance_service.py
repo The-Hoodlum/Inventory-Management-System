@@ -40,6 +40,7 @@ TENANT = uuid.uuid4()
 USER = uuid.uuid4()
 BRANCH_A = uuid.uuid4()
 BRANCH_B = uuid.uuid4()
+TODAY = dt.date.today()
 
 
 class _FakeFinanceRepo:
@@ -233,6 +234,27 @@ class _FakeFinanceRepo:
     async def upsert_handover_attachment(self, **kwargs):
         self.handover_attachments[kwargs["handover_id"]] = kwargs
         return kwargs
+
+    # period aggregations (dates ignored — unit tests use a single clean period)
+    async def period_category_sums(self, account_ids, start_dt, end_dt):
+        out: dict = {}
+        for m in self.movements:
+            if m.account_id in account_ids:
+                out[(m.category, m.direction)] = out.get((m.category, m.direction), Decimal("0")) + m.amount
+        return out
+
+    async def signed_sum_before(self, account_ids, before_dt):
+        return Decimal("0"), Decimal("0")   # no prior-period movements in these tests
+
+    async def money_in_by_account(self, account_ids, start_dt, end_dt):
+        out: dict = {}
+        for m in self.movements:
+            if m.account_id in account_ids and m.direction == "IN" and m.category == "sale_payment":
+                out[m.account_id] = out.get(m.account_id, Decimal("0")) + m.amount
+        return out
+
+    async def statement_movements(self, account_id, start_dt, end_dt):
+        return [m for m in self.movements if m.account_id == account_id]
 
 
 def _svc():
@@ -591,3 +613,44 @@ async def test_handover_reverse_returns_cash_to_branch():
     await svc.reverse_handover(tenant_id=TENANT, user_id=USER, handover_id=h.id, reason="cancelled")
     # The reversing IN restores the branch cash; nothing left in transit.
     assert await svc.account_balance(cash.id) == Decimal("1000")
+
+
+# ---------------------- statement / day book / dashboard ------------------ #
+async def test_statement_running_balance():
+    svc = _svc()
+    cash = await svc.create_account(tenant_id=TENANT, user_id=USER,
+        data=AccountCreate(name="Cash", type="CASH", branch_id=BRANCH_A, opening_balance=Decimal("100")))
+    await svc.post_movement(tenant_id=TENANT, user_id=USER, account_id=cash.id, direction="IN",
+                            amount=Decimal("250"), category="sale_payment")
+    await svc.post_movement(tenant_id=TENANT, user_id=USER, account_id=cash.id, direction="OUT",
+                            amount=Decimal("40"), category="expense")
+    stmt = await svc.account_statement(account_id=cash.id, date_from=TODAY, date_to=TODAY)
+    assert stmt.opening_balance == Decimal("100")
+    assert [r.running_balance for r in stmt.rows] == [Decimal("350"), Decimal("310")]
+    assert stmt.total_in == Decimal("250") and stmt.total_out == Decimal("40")
+    assert stmt.closing_balance == Decimal("310")
+
+
+async def test_day_book_closing_equals_opening_plus_in_minus_expenses_minus_handovers():
+    svc = _svc()
+    cash = await svc.create_account(tenant_id=TENANT, user_id=USER,
+        data=AccountCreate(name="Cash", type="CASH", branch_id=BRANCH_A, opening_balance=Decimal("1000")))
+    custody = await svc.create_account(tenant_id=TENANT, user_id=USER,
+        data=AccountCreate(name="HQ", type="CUSTODY", branch_id=None))
+    # sale payment IN 500, expense OUT 120, handover OUT 300 (all on the branch cash account).
+    await svc.post_movement(tenant_id=TENANT, user_id=USER, account_id=cash.id, direction="IN",
+                            amount=Decimal("500"), category="sale_payment")
+    await svc.create_expense(tenant_id=TENANT, user_id=USER,
+        data=ExpenseCreate(account_id=cash.id, amount=Decimal("120"), expense_date=dt.date(2026, 7, 19)))
+    await svc.create_handover(tenant_id=TENANT, user_id=USER,
+        data=HandoverCreate(from_account_id=cash.id, to_account_id=custody.id, branch_id=BRANCH_A,
+                            amount=Decimal("300"), received_by_name="Grace"))
+    book = await svc.day_book(allowed_branch_ids=None, period="daily", on=dt.date(2026, 7, 19))
+    branch_row = next(r for r in book.rows if r.branch_id == BRANCH_A)
+    assert branch_row.opening == Decimal("1000")
+    assert branch_row.money_in == Decimal("500")
+    assert branch_row.expenses == Decimal("120")
+    assert branch_row.handovers == Decimal("300")
+    # The invariant: closing == opening + money_in - expenses - handovers.
+    assert branch_row.closing == Decimal("1080")
+    assert branch_row.closing == branch_row.opening + branch_row.money_in - branch_row.expenses - branch_row.handovers
