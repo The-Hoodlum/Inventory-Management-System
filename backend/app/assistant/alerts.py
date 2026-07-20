@@ -12,7 +12,8 @@ from __future__ import annotations
 import datetime as dt
 
 from app.assistant.repository import AssistantRepository
-from app.assistant.whatsapp import WhatsAppAdapter
+from app.assistant.whatsapp import WhatsAppAdapter, deliver
+from app.core.config import settings
 
 _MAX_BULLETS = 8
 
@@ -90,6 +91,43 @@ def build_branch_daily_report(d: dict, *, currency: str = "") -> str:
     if busy:
         lines.append("*Activity:* " + ", ".join(busy))
     return "\n".join(lines)
+
+
+def build_branch_daily_report_params(d: dict, *, currency: str = "") -> tuple[str, ...]:
+    """The same digest as :func:`build_branch_daily_report`, condensed into the 5 positional
+    variables of the ``daily_summary`` template.
+
+    A template can't carry the multi-line breakdown (Meta rejects newlines in parameters), so
+    this summarises to one line per variable and the manager opens the app for the detail.
+    Kept beside the text builder so the two can't drift apart. Order is fixed by the approved
+    template: branch, date, sold, payments, activity.
+    """
+    ccy = currency
+    sold = d.get("sold") or []
+    gross = float(d.get("gross_total") or 0)
+    sold_txt = f"{len(sold)} line(s) totalling {ccy} {gross:,.2f}" if sold else "nothing today"
+
+    parts = [
+        f"{str(p.get('method', '')).replace('_', ' ').title()} {ccy} {float(p.get('amount') or 0):,.2f}"
+        for p in (d.get("payments") or [])
+    ]
+    pay_txt = ", ".join(parts) if parts else f"{ccy} {float(d.get('collected_total') or 0):,.2f} collected"
+    outstanding = float(d.get("outstanding_total") or 0)
+    if outstanding > 0:
+        pay_txt += f" (outstanding {ccy} {outstanding:,.2f})"
+
+    busy = [
+        f"{n} {label}" for n, label in (
+            (d.get("order_requests", 0), "order request(s)"),
+            (d.get("transfers", 0), "transfer(s)"),
+            (d.get("issuances", 0), "issuance(s)"),
+            (d.get("bike_issues", 0), "bike issue(s)"),
+        ) if n
+    ]
+    return (
+        str(d.get("branch") or "-"), str(d.get("date") or "-"),
+        sold_txt, pay_txt, ", ".join(busy) if busy else "no other activity",
+    )
 
 
 def build_weekly_report_message(perf: dict) -> str:
@@ -210,11 +248,23 @@ class AlertService:
         self.adapter = adapter
 
     async def _broadcast(self, message: str | None) -> int:
+        """Send one built alert to every registered number.
+
+        Every alert here is scheduled, so none of them can rely on Meta's 24-hour window.
+        The generic notification template carries them all: its two variables are the
+        message's headline and the rest, which is the shape each builder already produces
+        (a bold first line, then detail). With no template configured this stays free-form.
+        """
         if not message:
             return 0
+        headline, _, detail = message.partition("\n")
         phones = await self.repo.alert_recipients()
         for phone in phones:
-            await self.adapter.send(to=phone, text=message)
+            await deliver(
+                self.adapter, to=phone, text=message,
+                template=settings.whatsapp_template_notification,
+                params=(headline.strip("*🔔 "), detail or headline),
+            )
         return len(phones)
 
     async def run_due(

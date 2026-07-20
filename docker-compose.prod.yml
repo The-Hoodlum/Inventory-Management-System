@@ -70,6 +70,13 @@ services:
       WHATSAPP_API_BASE_URL: ${WHATSAPP_API_BASE_URL:-https://graph.facebook.com/v23.0}
       # Required to ROUTE inbound messages — without it webhooks are acknowledged, not answered.
       WHATSAPP_DEFAULT_TENANT_ID: ${WHATSAPP_DEFAULT_TENANT_ID:-}
+      # Approved template names (docs/WHATSAPP.md §8). Blank -> that alert keeps sending
+      # free-form text, which Meta delivers only inside the 24-hour window.
+      WHATSAPP_TEMPLATE_LANGUAGE: ${WHATSAPP_TEMPLATE_LANGUAGE:-en}
+      WHATSAPP_TEMPLATE_DAILY_SUMMARY: ${WHATSAPP_TEMPLATE_DAILY_SUMMARY:-}
+      WHATSAPP_TEMPLATE_BIKE_SOLD: ${WHATSAPP_TEMPLATE_BIKE_SOLD:-}
+      WHATSAPP_TEMPLATE_STOCK_ALERT: ${WHATSAPP_TEMPLATE_STOCK_ALERT:-}
+      WHATSAPP_TEMPLATE_NOTIFICATION: ${WHATSAPP_TEMPLATE_NOTIFICATION:-}
       FREIGHTOS_ENABLED: ${FREIGHTOS_ENABLED:-false}
       FREIGHTOS_API_KEY: ${FREIGHTOS_API_KEY:-}
       FREIGHTOS_API_SECRET: ${FREIGHTOS_API_SECRET:-}

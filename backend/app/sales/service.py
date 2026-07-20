@@ -13,6 +13,7 @@ from decimal import Decimal
 
 from sqlalchemy import select
 
+from app.core.config import settings
 from app.core.exceptions import BusinessRuleError, NotFoundError, PermissionDeniedError
 from app.models import (
     CreditNote,
@@ -665,15 +666,38 @@ class SalesService:
         else:
             lines.append("Paid: nothing yet — invoice issued")
         balance = self._invoice_balance_zmw(invoice)
-        lines.append(
-            f"Balance due: {currency} {_f(balance):,.2f}" if balance > Decimal("0.0001")
-            else "Balance: fully paid"
+        balance_txt = (
+            f"{currency} {_f(balance):,.2f} outstanding" if balance > Decimal("0.0001")
+            else "fully paid"
+        )
+        lines.append(f"Balance due: {currency} {_f(balance):,.2f}"
+                     if balance > Decimal("0.0001") else "Balance: fully paid")
+
+        # Same facts as the free-form body, flattened into the bike_sold template's six
+        # positional variables — a sale can happen at any hour, so it must survive Meta's
+        # 24-hour window rather than only reaching whoever chatted with the bot recently.
+        bike_txt = (
+            _bike_label(bikes[0][1], bikes[0][2]) if len(bikes) == 1
+            else "; ".join(_bike_label(m, col) for _, m, col, _ in bikes)
+        )
+        customer_txt = cust.get("name") or "Walk-in customer"
+        if cust.get("phone"):
+            customer_txt += f" ({cust['phone']})"
+        paid_txt = (
+            f"{currency} {_f(sum((_d(p.amount) for p in payments), Decimal('0'))):,.2f} "
+            f"via {', '.join(str(p.method).replace('_', ' ') for p in payments)}"
+            if payments else "nothing yet - invoice issued"
         )
         await self.notifications.notify(
             tenant_id=tenant_id, event_type=N_EVENTS.BIKE_SOLD, severity="info", push=True,
             title=title, body="\n".join(lines), href="/sales",
             entity_type="invoice", entity_id=invoice.id, branch_id=branch_id,
             actor_user_id=user_id, role="Branch Manager",
+            template=settings.whatsapp_template_bike_sold or None,
+            template_params=(
+                bike_txt, f"{currency} {_f(total):,.2f}", customer_txt,
+                cust.get("address") or "-", invoice.invoice_number, f"{paid_txt}; {balance_txt}",
+            ),
         )
 
     # ============================= sell a bike ========================== #
