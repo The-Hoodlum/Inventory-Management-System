@@ -19,6 +19,9 @@ FROM nginx:1.27-alpine AS serve
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 80
+# Probe 127.0.0.1, not localhost: inside the container `localhost` resolves to IPv6 ::1
+# first, but nginx listens on IPv4 only, so `localhost` gives connection-refused and the
+# container is wrongly marked unhealthy while serving every request fine.
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
-  CMD wget -qO- http://localhost/healthz >/dev/null 2>&1 || exit 1
+  CMD wget -qO- http://127.0.0.1/healthz >/dev/null 2>&1 || exit 1
 CMD ["nginx", "-g", "daemon off;"]
