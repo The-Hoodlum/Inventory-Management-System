@@ -15,11 +15,13 @@ import {
   type MotoColour,
   type MotoModel,
   type MotoVariant,
+  type ReorderPoint,
   motorcyclesApi,
+  useMotoColours,
   useMotoModels,
 } from "@/lib/motorcycles";
 
-type Tab = "models" | "variants" | "colours";
+type Tab = "models" | "variants" | "colours" | "reorder points";
 const INPUT = "w-full rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-content focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500";
 
 export default function MotorcycleSetupPage() {
@@ -29,12 +31,12 @@ export default function MotorcycleSetupPage() {
     <div>
       <PageHeading
         title="Motorcycle setup"
-        description="Configure the reference catalog: models, variants and colours."
+        description="Configure the reference catalog: models, variants, colours and stock reorder points."
         icon={<Bike className="h-5 w-5" />}
         actions={<Button variant="secondary" onClick={() => navigate("/motorcycles")}>Back to units</Button>}
       />
       <div className="mb-4 flex gap-1 border-b border-line">
-        {(["models", "variants", "colours"] as Tab[]).map((t) => (
+        {(["models", "variants", "colours", "reorder points"] as Tab[]).map((t) => (
           <button key={t} onClick={() => setTab(t)}
             className={clsx("-mb-px border-b-2 px-3 py-2 text-sm font-medium capitalize transition",
               tab === t ? "border-brand-600 text-brand-700" : "border-transparent text-muted hover:text-content")}>
@@ -45,6 +47,7 @@ export default function MotorcycleSetupPage() {
       {tab === "models" && <ModelsTab />}
       {tab === "variants" && <VariantsTab />}
       {tab === "colours" && <ColoursTab />}
+      {tab === "reorder points" && <ReorderPointsTab />}
     </div>
   );
 }
@@ -254,6 +257,140 @@ function ColourModal({ item, onClose, onDone }: { item?: MotoColour; onClose: ()
           </div>
         </Field>
         <label className="flex items-center gap-2 text-sm text-content"><input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Active</label>
+      </div>
+    </Modal>
+  );
+}
+
+// ----------------------------- reorder points -----------------------------
+// The threshold at which a model/colour is "running low". A row with no colour is the
+// model-wide default; a colour row overrides it for that colour. When sellable stock falls
+// to or below this number the low-stock report flags it and (if enabled) a WhatsApp alert
+// goes to branch managers. This is purchasing readiness — deliberately separate from the
+// assembly targets, which are about workshop throughput.
+function ReorderPointsTab() {
+  const [table, setTable] = useState<DataTableState>(initialTableState(20));
+  const { q, invalidate } = useCrud(
+    "setup-reorder-points",
+    async () => {
+      const rows = await motorcyclesApi.listReorderPoints();
+      return { items: rows, total: rows.length };
+    },
+  );
+  const [modal, setModal] = useState<{ item?: ReorderPoint } | null>(null);
+  const [removing, setRemoving] = useState<ReorderPoint | null>(null);
+
+  const del = useMutation({
+    mutationFn: (id: string) => motorcyclesApi.deleteReorderPoint(id),
+    onSuccess: () => { setRemoving(null); void invalidate(); },
+  });
+
+  const columns: Column<ReorderPoint>[] = [
+    { key: "model", header: "Model", accessor: (r) => r.model_name ?? "—", className: "font-medium text-content" },
+    {
+      key: "colour", header: "Colour", accessor: (r) => r.colour_name ?? "",
+      render: (r) => r.colour_name
+        ? r.colour_name
+        : <span className="rounded-full bg-surface-muted px-2 py-0.5 text-xs text-muted">All colours (default)</span>,
+    },
+    { key: "reorder_point", header: "Reorder at", align: "right", accessor: (r) => r.reorder_point,
+      render: (r) => <span className="font-medium text-content">{r.reorder_point}</span> },
+    { key: "actions", header: "", align: "right", render: (r) => (
+      <div className="flex justify-end gap-1">
+        <Button variant="ghost" onClick={() => setModal({ item: r })}>Edit</Button>
+        <Button variant="ghost" onClick={() => setRemoving(r)}>Remove</Button>
+      </div>
+    ) },
+  ];
+  const items = (q.data?.items ?? []) as ReorderPoint[];
+
+  return (
+    <>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <p className="text-sm text-muted">
+          Set the sellable-stock level at which each model (or a specific colour) is flagged as running low.
+        </p>
+        <Button onClick={() => setModal({})}>New reorder point</Button>
+      </div>
+      <DataTable<ReorderPoint> columns={columns} rows={items} total={q.data?.total ?? 0} rowId={(r) => r.id}
+        state={table} onStateChange={setTable} loading={q.isLoading} searchable={false}
+        storageKey="moto-reorder-points" exportName="motorcycle-reorder-points"
+        emptyTitle="No reorder points yet"
+        emptyHint="Add one to start monitoring a model or colour for low stock." />
+      {modal && <ReorderPointModal item={modal.item} onClose={() => setModal(null)}
+        onDone={() => { setModal(null); void invalidate(); }} />}
+      {removing && (
+        <Modal title="Remove reorder point" size="sm" onClose={() => setRemoving(null)} footer={
+          <><Button variant="secondary" onClick={() => setRemoving(null)}>Cancel</Button>
+          <Button variant="ghost" className="text-red-600 hover:bg-red-50" disabled={del.isPending}
+            onClick={() => del.mutate(removing.id)}>
+            {del.isPending ? "Removing…" : "Remove"}</Button></>
+        }>
+          <p className="text-sm text-content">
+            Stop monitoring <span className="font-medium">{removing.model_name}
+            {removing.colour_name ? ` (${removing.colour_name})` : " — all colours"}</span> for low stock?
+            No stock or history is affected.
+          </p>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+function ReorderPointModal({ item, onClose, onDone }: { item?: ReorderPoint; onClose: () => void; onDone: () => void }) {
+  const models = useMotoModels();
+  const colours = useMotoColours();
+  const [modelId, setModelId] = useState(item?.model_id ?? "");
+  const [colourId, setColourId] = useState(item?.colour_id ?? "");
+  const [point, setPoint] = useState(item?.reorder_point?.toString() ?? "");
+  const [err, setErr] = useState<string | null>(null);
+
+  const m = useMutation({
+    mutationFn: () => motorcyclesApi.setReorderPoint({
+      model_id: modelId, colour_id: colourId || null, reorder_point: Number(point),
+    }),
+    onSuccess: onDone,
+    // set is an UPSERT keyed on (model, colour), so editing and re-adding the same pair both
+    // land on the same row — no duplicate-key error to surface here.
+    onError: (e) => setErr(e instanceof ApiError ? e.message : "Could not save the reorder point."),
+  });
+  const pointNum = Number(point);
+  const canSave = modelId && point !== "" && Number.isInteger(pointNum) && pointNum >= 0;
+
+  return (
+    <Modal title={item ? "Edit reorder point" : "New reorder point"} size="md" onClose={onClose} footer={
+      <><Button variant="secondary" onClick={onClose}>Cancel</Button>
+      <Button disabled={!canSave || m.isPending} onClick={() => { setErr(null); m.mutate(); }}>{m.isPending ? "Saving…" : "Save"}</Button></>
+    }>
+      <div className="space-y-3">
+        {err && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
+        <Field label="Model *">
+          {/* Locked when editing: the (model, colour) pair identifies the row. Change it and
+              you'd silently upsert a different one, leaving the original untouched. */}
+          <select className={INPUT} value={modelId} disabled={!!item}
+            onChange={(e) => setModelId(e.target.value)}>
+            <option value="">Select a model…</option>
+            {(models.data?.items ?? []).map((mm) => <option key={mm.id} value={mm.id}>{mm.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Colour">
+          <select className={INPUT} value={colourId} disabled={!!item}
+            onChange={(e) => setColourId(e.target.value)}>
+            <option value="">All colours (model-wide default)</option>
+            {(colours.data?.items ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <span className="mt-1 block text-xs text-muted">
+            Leave as “All colours” for a default that applies to every colour without its own threshold.
+          </span>
+        </Field>
+        <Field label="Reorder point *">
+          <input type="number" min={0} step={1} className={INPUT} value={point}
+            onChange={(e) => setPoint(e.target.value)} autoFocus
+            placeholder="e.g. 5" />
+          <span className="mt-1 block text-xs text-muted">
+            Flag as low when sellable stock is at or below this number.
+          </span>
+        </Field>
       </div>
     </Modal>
   );

@@ -196,7 +196,35 @@ export const motorcyclesApi = {
   // assembly_pending for a sold unit, or moves an in-stock unit unassembled -> assembled.
   assemble: (id: string, body: { note?: string } = {}) =>
     api.post<MotoUnit>(`/motorcycles/units/${id}/assemble`, body),
+  // stock reorder points (per model / optional colour). A row with no colour is the
+  // model-wide default used by every colour that has no row of its own.
+  listReorderPoints: () => api.get<ReorderPoint[]>("/motorcycles/reorder-points"),
+  setReorderPoint: (body: { model_id: string; colour_id?: string | null; reorder_point: number }) =>
+    api.put<ReorderPoint>("/motorcycles/reorder-points", body),
+  deleteReorderPoint: (id: string) => api.del<void>(`/motorcycles/reorder-points/${id}`),
+  lowStock: (branchId?: string | null) =>
+    api.get<LowStockBike[]>(`/motorcycles/low-stock${branchId ? `?branch_id=${branchId}` : ""}`),
 };
+
+export interface ReorderPoint {
+  id: string;
+  model_id: string;
+  model_name: string | null;
+  colour_id: string | null;
+  colour_name: string | null;
+  reorder_point: number;
+}
+
+export interface LowStockBike {
+  model_id: string;
+  model: string | null;
+  colour_id: string | null;
+  colour: string | null;
+  branch_id: string | null;
+  branch: string | null;
+  available: number;
+  reorder_point: number;
+}
 
 export interface MotoMetrics {
   total: number;
