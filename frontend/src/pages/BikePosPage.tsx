@@ -14,7 +14,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { emptyPaymentRow, type PaymentRow, PaymentRows, paymentRowsTotal, toPaymentLines } from "@/components/PaymentRows";
 import { Button, Card, Spinner } from "@/components/ui";
 import { ApiError } from "@/lib/api";
-import { useCustomers } from "@/lib/customers";
+import { customersApi, useCustomers } from "@/lib/customers";
 import { formatDate, formatMoney } from "@/lib/format";
 import { assemblyState, type MotoUnit, motorcyclesApi, useMotoModels } from "@/lib/motorcycles";
 import { useBranches } from "@/lib/refdata";
@@ -42,6 +42,12 @@ export default function BikePosPage() {
   const [cart, setCart] = useState<MotoUnit[]>([]);
   const [prices, setPrices] = useState<Record<string, string>>({});
   const [customerId, setCustomerId] = useState("");
+  // Add a customer inline, without leaving the POS. Name/phone/address mirror the fields the
+  // bike-sale WhatsApp alert sends to managers, so a walk-in buyer is captured in one place.
+  const [inlineNew, setInlineNew] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newPhone, setNewPhone] = useState("");
+  const [newAddr, setNewAddr] = useState("");
   const [takePayment, setTakePayment] = useState(true);
   const [payRows, setPayRows] = useState<PaymentRow[]>([emptyPaymentRow("cash")]);
   // Selling bikes before they're assembled: assemblyRequired = the dealership assembles them
@@ -88,9 +94,11 @@ export default function BikePosPage() {
   const beforeAssembly = cart.some((u) => assemblyState(u) !== "assembled");
   const allPriced = cart.every((u) => (Number(prices[u.id]) || 0) > 0);
   const overpay = takePayment && paidNum > total + 0.001;
+  // A new inline customer needs a name; picking an existing one (or walk-in) is always fine.
+  const customerReady = !inlineNew || newName.trim().length > 0;
   const valid =
     cart.length > 0 && allPriced && (!takePayment || paidNum > 0) && !overpay &&
-    (!beforeAssembly || ackBeforeAssembly);
+    customerReady && (!beforeAssembly || ackBeforeAssembly);
 
   function toggle(u: MotoUnit) {
     setErr(null);
@@ -109,25 +117,40 @@ export default function BikePosPage() {
     setCart([]);
     setPrices({});
     setCustomerId("");
+    setInlineNew(false);
+    setNewName(""); setNewPhone(""); setNewAddr("");
     setPayRows([emptyPaymentRow("cash")]);
     setAssemblyRequired(true);
     setAckBeforeAssembly(false);
   }
 
   const sell = useMutation({
-    mutationFn: () =>
-      salesApi.sellBikesBulk({
-        customer_id: customerId || null,
+    mutationFn: async () => {
+      // Create the inline customer first, then sell against its id — so a failed sale never
+      // leaves an orphaned half-entered buyer, and the new record is reusable afterwards.
+      let cid = customerId || null;
+      if (inlineNew && newName.trim()) {
+        const created = await customersApi.create({
+          name: newName.trim(),
+          phone: newPhone.trim() || null,
+          addresses: newAddr.trim() ? [{ line1: newAddr.trim(), is_default: true }] : undefined,
+        });
+        cid = created.id;
+      }
+      return salesApi.sellBikesBulk({
+        customer_id: cid,
         lines: cart.map((u) => ({
           unit_id: u.id,
           price: Number(prices[u.id]) || 0,
           assembly_required: assemblyState(u) !== "assembled" ? assemblyRequired : true,
         })),
         payments: takePayment ? toPaymentLines(payRows) : [],
-      }),
+      });
+    },
     onSuccess: (r) => {
       setDone(r);
       clearSale();
+      void customers.refetch?.();
       void qc.invalidateQueries({ queryKey: ["bike-pos-units"] });
       void qc.invalidateQueries({ queryKey: ["bike-sales-log"] });
     },
@@ -238,13 +261,30 @@ export default function BikePosPage() {
               </div>
             ) : (
               <div className="flex-1 space-y-3">
-                <label className="block text-sm">
-                  <span className="mb-1 block font-medium text-slate-700">Customer</span>
-                  <select className={`${INPUT} w-full`} value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
-                    <option value="">Walk-in customer</option>
-                    {(customers.data?.items ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                </label>
+                <div className="text-sm">
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="font-medium text-slate-700">Customer</span>
+                    <button type="button" className="text-xs text-brand-600 hover:underline"
+                      onClick={() => setInlineNew((v) => !v)}>
+                      {inlineNew ? "Pick existing" : "+ New customer"}
+                    </button>
+                  </div>
+                  {inlineNew ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      <input className={`${INPUT} w-full`} placeholder="Name *" value={newName}
+                        onChange={(e) => setNewName(e.target.value)} autoFocus />
+                      <input className={`${INPUT} w-full`} placeholder="Phone" value={newPhone}
+                        onChange={(e) => setNewPhone(e.target.value)} />
+                      <input className={`${INPUT} col-span-2 w-full`} placeholder="Address" value={newAddr}
+                        onChange={(e) => setNewAddr(e.target.value)} />
+                    </div>
+                  ) : (
+                    <select className={`${INPUT} w-full`} value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
+                      <option value="">Walk-in customer</option>
+                      {(customers.data?.items ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  )}
+                </div>
 
                 {/* Cart lines */}
                 <div className="max-h-64 space-y-1.5 overflow-y-auto">
