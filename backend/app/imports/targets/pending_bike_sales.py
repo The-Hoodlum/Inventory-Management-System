@@ -259,7 +259,7 @@ class PendingBikeSalesImporter(AtomicImporter):
                 status=invoice_status_after_payment(price, paid),
                 subtotal=price, discount_total=Decimal("0"), net_total=amt["net"], tax_total=amt["vat"],
                 grand_total=price, vat_rate=vat_rate, fx_rate=Decimal("1"), grand_total_zmw=price,
-                amount_paid=paid, notes=note, created_by=user_id,
+                amount_paid=paid, created_by=user_id,
             )
             session.add(invoice)
             await session.flush()
