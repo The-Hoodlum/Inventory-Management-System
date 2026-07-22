@@ -7,6 +7,8 @@ import { useQuery } from "@tanstack/react-query";
 import { AlertCircle, CircleDollarSign, Wallet } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { useNavigate } from "react-router-dom";
+
 import { useAuth } from "@/auth/AuthContext";
 import { PageHeader } from "@/components/PageHeader";
 import { PaymentModal } from "@/components/PaymentModal";
@@ -28,8 +30,10 @@ function ageDays(iso: string | null | undefined): number | null {
 }
 
 export default function PendingPaymentsPage() {
+  const navigate = useNavigate();
   const { hasPermission } = useAuth();
   const canPay = hasPermission("sales.payment");
+  const canImport = hasPermission("data.import");
   const [search, setSearch] = useState("");
   const [payInvoice, setPayInvoice] = useState<string | null>(null);
 
@@ -56,6 +60,11 @@ export default function PendingPaymentsPage() {
       <PageHeader
         title="Pending Payments"
         description="Invoices that still owe money — unpaid, partially paid or overdue. Record a payment to collect and clear the balance."
+        actions={canImport && (
+          <Button variant="secondary" onClick={() => navigate("/sales/pending-payments/import")}>
+            Import pending bikes
+          </Button>
+        )}
       />
 
       {/* Summary */}
