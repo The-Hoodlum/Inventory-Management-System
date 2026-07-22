@@ -12,6 +12,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button, Card, Spinner } from "@/components/ui";
 import { ApiError } from "@/lib/api";
 import { catalogApi } from "@/lib/catalog";
+import { customersApi, useCustomers } from "@/lib/customers";
 import { formatDate, formatMoney } from "@/lib/format";
 import { useBranches, useWarehouses } from "@/lib/refdata";
 import { PAYMENT_METHODS, type PaymentMethod, type Receipt, salesApi } from "@/lib/sales";
@@ -39,12 +40,19 @@ export default function SparePartsSalesPage() {
     const b = w.branch_id ? branches.map.get(w.branch_id) : undefined;
     return b ? `${b.name} · ${w.name}` : w.name;
   };
+  const customers = useCustomers();
   const [locationId, setLocationId] = useState("");
   const [search, setSearch] = useState("");
   const [cart, setCart] = useState<CartLine[]>([]);
   const [method, setMethod] = useState<PaymentMethod>("cash");
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [customerId, setCustomerId] = useState("");
+  // Add a customer inline without leaving the POS (mirrors the Bike POS). Empty = walk-in.
+  const [inlineNew, setInlineNew] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newPhone, setNewPhone] = useState("");
+  const [newAddr, setNewAddr] = useState("");
 
   const location = locationId || warehouses.list[0]?.id || "";
   const locationBranch = warehouses.list.find((w) => w.id === location)?.branch_id ?? null;
@@ -76,21 +84,37 @@ export default function SparePartsSalesPage() {
 
   const qc = useQueryClient();
   const checkout = useMutation({
-    mutationFn: () =>
-      salesApi.posCheckout({
+    mutationFn: async () => {
+      // Create the inline customer first, then charge against its id — a failed checkout
+      // never leaves an orphaned half-entered buyer, and the record is reusable afterwards.
+      let cid: string | null = customerId || null;
+      if (inlineNew && newName.trim()) {
+        const created = await customersApi.create({
+          name: newName.trim(),
+          phone: newPhone.trim() || null,
+          addresses: newAddr.trim() ? [{ line1: newAddr.trim(), is_default: true }] : undefined,
+        });
+        cid = created.id;
+      }
+      return salesApi.posCheckout({
         location_id: location,
+        customer_id: cid,
         // POS deducts stock via the single InventoryService write path — reused, never re-implemented.
         lines: cart.map((l) => ({ product_id: l.product_id, qty: l.qty, unit_price: l.unit_price })),
         payments: [{ method, amount: total }],
-      }),
+      });
+    },
     onSuccess: (res) => {
       setReceipt(res.receipt);
       setCart([]);
+      setCustomerId(""); setInlineNew(false); setNewName(""); setNewPhone(""); setNewAddr("");
+      void customers.refetch?.();
       qc.invalidateQueries({ queryKey: ["parts-sales-log"] });
       qc.invalidateQueries({ queryKey: ["parts-stock", location] });
     },
     onError: (e) => setErr(e instanceof ApiError ? e.message : "Checkout failed."),
   });
+  const customerReady = !inlineNew || newName.trim().length > 0;
 
   function add(p: { id: string; sku: string; name: string; selling_price?: number | string }) {
     setCart((c) => [
@@ -227,6 +251,30 @@ export default function SparePartsSalesPage() {
             )}
 
             <div className="mt-3 border-t border-slate-200 pt-3">
+              <div className="mb-3 text-sm">
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="font-medium text-slate-700">Customer</span>
+                  <button type="button" className="text-xs text-brand-600 hover:underline"
+                    onClick={() => setInlineNew((v) => !v)}>
+                    {inlineNew ? "Pick existing" : "+ New customer"}
+                  </button>
+                </div>
+                {inlineNew ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    <input className={`${INPUT} w-full`} placeholder="Name *" value={newName}
+                      onChange={(e) => setNewName(e.target.value)} autoFocus />
+                    <input className={`${INPUT} w-full`} placeholder="Phone" value={newPhone}
+                      onChange={(e) => setNewPhone(e.target.value)} />
+                    <input className={`${INPUT} col-span-2 w-full`} placeholder="Address" value={newAddr}
+                      onChange={(e) => setNewAddr(e.target.value)} />
+                  </div>
+                ) : (
+                  <select className={`${INPUT} w-full`} value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
+                    <option value="">Walk-in customer</option>
+                    {(customers.data?.items ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                )}
+              </div>
               <div className="flex items-center justify-between text-lg font-semibold text-slate-900">
                 <span>Total</span><span className="font-mono">{formatMoney(total)}</span>
               </div>
@@ -243,7 +291,7 @@ export default function SparePartsSalesPage() {
               {err && <div className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
               <Button
                 className="mt-3 w-full justify-center"
-                disabled={cart.length === 0 || !location || checkout.isPending}
+                disabled={cart.length === 0 || !location || !customerReady || checkout.isPending}
                 onClick={() => { setErr(null); checkout.mutate(); }}
               >
                 {checkout.isPending ? "Processing…" : `Charge ${formatMoney(total)}`}
