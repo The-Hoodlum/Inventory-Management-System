@@ -49,6 +49,16 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY (min 32 chars) in .env.prod}
       ENVIRONMENT: production
       CORS_ORIGINS: ${CORS_ORIGINS:?set CORS_ORIGINS to your public site URL in .env.prod}
+      # Company identity printed on generated documents (invoices, delivery notes, POs, slips).
+      # Blank -> app defaults ("Your Company"). The logo is a file referenced by
+      # COMPANY_LOGO_PATH and mounted below at /app/branding.
+      COMPANY_NAME: ${COMPANY_NAME:-}
+      COMPANY_ADDRESS: ${COMPANY_ADDRESS:-}
+      COMPANY_PHONE: ${COMPANY_PHONE:-}
+      COMPANY_EMAIL: ${COMPANY_EMAIL:-}
+      COMPANY_TAX_LABEL: ${COMPANY_TAX_LABEL:-Tax ID}
+      COMPANY_TAX_ID: ${COMPANY_TAX_ID:-}
+      COMPANY_LOGO_PATH: ${COMPANY_LOGO_PATH:-}
       # Optional integrations — all inert unless enabled with a key (see .env.prod.example).
       ADVISOR_LLM_ENABLED: ${ADVISOR_LLM_ENABLED:-false}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -81,6 +91,10 @@ services:
       FREIGHTOS_API_KEY: ${FREIGHTOS_API_KEY:-}
       FREIGHTOS_API_SECRET: ${FREIGHTOS_API_SECRET:-}
       INTEL_SCHEDULER_ENABLED: ${INTEL_SCHEDULER_ENABLED:-false}
+    volumes:
+      # Print assets (e.g. the logo at COMPANY_LOGO_PATH). Create ./branding on the host and
+      # drop your logo in; absent/empty is fine — documents just render without a logo.
+      - ./branding:/app/branding:ro
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)\""]
       interval: 10s
