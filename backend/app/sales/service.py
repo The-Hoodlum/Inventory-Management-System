@@ -588,9 +588,16 @@ class SalesService:
             payload=InvoiceCreate(sales_order_id=so.id, delivery_note_id=note.id),
         )
         invoice = await self.repo.get_invoice(invoice_out.id, lock=True)
+        # A single-tender POS sale settles the invoice IN FULL: snap the amount to the invoice's
+        # authoritative ZMW total so a client/server rounding difference (the till prices in ZMW,
+        # the invoice re-derives from USD net + VAT + fx) can never reject the sale or leave a
+        # stray balance. The cashier's chosen method is preserved.
+        pays = payload.payments
+        if len(pays) == 1:
+            pays = [pays[0].model_copy(update={"amount": float(self._invoice_balance_zmw(invoice))})]
         receipt = await self._settle(
             tenant_id=tenant_id, user_id=user_id, invoice=invoice,
-            payments=payload.payments, branch_id=payload.branch_id,
+            payments=pays, branch_id=payload.branch_id,
         )
         await self.repo.session.flush()
         return PosResult(

@@ -14,6 +14,7 @@ import { ApiError } from "@/lib/api";
 import { catalogApi } from "@/lib/catalog";
 import { customersApi, useCustomers } from "@/lib/customers";
 import { formatDate, formatMoney } from "@/lib/format";
+import { tenantApi } from "@/lib/tenantSettings";
 import { useBranches, useWarehouses } from "@/lib/refdata";
 import { PAYMENT_METHODS, type PaymentMethod, type Receipt, salesApi } from "@/lib/sales";
 
@@ -41,6 +42,16 @@ export default function SparePartsSalesPage() {
     return b ? `${b.name} · ${w.name}` : w.name;
   };
   const customers = useCustomers();
+  // Parts are priced in USD (supplier cost) and VAT-exclusive. This till bills in Kwacha, so
+  // it converts the USD price to ZMW and adds VAT: ZMW = USD x rate x (1 + VAT). The cart
+  // holds the ZMW-inclusive price the cashier sees; at checkout it's converted back to the USD
+  // net price the backend expects (the backend re-applies rate + VAT when it issues the invoice).
+  const settingsQ = useQuery({ queryKey: ["tenant", "settings"], queryFn: tenantApi.get });
+  const fx = Number(settingsQ.data?.fx_rate ?? 1) || 1;
+  const vat = Number(settingsQ.data?.vat_rate ?? 0) || 0;
+  const grossFactor = fx * (1 + vat);
+  const toZmw = (usdNet: number) => usdNet * grossFactor;      // USD net -> ZMW incl VAT
+  const toUsdNet = (zmwGross: number) => zmwGross / grossFactor;
   const [locationId, setLocationId] = useState("");
   const [search, setSearch] = useState("");
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -100,7 +111,10 @@ export default function SparePartsSalesPage() {
         location_id: location,
         customer_id: cid,
         // POS deducts stock via the single InventoryService write path — reused, never re-implemented.
-        lines: cart.map((l) => ({ product_id: l.product_id, qty: l.qty, unit_price: l.unit_price })),
+        // Cart prices are ZMW-inclusive for the cashier; convert back to the USD net price the
+        // backend re-prices from. The payment is the ZMW total (backend snaps it to the exact
+        // invoice total, so no rounding can reject the sale).
+        lines: cart.map((l) => ({ product_id: l.product_id, qty: l.qty, unit_price: toUsdNet(l.unit_price) })),
         payments: [{ method, amount: total }],
       });
     },
@@ -124,7 +138,7 @@ export default function SparePartsSalesPage() {
         sku: p.sku,
         name: p.name,
         qty: 1,
-        unit_price: Number(p.selling_price ?? 0),
+        unit_price: toZmw(Number(p.selling_price ?? 0)),   // ZMW incl VAT (converted from USD net)
         available: availableAt.get(p.id) ?? 0,
       },
     ]);
@@ -193,7 +207,7 @@ export default function SparePartsSalesPage() {
                           <span className={avail > 0 ? "text-slate-500" : "text-red-600"}>
                             {avail > 0 ? `${avail} in stock` : "out of stock"}
                           </span>
-                          <span className="text-slate-500">{formatMoney(Number(p.selling_price ?? 0))}</span>
+                          <span className="text-slate-500">{formatMoney(toZmw(Number(p.selling_price ?? 0)), "ZMW")}</span>
                           <Plus className="h-3.5 w-3.5 text-brand-600" />
                         </span>
                       </button>
@@ -238,7 +252,7 @@ export default function SparePartsSalesPage() {
                       onChange={(e) => setLine(i, { unit_price: Number(e.target.value) })}
                       className={`${INPUT} w-20 text-right`}
                     />
-                    <div className="w-20 text-right font-mono text-slate-700">{formatMoney(l.qty * l.unit_price)}</div>
+                    <div className="w-24 text-right font-mono text-slate-700">{formatMoney(l.qty * l.unit_price, "ZMW")}</div>
                     <button
                       onClick={() => setCart((c) => c.filter((_, j) => j !== i))}
                       className="text-slate-400 hover:text-red-600"
@@ -276,7 +290,7 @@ export default function SparePartsSalesPage() {
                 )}
               </div>
               <div className="flex items-center justify-between text-lg font-semibold text-slate-900">
-                <span>Total</span><span className="font-mono">{formatMoney(total)}</span>
+                <span>Total (incl. VAT)</span><span className="font-mono">{formatMoney(total, "ZMW")}</span>
               </div>
               <div className="mt-3">
                 <select value={method} onChange={(e) => setMethod(e.target.value as PaymentMethod)} className={`${INPUT} w-full`}>
@@ -294,7 +308,7 @@ export default function SparePartsSalesPage() {
                 disabled={cart.length === 0 || !location || !customerReady || checkout.isPending}
                 onClick={() => { setErr(null); checkout.mutate(); }}
               >
-                {checkout.isPending ? "Processing…" : `Charge ${formatMoney(total)}`}
+                {checkout.isPending ? "Processing…" : `Charge ${formatMoney(total, "ZMW")}`}
               </Button>
             </div>
           </Card>
