@@ -60,7 +60,7 @@ export default function SparePartsSalesPage() {
   // Live available stock at the selected location, keyed by product.
   const stockQ = useQuery({
     queryKey: ["parts-stock", location],
-    queryFn: () => catalogApi.inventory({ warehouse_id: location, page_size: 500 }),
+    queryFn: () => catalogApi.inventory({ warehouse_id: location, page_size: 1000 }),
     enabled: !!location,
   });
   const availableAt = useMemo(() => {
