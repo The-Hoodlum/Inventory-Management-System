@@ -110,7 +110,11 @@ async def list_inventory(
     product_id: uuid.UUID | None = None,
     search: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=50, ge=1, le=200),
+    # Cap raised to 1000 so the POS can load a whole location's stock in one page: it fetches
+    # all inventory for the selected warehouse up front to answer availability instantly as the
+    # cashier searches. At the old 200 cap a location with >200 parts made the request 422 and
+    # the till showed everything as out of stock.
+    page_size: int = Query(default=50, ge=1, le=1000),
     user: CurrentUser = Depends(require_permission(P.INVENTORY_READ)),
     svc: InventoryService = Depends(get_inventory_service),
 ) -> Page[InventoryOut]:
