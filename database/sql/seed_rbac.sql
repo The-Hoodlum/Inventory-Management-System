@@ -18,6 +18,7 @@ INSERT INTO permissions (code, description) VALUES
     ('supplier.read',      'View suppliers'),
     ('supplier.create',    'Create suppliers'),
     ('supplier.update',    'Edit suppliers'),
+    ('warehouse.read',     'View branches and warehouses (read-only)'),
     ('warehouse.manage',   'Create / edit warehouses'),
     ('inventory.read',     'View inventory and movements'),
     ('inventory.receive',  'Receive stock (incl. PO receiving)'),
@@ -68,7 +69,7 @@ INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id
 FROM roles r JOIN permissions p ON p.code IN (
     'product.read','product.create','product.update','product.delete',
-    'supplier.read','warehouse.manage',
+    'supplier.read','warehouse.read','warehouse.manage',
     'inventory.read','inventory.receive','inventory.issue','inventory.adjust','inventory.transfer',
     'reorder.read','reorder.run','reorder.manage',
     'po.read','report.read','report.export','dashboard.read','data.import'
@@ -82,7 +83,7 @@ SELECT r.id, p.id
 FROM roles r JOIN permissions p ON p.code IN (
     'product.read',
     'supplier.read','supplier.create','supplier.update',
-    'inventory.read',
+    'warehouse.read','inventory.read',
     'reorder.read','reorder.run','reorder.manage',
     'po.read','po.create','po.update','po.approve',
     'report.read','report.export','dashboard.read'
@@ -96,7 +97,7 @@ SELECT r.id, p.id
 FROM roles r JOIN permissions p ON p.code IN (
     'product.read','product.create','product.update',
     'supplier.read','supplier.create','supplier.update',
-    'warehouse.manage',
+    'warehouse.read','warehouse.manage',
     'inventory.read','inventory.receive','inventory.issue','inventory.adjust','inventory.transfer',
     'reorder.read','reorder.run','reorder.manage',
     'po.read','po.create','po.update','po.approve',
@@ -109,7 +110,7 @@ ON CONFLICT DO NOTHING;
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id
 FROM roles r JOIN permissions p ON p.code IN (
-    'product.read','supplier.read','inventory.read','reorder.read','po.read','report.read','dashboard.read'
+    'product.read','supplier.read','warehouse.read','inventory.read','reorder.read','po.read','report.read','dashboard.read'
 )
 WHERE r.is_system AND r.name = 'Viewer'
 ON CONFLICT DO NOTHING;

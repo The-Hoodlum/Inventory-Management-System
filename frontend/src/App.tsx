@@ -122,8 +122,8 @@ export default function App() {
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/products" element={<ProductsPage />} />
         <Route path="/suppliers" element={<SuppliersPage />} />
-        <Route path="/branches" element={<RequirePermission permission="warehouse.manage"><BranchesPage /></RequirePermission>} />
-        <Route path="/warehouses" element={<RequirePermission permission="warehouse.manage"><WarehousesPage /></RequirePermission>} />
+        <Route path="/branches" element={<RequirePermission permission="warehouse.read"><BranchesPage /></RequirePermission>} />
+        <Route path="/warehouses" element={<RequirePermission permission="warehouse.read"><WarehousesPage /></RequirePermission>} />
         <Route path="/delivery-notes" element={<DeliveryNotesPage />} />
         <Route path="/delivery-notes/:id" element={<DeliveryNoteDetailPage />} />
         <Route path="/issuances" element={<IssuancesPage />} />

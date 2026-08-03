@@ -23,7 +23,7 @@ ON CONFLICT DO NOTHING;
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id
 FROM roles r JOIN permissions p ON p.code IN (
-    'product.read', 'supplier.read', 'inventory.read',
+    'product.read', 'supplier.read', 'warehouse.read', 'inventory.read',
     'reorder.read', 'po.read', 'report.read', 'dashboard.read', 'assistant.use'
 )
 WHERE r.is_system AND r.name = 'Branch Manager'
