@@ -67,6 +67,31 @@ async def test_plan_values_and_validates():
 
 
 @pytest.mark.asyncio
+async def test_imports_human_readable_template_as_is():
+    """The exported template ships $-prefixed prices, ' K' (Kwacha) suffixes, comma
+    thousands, and 'DD-Mon-YYYY' dates. It must import without hand-cleaning."""
+    imp = PartsSalesLogImporter()
+    raw = [
+        {"date": "25-Jul-2026", "item_code": "n8160040", "description": "HEADLAMP COMP",
+         "unit_price_usd": "$17.27", "qty": "1", "total_zmw": "345.4 K", "vat_zmw": "400.7 K"},
+        {"date": "25-Jul-2026", "item_code": "tr600285fb", "description": "ENG OIL 1LTR",
+         "unit_price_usd": "$4.29", "qty": "12", "total_zmw": "1,029.6 K", "vat_zmw": "1,194.3 K"},
+    ]
+    plan = await imp.plan(_FakeSession(), tenant_id="t", rows=_rows(imp, raw))
+    assert all(r.ok for r in plan.rows)
+
+    r0 = plan.rows[0]
+    assert r0.data["sale_date"] == dt.date(2026, 7, 25)
+    assert r0.data["unit_price_usd"] == Decimal("17.27")
+    assert r0.data["revenue_zmw"] == Decimal("345.4")
+    assert r0.data["vat_zmw"] == Decimal("400.7")
+    # fx backed out of the ex-VAT total: 345.4 / (17.27 * 1) == 20
+    assert r0.data["fx_rate"] == Decimal("20.000000")
+
+    assert plan.rows[1].data["revenue_zmw"] == Decimal("1029.6")
+
+
+@pytest.mark.asyncio
 async def test_commit_inserts_one_per_valid_row():
     imp = PartsSalesLogImporter()
     raw = [

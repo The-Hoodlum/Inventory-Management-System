@@ -43,7 +43,10 @@ _STD = (LEVEL_STANDARD, LEVEL_ADVANCED)
 # The spreadsheet prices parts in USD and shows ZMW at this rate; used only as a fallback
 # when a row has no "Total (ZMW)" to read the effective rate from.
 DEFAULT_FX = Decimal("20")
-_DATE_FORMATS = ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d", "%m/%d/%Y")
+_DATE_FORMATS = (
+    "%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d", "%m/%d/%Y",
+    "%d-%b-%Y", "%d %b %Y", "%d-%B-%Y",  # 25-Jul-2026 / 25 Jul 2026 / 25-July-2026
+)
 
 
 _FIELDS: tuple[FieldSpec, ...] = (

@@ -26,6 +26,15 @@ def test_decimal_parses_and_strips_thousands():
     assert coerce(QTY, "1,250.5") == (Decimal("1250.5"), None)
 
 
+def test_decimal_strips_currency_decoration():
+    # Human-readable exports: "$17.27", "345.4 K" (K = Kwacha, not thousands), "ZMW 1,029.60".
+    assert coerce(QTY, "$17.27") == (Decimal("17.27"), None)
+    assert coerce(QTY, "345.4 K") == (Decimal("345.4"), None)
+    assert coerce(QTY, "1,029.6 K") == (Decimal("1029.6"), None)
+    assert coerce(QTY, "ZMW 1,029.60") == (Decimal("1029.60"), None)
+    assert coerce(QTY, "0.0 K") == (Decimal("0.0"), None)
+
+
 def test_negative_number_rejected():
     val, err = coerce(QTY, "-5")
     assert val is None and "negative" in err
