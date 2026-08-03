@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { ProtectedRoute } from "@/auth/ProtectedRoute";
+import { RequirePermission } from "@/auth/RequirePermission";
 import { AppShell } from "@/components/AppShell";
 import AdvisorPage from "@/pages/AdvisorPage";
 import AppLauncherPage from "@/pages/AppLauncherPage";
@@ -94,14 +95,14 @@ export default function App() {
         <Route path="/sales-log" element={<SalesLogPage />} />
         <Route path="/sales-report" element={<SalesReportPage />} />
         <Route path="/customers" element={<CustomersPage />} />
-        <Route path="/finance" element={<FinanceDashboardPage />} />
-        <Route path="/finance/accounts" element={<FinanceAccountsPage />} />
-        <Route path="/finance/statement" element={<FinanceStatementPage />} />
-        <Route path="/finance/day-book" element={<FinanceDayBookPage />} />
-        <Route path="/finance/expenses" element={<FinanceExpensesPage />} />
-        <Route path="/finance/transfers" element={<FinanceTransfersPage />} />
-        <Route path="/finance/handovers" element={<FinanceHandoversPage />} />
-        <Route path="/finance/payment-setup" element={<FinancePaymentSetupPage />} />
+        <Route path="/finance" element={<RequirePermission permission="finance.read"><FinanceDashboardPage /></RequirePermission>} />
+        <Route path="/finance/accounts" element={<RequirePermission permission="finance.read"><FinanceAccountsPage /></RequirePermission>} />
+        <Route path="/finance/statement" element={<RequirePermission permission="finance.read"><FinanceStatementPage /></RequirePermission>} />
+        <Route path="/finance/day-book" element={<RequirePermission permission="finance.read"><FinanceDayBookPage /></RequirePermission>} />
+        <Route path="/finance/expenses" element={<RequirePermission permission="finance.read"><FinanceExpensesPage /></RequirePermission>} />
+        <Route path="/finance/transfers" element={<RequirePermission permission="finance.read"><FinanceTransfersPage /></RequirePermission>} />
+        <Route path="/finance/handovers" element={<RequirePermission permission="finance.read"><FinanceHandoversPage /></RequirePermission>} />
+        <Route path="/finance/payment-setup" element={<RequirePermission permission="finance.read"><FinancePaymentSetupPage /></RequirePermission>} />
         <Route path="/motorcycles" element={<MotorcyclesPage />} />
         <Route path="/motorcycles/setup" element={<MotorcycleSetupPage />} />
         <Route path="/motorcycles/import" element={<MotorcycleImportPage />} />
@@ -121,8 +122,8 @@ export default function App() {
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/products" element={<ProductsPage />} />
         <Route path="/suppliers" element={<SuppliersPage />} />
-        <Route path="/branches" element={<BranchesPage />} />
-        <Route path="/warehouses" element={<WarehousesPage />} />
+        <Route path="/branches" element={<RequirePermission permission="warehouse.manage"><BranchesPage /></RequirePermission>} />
+        <Route path="/warehouses" element={<RequirePermission permission="warehouse.manage"><WarehousesPage /></RequirePermission>} />
         <Route path="/delivery-notes" element={<DeliveryNotesPage />} />
         <Route path="/delivery-notes/:id" element={<DeliveryNoteDetailPage />} />
         <Route path="/issuances" element={<IssuancesPage />} />

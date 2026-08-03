@@ -108,8 +108,8 @@ const GROUPS: NavGroup[] = [
       { to: "/inventory", label: "Inventory", icon: Boxes, permission: "inventory.read" },
       { to: "/movements", label: "Stock Movements", icon: History, permission: "inventory.read" },
       { to: "/products", label: "Products", icon: Package, permission: "product.read" },
-      { to: "/branches", label: "Branches", icon: Building2, permission: "inventory.read" },
-      { to: "/warehouses", label: "Warehouses", icon: Warehouse, permission: "inventory.read" },
+      { to: "/branches", label: "Branches", icon: Building2, permission: "warehouse.manage" },
+      { to: "/warehouses", label: "Warehouses", icon: Warehouse, permission: "warehouse.manage" },
     ],
   },
   {
