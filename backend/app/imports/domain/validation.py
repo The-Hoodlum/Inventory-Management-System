@@ -2,11 +2,25 @@
 identically. Pure (stdlib only). Returns typed values or human-readable errors."""
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from app.imports.domain.fields import FieldKind, FieldSpec
+
+# Currency symbols/spaces to drop anywhere in a numeric cell, and currency codes/letters
+# to drop at either end. Sheets are often exported for humans: "$17.27", "345.4 K"
+# (K = Zambian Kwacha, a suffix, NOT thousands), "ZMW 1,029.60". We strip the decoration
+# and parse the bare number. Bare numbers are unaffected, so nothing that parsed before
+# changes meaning.
+_NUM_DECORATION = re.compile(r"[$£€\s]")
+_NUM_CURRENCY_CODE = re.compile(r"(?i)^(k|zmw|usd)|(k|zmw|usd)$")
+
+
+def _clean_number(s: str) -> str:
+    t = _NUM_DECORATION.sub("", s.replace(",", ""))  # drop symbols, spaces, thousands sep
+    return _NUM_CURRENCY_CODE.sub("", t)              # drop a leading/trailing K/ZMW/USD
 
 
 def coerce(spec: FieldSpec, raw: Any) -> tuple[Any, str | None]:
@@ -41,7 +55,7 @@ def coerce(spec: FieldSpec, raw: Any) -> tuple[Any, str | None]:
 
     if spec.kind in (FieldKind.INTEGER, FieldKind.DECIMAL):
         try:
-            d = Decimal(s.replace(",", ""))  # tolerate thousands separators
+            d = Decimal(_clean_number(s))  # tolerate thousands sep + currency decoration
         except (InvalidOperation, ValueError):
             return None, f"{spec.label} '{s}' is not a valid number"
         if d < 0 and not spec.signed:
