@@ -145,10 +145,12 @@ SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code = 'finance.transfer'
 WHERE r.is_system AND r.name IN ('Admin','Finance','Branch Manager')
 ON CONFLICT DO NOTHING;
 
--- Handovers: managers + Cashier (a cashier hands over their till; a manager/accountant confirms).
+-- Handovers: managers only (Admin, Finance, Branch Manager). The Cashier is intentionally
+-- excluded — front-line roles have no Finance access (see migration 0061); a manager records
+-- the till handover.
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code = 'finance.handover'
-WHERE r.is_system AND r.name IN ('Admin','Finance','Branch Manager','Cashier')
+WHERE r.is_system AND r.name IN ('Admin','Finance','Branch Manager')
 ON CONFLICT DO NOTHING;
 
 COMMENT ON TABLE account_transfers IS 'Money moved between two accounts: one transfer record backing a PAIRED OUT + IN in a single transaction. Reversible only by a reversing pair.';

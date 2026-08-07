@@ -4,8 +4,8 @@ it to the oversight/management roles.
 The Branches and Warehouses pages used to be gated on 'inventory.read', which front-line
 roles (Cashier) also hold for POS stock lookups — so they could see those admin pages.
 This adds a dedicated read permission so viewing branch/warehouse structure can be granted
-to oversight roles (Admin, Inventory/Warehouse/Procurement Manager, Branch Manager, Viewer)
-without exposing it to Cashier / Salesperson / Mechanic. Writes remain 'warehouse.manage'.
+to oversight roles (Admin, Inventory/Warehouse/Procurement Manager, Branch Manager, Viewer,
+Mechanic) without exposing it to Cashier / Salesperson. Writes remain 'warehouse.manage'.
 
 Idempotent — mirrors seed_rbac.sql + assistant_roles.sql for already-built databases.
 
@@ -30,6 +30,7 @@ _ROLES = (
     "Procurement Manager",
     "Branch Manager",
     "Viewer",
+    "Mechanic",
 )
 
 

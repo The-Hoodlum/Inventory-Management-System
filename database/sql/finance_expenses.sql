@@ -132,12 +132,9 @@ SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code = 'finance.expense.m
 WHERE r.is_system AND r.name IN ('Admin','Finance','Branch Manager')
 ON CONFLICT DO NOTHING;
 
--- Cashier gets finance.read: a non-manager who may VIEW finance (accounts, expenses)
--- within their branch scope, but cannot record/edit — the "non-managers may view" rule.
-INSERT INTO role_permissions (role_id, permission_id)
-SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code = 'finance.read'
-WHERE r.is_system AND r.name = 'Cashier'
-ON CONFLICT DO NOTHING;
+-- NOTE: the Cashier is intentionally NOT granted finance.read — front-line roles have no
+-- Finance access at all (see migration 0061). Only authorized roles (Admin, Finance, and
+-- Branch Manager for their branch) may view finance.
 
 COMMENT ON TABLE expenses IS 'Money-out records. Recording one posts an OUT movement to its account (append-only ledger), dropping the balance by exactly the amount. Manager-recorded (finance.expense.manage), no approval. Corrections are voids (reversing IN), never edits of amount or deletes.';
 COMMENT ON TABLE expense_categories IS 'Configurable tenant expense category list (fuel, rent, salaries, …). Deactivated, never deleted.';
