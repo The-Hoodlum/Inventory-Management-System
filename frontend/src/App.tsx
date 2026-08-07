@@ -15,6 +15,8 @@ import ContainerPage from "@/pages/ContainerPage";
 import CreateQuotationPage from "@/pages/CreateQuotationPage";
 import CustomerDeliveriesPage from "@/pages/CustomerDeliveriesPage";
 import CustomerDeliveryDetailPage from "@/pages/CustomerDeliveryDetailPage";
+import HandoverDetailPage from "@/pages/HandoverDetailPage";
+import HandoversPage from "@/pages/HandoversPage";
 import CustomersPage from "@/pages/CustomersPage";
 import DashboardPage from "@/pages/DashboardPage";
 import DeliveryNoteDetailPage from "@/pages/DeliveryNoteDetailPage";
@@ -112,6 +114,8 @@ export default function App() {
         <Route path="/assembly-planner" element={<AssemblyPlannerPage />} />
         <Route path="/assembly-queue" element={<AssemblyQueuePage />} />
         <Route path="/service-followup" element={<ServiceFollowUpPage />} />
+        <Route path="/handovers" element={<HandoversPage />} />
+        <Route path="/handovers/:id" element={<HandoverDetailPage />} />
         <Route path="/pos" element={<BikePosPage />} />
         <Route path="/parts-sales" element={<SparePartsSalesPage />} />
         <Route path="/inventory" element={<InventoryPage />} />

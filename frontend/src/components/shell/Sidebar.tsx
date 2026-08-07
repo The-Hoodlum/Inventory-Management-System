@@ -14,6 +14,7 @@ import {
   CalendarClock,
   ChevronsLeft,
   ChevronsRight,
+  ClipboardCheck,
   ClipboardList,
   Container,
   Contact,
@@ -87,6 +88,7 @@ const GROUPS: NavGroup[] = [
       { to: "/assembly-planner", label: "Assembly Planner", icon: Hammer, permission: "motorcycle.read" },
       { to: "/assembly-queue", label: "Assembly Queue", icon: PackageCheck, permission: "motorcycle.read" },
       { to: "/service-followup", label: "Service Follow-up", icon: CalendarClock, permission: "motorcycle.read" },
+      { to: "/handovers", label: "Customer Handovers", icon: ClipboardCheck, permission: "motorcycle.read" },
     ],
   },
   {
