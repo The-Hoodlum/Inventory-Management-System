@@ -94,28 +94,28 @@ async def test_expense_reduces_balance_and_void_restores_it(client):
     assert await _balance(client, h, acct) == 1000.0
 
 
-async def test_only_managers_record_non_managers_view_within_scope(client):
+async def test_cashier_has_no_finance_access(client):
     admin = await _headers(client, ADMIN_EMAIL, ADMIN_PASSWORD)
     br = await _branch(client, admin)
     acct = await _account(client, admin, "Cash", br, opening="500")
     exp = (await client.post("/api/v1/finance/expenses", headers=admin, json={
         "account_id": acct, "amount": "100", "expense_date": TODAY})).json()
 
-    # A Cashier scoped to this branch: has finance.read (view) but NOT finance.expense.manage.
+    # Front-line roles are locked out of Finance entirely: a Cashier has neither finance.read
+    # (view) nor finance.expense.manage (record), even within their own branch.
     email, pw = _rand("cash") + "@demo.com", "ScopeTest123!"
     await client.post("/api/v1/users", headers=admin, json={
         "email": email, "full_name": "Till cashier", "password": pw,
         "role_ids": [await _role_id(client, admin, "Cashier")], "branch_ids": [br]})
     u = await _headers(client, email, pw)
 
-    # Can VIEW the branch's expenses.
-    listed = {e["id"] for e in (await client.get("/api/v1/finance/expenses", headers=u)).json()}
-    assert exp["id"] in listed
-    # Cannot record (manager-only).
+    # Cannot view.
+    assert (await client.get("/api/v1/finance/expenses", headers=u)).status_code == 403
+    # Cannot record.
     r = await client.post("/api/v1/finance/expenses", headers=u, json={
         "account_id": acct, "amount": "20", "expense_date": TODAY})
     assert r.status_code == 403, r.text
-    # Cannot void either.
+    # Cannot void.
     assert (await client.post(f"/api/v1/finance/expenses/{exp['id']}/void", headers=u,
                               json={"reason": "x"})).status_code == 403
 
