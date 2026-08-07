@@ -15,6 +15,7 @@ class P:
     SUPPLIER_CREATE = "supplier.create"
     SUPPLIER_UPDATE = "supplier.update"
     # Warehouses
+    WAREHOUSE_READ = "warehouse.read"      # view branch/warehouse structure (oversight roles)
     WAREHOUSE_MANAGE = "warehouse.manage"
     # Inventory
     INVENTORY_READ = "inventory.read"

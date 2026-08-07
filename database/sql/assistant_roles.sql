@@ -23,7 +23,7 @@ ON CONFLICT DO NOTHING;
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id
 FROM roles r JOIN permissions p ON p.code IN (
-    'product.read', 'supplier.read', 'inventory.read',
+    'product.read', 'supplier.read', 'warehouse.read', 'inventory.read',
     'reorder.read', 'po.read', 'report.read', 'dashboard.read', 'assistant.use'
 )
 WHERE r.is_system AND r.name = 'Branch Manager'
@@ -38,11 +38,11 @@ FROM roles r JOIN permissions p ON p.code IN (
 WHERE r.is_system AND r.name = 'Cashier'
 ON CONFLICT DO NOTHING;
 
--- Mechanic: parts (catalog + stock) reads + assistant.
+-- Mechanic: parts (catalog + stock) reads + branch/warehouse read view + assistant.
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id
 FROM roles r JOIN permissions p ON p.code IN (
-    'product.read', 'inventory.read', 'assistant.use'
+    'product.read', 'inventory.read', 'warehouse.read', 'assistant.use'
 )
 WHERE r.is_system AND r.name = 'Mechanic'
 ON CONFLICT DO NOTHING;
