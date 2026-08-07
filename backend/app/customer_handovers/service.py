@@ -31,6 +31,7 @@ from app.customer_handovers.schemas import (
     HandoverUpdate,
 )
 from app.models import CustomerHandover, MotorcycleUnitEvent
+from app.motorcycles.domain import lifecycle as L
 from app.repositories.audit_repo import AuditRepository
 
 
@@ -60,42 +61,58 @@ class CustomerHandoverService:
         payload: HandoverCreate,
         allowed_branch_ids: frozenset[uuid.UUID] | None = None,
     ) -> HandoverOut:
-        invoice = await self.repo.get_invoice(payload.invoice_id)
-        if invoice is None:
-            raise NotFoundError("Invoice not found")
         unit = await self.repo.get_unit(payload.unit_id)
         if unit is None:
             raise NotFoundError("Motorcycle unit not found")
 
-        # This bike must actually be the one sold on that invoice.
-        if unit.sold_ref is None:
-            raise BusinessRuleError(f"Bike {unit.chassis_number} has not been sold yet — nothing to hand over.")
-        if unit.sold_ref != invoice.id:
-            raise BusinessRuleError(f"Bike {unit.chassis_number} is not linked to invoice {invoice.invoice_number}.")
+        # The bike must be SOLD (the unit's sale status) — that, not an invoice link, is
+        # what "ready to hand over" means. Bulk-imported historical sales are sold but carry
+        # no invoice, so we do NOT require ``sold_ref``.
+        if unit.status != L.SOLD:
+            raise BusinessRuleError(
+                f"Bike {unit.chassis_number} is {unit.status} and hasn't been sold yet — nothing to hand over."
+            )
+
+        # Resolve the source invoice: an explicit one, else the unit's linked invoice
+        # (absent for historically-imported sales — that is allowed).
+        invoice = None
+        invoice_id = payload.invoice_id or unit.sold_ref
+        if invoice_id is not None:
+            invoice = await self.repo.get_invoice(invoice_id)
+            if invoice is None:
+                raise NotFoundError("Invoice not found")
+            if unit.sold_ref is not None and unit.sold_ref != invoice.id:
+                raise BusinessRuleError(f"Bike {unit.chassis_number} is not linked to invoice {invoice.invoice_number}.")
 
         # Branch isolation — both the unit's branch and the invoice's branch must be in scope.
-        self._assert_branch(allowed_branch_ids, unit.branch_id, invoice.branch_id)
+        self._assert_branch(allowed_branch_ids, unit.branch_id, invoice.branch_id if invoice else None)
 
         # One handover per unit (friendly error before the DB unique constraint).
         if await self.repo.unit_handover(tenant_id, unit.id) is not None:
             raise BusinessRuleError(f"Bike {unit.chassis_number} already has a handover record.")
 
-        customer_id = unit.customer_id or invoice.customer_id
+        customer_id = unit.customer_id or (invoice.customer_id if invoice else None)
         customer = await self.repo.get_customer(customer_id) if customer_id else None
         address = await self.repo.default_address(customer_id) if customer_id else None
-        salesperson_id = payload.salesperson_id or await self.repo.order_salesperson(invoice)
+        salesperson_id = payload.salesperson_id or (await self.repo.order_salesperson(invoice) if invoice else None)
 
-        invoice_amount = _d(invoice.grand_total_zmw)
-        amount_paid = _d(invoice.amount_paid)
+        # Amounts come from the invoice when there is one; otherwise from the unit's own
+        # sale price (a historical sale is treated as already settled — the user can adjust).
+        if invoice is not None:
+            invoice_amount = _d(invoice.grand_total_zmw)
+            amount_paid = _d(invoice.amount_paid)
+        else:
+            invoice_amount = _d(unit.price_charged)
+            amount_paid = _d(unit.price_charged)
 
         h = CustomerHandover(
             tenant_id=tenant_id,
             handover_no=await self.repo.number(tenant_id),
             status=S.DRAFT,
-            invoice_id=invoice.id,
-            sales_order_id=invoice.sales_order_id,
+            invoice_id=invoice.id if invoice else None,
+            sales_order_id=invoice.sales_order_id if invoice else None,
             unit_id=unit.id,
-            branch_id=unit.branch_id or invoice.branch_id,
+            branch_id=unit.branch_id or (invoice.branch_id if invoice else None),
             salesperson_id=salesperson_id,
             delivery_date=_today(),
             # Customer snapshot (frozen now).
@@ -118,7 +135,10 @@ class CustomerHandoverService:
 
         self.repo.session.add(h)
         await self.repo.session.flush()
-        await self._audit(tenant_id, user_id, h.id, "created", {"unit_id": str(unit.id), "invoice": invoice.invoice_number})
+        await self._audit(
+            tenant_id, user_id, h.id, "created",
+            {"unit_id": str(unit.id), "invoice": invoice.invoice_number if invoice else None},
+        )
         return await self._out(h)
 
     # ------------------------------- update ---------------------------------- #
@@ -222,18 +242,26 @@ class CustomerHandoverService:
         if unit is None:
             raise NotFoundError(f"No motorcycle found with chassis '{chassis}'.")
         self._assert_branch(allowed_branch_ids, unit.branch_id)
-        if unit.sold_ref is None:
-            raise BusinessRuleError(f"Bike {unit.chassis_number} has not been sold yet — nothing to hand over.")
+        if unit.status != L.SOLD:
+            raise BusinessRuleError(
+                f"Bike {unit.chassis_number} is {unit.status} and hasn't been sold yet — nothing to hand over."
+            )
 
-        invoice = await self.repo.get_invoice(unit.sold_ref)
+        # The invoice is optional — historically-imported sales have none.
+        invoice = await self.repo.get_invoice(unit.sold_ref) if unit.sold_ref else None
         ctx = await self.repo.unit_context(unit.id)
         customer_id = unit.customer_id or (invoice.customer_id if invoice else None)
         customer = await self.repo.get_customer(customer_id) if customer_id else None
         existing = await self.repo.unit_handover(tenant_id, unit.id)
         salesperson_id = await self.repo.order_salesperson(invoice) if invoice else None
 
-        invoice_amount = _d(invoice.grand_total_zmw) if invoice else Decimal("0")
-        amount_paid = _d(invoice.amount_paid) if invoice else Decimal("0")
+        # Amounts from the invoice when present, else the unit's own sale price.
+        if invoice is not None:
+            invoice_amount = _d(invoice.grand_total_zmw)
+            amount_paid = _d(invoice.amount_paid)
+        else:
+            invoice_amount = _d(unit.price_charged)
+            amount_paid = _d(unit.price_charged)
         return HandoverLookupOut(
             unit_id=unit.id,
             invoice_id=invoice.id if invoice else None,
