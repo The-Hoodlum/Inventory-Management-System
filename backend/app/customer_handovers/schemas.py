@@ -110,11 +110,12 @@ class _HandoverEditable(BaseModel):
 
 
 class HandoverCreate(_HandoverEditable):
-    """Create a DRAFT. Requires the two source references; everything else is either
-    auto-filled from the invoice / unit / customer or supplied here."""
+    """Create a DRAFT against a SOLD unit. ``unit_id`` is required; ``invoice_id`` is
+    optional — bulk-imported historical sales carry no invoice, so the amount/customer are
+    then pulled from the unit itself. Everything else is auto-filled or supplied here."""
 
-    invoice_id: uuid.UUID
     unit_id: uuid.UUID
+    invoice_id: uuid.UUID | None = None
 
 
 class HandoverUpdate(_HandoverEditable):

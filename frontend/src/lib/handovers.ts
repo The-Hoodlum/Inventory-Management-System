@@ -144,8 +144,8 @@ export interface HandoverLookup {
 export type HandoverPatch = Record<string, unknown>;
 
 export interface CreateHandoverBody extends HandoverPatch {
-  invoice_id: string;
   unit_id: string;
+  invoice_id?: string | null; // absent for bulk-imported historical sales
 }
 
 export function handoverStatusLabel(s: string): string {

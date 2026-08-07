@@ -113,7 +113,7 @@ function NewHandoverModal({ onClose, onCreated }: { onClose: () => void; onCreat
   });
 
   const create = useMutation({
-    mutationFn: () => handoversApi.create({ invoice_id: preview!.invoice_id!, unit_id: preview!.unit_id }),
+    mutationFn: () => handoversApi.create({ unit_id: preview!.unit_id, invoice_id: preview!.invoice_id ?? undefined }),
     onSuccess: (h) => { void qc.invalidateQueries({ queryKey: ["handovers"] }); onCreated(h.id); },
     onError: (e) => setErr(e instanceof ApiError ? e.message : "Could not create the handover."),
   });
@@ -132,7 +132,7 @@ function NewHandoverModal({ onClose, onCreated }: { onClose: () => void; onCreat
             <Button onClick={() => onCreated(existing)}>Open existing handover</Button>
           ) : (
             <Button
-              disabled={!preview || !preview.invoice_id || create.isPending}
+              disabled={!preview || create.isPending}
               onClick={() => { setErr(null); create.mutate(); }}
             >
               {create.isPending ? "Creating…" : "Create draft"}
@@ -182,7 +182,7 @@ function NewHandoverModal({ onClose, onCreated }: { onClose: () => void; onCreat
               <Info label="Balance" value={`ZMW ${formatNumber(preview.balance_zmw, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />
             </div>
             {!preview.invoice_id && (
-              <div className="mt-2 text-xs text-red-600">This unit has no linked invoice — a handover needs a completed sale.</div>
+              <div className="mt-2 text-xs text-slate-500">No linked invoice (imported historical sale) — the amount is taken from the bike's sale price and can be adjusted on the form.</div>
             )}
           </div>
         )}

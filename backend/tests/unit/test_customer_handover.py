@@ -271,6 +271,46 @@ async def test_complete_marks_unit_delivered_and_stamps_warranty():
     assert events[0].reference_type == "customer_handover"
 
 
+async def test_create_for_imported_historical_sale_without_invoice():
+    """A bulk-imported historical sale is SOLD but has no invoice (sold_ref is None). The
+    handover must still be creatable, pulling the amount + customer from the unit itself."""
+    invoice, unit, customer = _make_fixtures()
+    unit.sold_ref = None                 # historical import: no invoice link
+    unit.price_charged = Decimal("17250")
+    session = _FakeSession()
+    repo = _FakeRepo(session, invoice, unit, customer)
+    svc = CustomerHandoverService(repo, _FakeAudit())
+
+    out = await svc.create(
+        tenant_id=uuid.uuid4(), user_id=uuid.uuid4(),
+        payload=HandoverCreate(unit_id=unit.id),   # no invoice_id
+    )
+    assert out.status == "DRAFT"
+    assert out.invoice_id is None
+    assert out.invoice_amount_zmw == Decimal("17250")   # from the unit's sale price
+    assert out.balance_zmw == Decimal("0")              # treated as settled
+    assert out.full_name == "John Banda"               # customer still snapshotted
+
+
+async def test_create_rejects_unit_that_is_not_sold():
+    invoice, unit, customer = _make_fixtures()
+    unit.status = "assembled"            # not sold
+    session = _FakeSession()
+    repo = _FakeRepo(session, invoice, unit, customer)
+    svc = CustomerHandoverService(repo, _FakeAudit())
+
+    from app.core.exceptions import BusinessRuleError
+
+    try:
+        await svc.create(
+            tenant_id=uuid.uuid4(), user_id=uuid.uuid4(),
+            payload=HandoverCreate(unit_id=unit.id),
+        )
+        raise AssertionError("expected a not-sold rejection")
+    except BusinessRuleError as e:
+        assert "hasn't been sold" in str(e).lower() or "sold" in str(e).lower()
+
+
 async def test_cannot_complete_with_outstanding_balance():
     invoice, unit, customer = _make_fixtures()
     invoice.amount_paid = Decimal("10000")  # 8,500 outstanding
