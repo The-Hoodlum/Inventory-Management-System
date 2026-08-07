@@ -102,6 +102,11 @@ class MotorcycleUnit(Base):
     registered: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     registration_number: Mapped[str | None] = mapped_column(Text, nullable=True)
     registration_papers_received: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    # Physical delivery to the customer — an INDEPENDENT fact (like inspected / registered),
+    # set when a Customer Handover is completed. Does NOT change the terminal 'sold' sale
+    # status, so the sales log/KPIs are unaffected. See app/customer_handovers/.
+    delivered: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    delivered_at: Mapped[dt.datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
     warranty_start: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     warranty_end: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     # How hard this bike is ridden (light/medium/heavy) — scales the service interval on

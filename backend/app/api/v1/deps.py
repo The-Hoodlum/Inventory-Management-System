@@ -301,6 +301,15 @@ def get_customer_delivery_service(db: AsyncSession = Depends(get_db)):
     return CustomerDeliveryService(CustomerDeliveryRepository(db), get_inventory_service(db), AuditRepository(db), get_notification_service(db))
 
 
+def get_handover_service(db: AsyncSession = Depends(get_db)):
+    # Customer Handover: signed proof a customer received their bike. Writes NO stock;
+    # completing it marks the unit delivered (independent fact) + stamps warranty.
+    from app.customer_handovers.repository import CustomerHandoverRepository
+    from app.customer_handovers.service import CustomerHandoverService
+
+    return CustomerHandoverService(CustomerHandoverRepository(db), AuditRepository(db))
+
+
 def get_notification_service(db: AsyncSession = Depends(get_db)):
     # Event-driven, per-recipient notifications. Producers call emit(); the bell/inbox read.
     # The WhatsApp adapter powers opt-in push of critical events (mock until Cloud API is set).

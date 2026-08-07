@@ -35,6 +35,7 @@ from app.models.finance import (
     FinancePaymentAccountMap,
     FinancialAccount,
 )
+from app.models.handover import CustomerHandover
 from app.models.identity import (
     AuditLog,
     Permission,
@@ -118,6 +119,7 @@ __all__ = [
     "DispatchNote", "DispatchNoteLine",
     "Issuance", "IssuanceLine",
     "CustomerDelivery", "CustomerDeliveryLine",
+    "CustomerHandover",
     "BikeIssue", "BikeIssueLine",
     "AssemblyTarget",
     "Notification", "NotificationPref",

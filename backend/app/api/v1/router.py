@@ -20,6 +20,7 @@ from app.assistant.api import router as assistant_router
 from app.bike_issues.api import router as bike_issues_router
 from app.container.api import router as container_router
 from app.customer_delivery.api import router as customer_delivery_router
+from app.customer_handovers.api import router as handovers_router
 from app.dashboard.api import router as dashboard_router
 from app.demand.api import router as demand_router
 from app.dispatch.api import router as dispatch_router
@@ -75,6 +76,7 @@ api_router.include_router(
 api_router.include_router(dispatch_router, prefix="/delivery-notes", tags=["delivery-notes"])
 api_router.include_router(issuance_router, prefix="/issuances", tags=["issuances"])
 api_router.include_router(customer_delivery_router, prefix="/customer-deliveries", tags=["customer-deliveries"])
+api_router.include_router(handovers_router, prefix="/handovers", tags=["handovers"])
 api_router.include_router(search_router, prefix="/search", tags=["search"])
 api_router.include_router(notifications_router, prefix="/notifications", tags=["notifications"])
 api_router.include_router(finance_router, prefix="/finance", tags=["finance"])
